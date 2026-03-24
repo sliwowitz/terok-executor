@@ -194,7 +194,7 @@ RUN_COMMAND = CommandDef(
         ArgDef(name="--timeout", type=int, default=1800, help="Timeout in seconds (default: 1800)"),
         ArgDef(name="--interactive", action="store_true", help="CLI mode (user logs in)"),
         ArgDef(name="--web", action="store_true", help="Toad web mode"),
-        ArgDef(name="--port", type=int, default=8080, help="Port for web mode (default: 8080)"),
+        ArgDef(name="--port", type=int, help="Port for web mode (auto-allocated if omitted)"),
         ArgDef(name="--gate", action="store_true", default=True, help="Use gate (default)"),
         ArgDef(name="--no-gate", action="store_true", help="Disable gate (direct network)"),
         ArgDef(name="--branch", help="Git branch to check out"),

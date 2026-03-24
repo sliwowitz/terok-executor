@@ -325,13 +325,20 @@ class AgentRunner:
         self,
         repo: str,
         *,
-        port: int,
+        port: int | None = None,
         branch: str | None = None,
         gate: bool = True,
         name: str | None = None,
         public_url: str | None = None,
     ) -> str:
-        """Launch a toad web container. Returns container name."""
+        """Launch a toad web container. Returns container name.
+
+        If *port* is None, an available port is auto-allocated.
+        """
+        if port is None:
+            from terok_sandbox import find_free_port
+
+            port = find_free_port()
         return self._run(
             provider="claude",  # toad uses claude as default
             repo=repo,
