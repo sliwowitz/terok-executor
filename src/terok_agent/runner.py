@@ -117,6 +117,45 @@ class AgentRunner:
             mounts.append(f"{host_dir}:{ap.container_mount}:z")
         return mounts
 
+    def _setup_gate(self, repo_url: str, task_id: str) -> str:
+        """Mirror a repo via the sandbox gate and return the gate HTTP URL.
+
+        Steps:
+        1. Create a bare git mirror under the gate base path
+        2. Ensure the gate server is running
+        3. Create a task-scoped access token
+        4. Construct the HTTP gate URL
+
+        The container will clone from this URL — shield blocks all other egress.
+        """
+        from terok_sandbox import GitGate
+
+        cfg = self.sandbox.config
+        gate_base = cfg.gate_base_path
+        gate_base.mkdir(parents=True, exist_ok=True)
+
+        # Derive a collision-free repo key from the full URL
+        import hashlib
+
+        url_hash = hashlib.sha256(repo_url.encode()).hexdigest()[:12]
+        basename = repo_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        repo_key = f"{basename}-{url_hash}"
+        gate_path = gate_base / repo_key
+
+        # Sync (creates bare mirror if missing, fetches if exists)
+        gate = GitGate(
+            project_id=repo_key,
+            gate_path=gate_path,
+            upstream_url=repo_url,
+            envs_base_dir=cfg.effective_envs_dir,
+        )
+        gate.sync()
+
+        # Ensure gate server is running, create token, build URL
+        self.sandbox.ensure_gate()
+        token = self.sandbox.create_token(repo_key, task_id)
+        return self.sandbox.gate_url(gate_path, token)
+
     def _base_env(self, task_id: str, provider_name: str) -> dict[str, str]:
         """Assemble the base environment variables for a container."""
         env: dict[str, str] = {
@@ -210,7 +249,15 @@ class AgentRunner:
         cmd += ["--name", cname, "-w", "/workspace", image]
         cmd += command
 
-        print("$", shlex.join(cmd))
+        # Redact env values that may contain gate tokens
+        _REDACT_PREFIXES = ("CODE_REPO=", "CLONE_FROM=")
+        display_cmd = [
+            arg.split("=", 1)[0] + "=<redacted>"
+            if any(arg.startswith(p) for p in _REDACT_PREFIXES)
+            else arg
+            for arg in cmd
+        ]
+        print("$", shlex.join(display_cmd))
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:
@@ -344,25 +391,17 @@ class AgentRunner:
         if branch:
             env["GIT_BRANCH"] = branch
 
-        # Repo access: local bind-mount or git clone
-        # Gate integration for standalone terok-agent is not yet implemented.
-        # When called from terok, the gate flow runs in terok's environment.py
-        # (ensure_server_reachable, GitGate.sync, create_token, gate_url)
-        # which is independent of AgentRunner.
-        if gate and code_repo:
-            import warnings
-
-            warnings.warn(
-                "Gate mode is not yet implemented in standalone terok-agent. "
-                "Running with direct network access.",
-                stacklevel=2,
-            )
-
+        # Repo access: local bind-mount or git clone (with optional gate)
         volumes: list[str] = []
         if local_path:
             volumes.append(f"{local_path}:/workspace:Z")
         elif code_repo:
-            env["CODE_REPO"] = code_repo
+            if gate:
+                # Gate mode: mirror repo, serve via HTTP, block other egress
+                effective_repo = self._setup_gate(code_repo, task_id)
+            else:
+                effective_repo = code_repo
+            env["CODE_REPO"] = effective_repo
             workspace = task_dir / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
             volumes.append(f"{workspace}:/workspace:Z")
