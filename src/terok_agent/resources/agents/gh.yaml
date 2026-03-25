@@ -5,10 +5,20 @@ kind: tool
 label: GitHub CLI
 binary: gh
 
+credential_proxy:
+  route_prefix: gh
+  upstream: https://api.github.com
+  auth_header: Authorization
+  auth_prefix: "token "
+  credential_type: oauth_token
+  credential_file: hosts.yml
+
 auth:
   host_dir: _gh-config
   container_mount: /home/dev/.config/gh
+  modes: [oauth, api_key]
   command: ["gh", "auth", "login"]
   banner_hint: |-
     You will be guided through GitHub authentication.
     Recommended: choose 'Login with a web browser' or paste a token.
+  api_key_hint: "Paste a GitHub personal access token (https://github.com/settings/tokens)"

@@ -157,7 +157,8 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
     if not auth:
         return None
 
-    # Determine command: explicit command list, or build from auth_key config
+    # Determine command: explicit command list, or build from auth_key config.
+    # API-key-only providers may have no command — that's fine.
     auth_key_data = auth.get("auth_key")
     if "command" in auth:
         command = list(auth["command"])
@@ -173,7 +174,9 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
             )
         )
     else:
-        return None
+        command = []
+
+    modes = tuple(auth.get("modes", ("api_key",)))
 
     return AuthProvider(
         name=name,
@@ -183,12 +186,14 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
         command=command,
         banner_hint=auth.get("banner_hint", ""),
         extra_run_args=tuple(auth.get("extra_run_args", ())),
+        modes=modes,
+        api_key_hint=auth.get("api_key_hint", ""),
     )
 
 
 def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
     """Auto-derive an auth provider for an OpenCode-based agent."""
-    from .auth import AuthKeyConfig, AuthProvider, _api_key_command
+    from .auth import AuthProvider
 
     oc = data.get("opencode")
     if not oc:
@@ -199,20 +204,10 @@ def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
         label=data.get("label", name),
         host_dir_name=f"_{name}-config",
         container_mount=f"/home/dev/{oc['config_dir']}",
-        command=_api_key_command(
-            AuthKeyConfig(
-                label=data.get("label", name),
-                key_url=oc["auth_key_url"],
-                env_var=f"{oc['env_var_prefix']}_API_KEY",
-                config_path=f"~/{oc['config_dir']}/config.json",
-                printf_template='{"api_key": "%s"}',
-                tool_name=name,
-            )
-        ),
-        banner_hint=(
-            f"You will be prompted to enter your {data.get('label', name)} API key.\n"
-            f"Get your API key at: {oc['auth_key_url']}"
-        ),
+        command=[],  # API-key-only — no container command needed
+        banner_hint="",
+        modes=("api_key",),
+        api_key_hint=f"Get your API key at: {oc['auth_key_url']}",
     )
 
 
@@ -236,6 +231,66 @@ class MountDef:
 
 
 @dataclass(frozen=True)
+class CredentialProxyRoute:
+    """Proxy route config parsed from a ``credential_proxy:`` YAML section.
+
+    Used to generate the ``routes.json`` that the credential proxy server reads.
+    """
+
+    provider: str
+    """Agent/tool name (e.g. ``"claude"``)."""
+
+    route_prefix: str
+    """Path prefix in the proxy (e.g. ``"claude"`` → ``/claude/v1/...``)."""
+
+    upstream: str
+    """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
+
+    auth_header: str = "Authorization"
+    """HTTP header name for the real credential."""
+
+    auth_prefix: str = "Bearer "
+    """Prefix before the token value in the auth header."""
+
+    credential_type: str = "api_key"
+    """Type of credential: ``"oauth"``, ``"api_key"``, ``"oauth_token"``, ``"pat"``."""
+
+    credential_file: str = ""
+    """Credential file path relative to the auth mount."""
+
+    phantom_env: dict[str, bool] = field(default_factory=dict)
+    """Phantom API key env vars to inject (e.g. ``{"ANTHROPIC_API_KEY": true}``)."""
+
+    base_url_env: str = ""
+    """Env var to override with proxy URL (e.g. ``"ANTHROPIC_BASE_URL"``)."""
+
+
+def _to_proxy_route(name: str, data: dict) -> CredentialProxyRoute | None:
+    """Parse the ``credential_proxy:`` YAML section into a route config."""
+    cp = data.get("credential_proxy")
+    if not cp:
+        return None
+    if not isinstance(cp, dict):
+        raise ValueError(
+            f"Agent {name!r}: credential_proxy must be a mapping, got {type(cp).__name__}"
+        )
+    for required in ("route_prefix", "upstream"):
+        if required not in cp:
+            raise ValueError(f"Agent {name!r}: credential_proxy missing required key {required!r}")
+    return CredentialProxyRoute(
+        provider=name,
+        route_prefix=cp["route_prefix"],
+        upstream=cp["upstream"],
+        auth_header=cp.get("auth_header", "Authorization"),
+        auth_prefix=cp.get("auth_prefix", "Bearer "),
+        credential_type=cp.get("credential_type", "api_key"),
+        credential_file=cp.get("credential_file", ""),
+        phantom_env=cp.get("phantom_env", {}),
+        base_url_env=cp.get("base_url_env", ""),
+    )
+
+
+@dataclass(frozen=True)
 class AgentRegistry:
     """Loaded registry of agents and tools from YAML definitions.
 
@@ -244,6 +299,7 @@ class AgentRegistry:
 
     _providers: dict[str, HeadlessProvider] = field(default_factory=dict)
     _auth_providers: dict[str, AuthProvider] = field(default_factory=dict)
+    _proxy_routes: dict[str, CredentialProxyRoute] = field(default_factory=dict)
     _mounts: tuple[MountDef, ...] = ()
     _agent_names: tuple[str, ...] = ()
     _all_names: tuple[str, ...] = ()
@@ -303,6 +359,35 @@ class AgentRegistry:
             raise SystemExit(f"Unknown auth provider: {name!r}. Available: {available}")
         return info
 
+    @property
+    def proxy_routes(self) -> dict[str, CredentialProxyRoute]:
+        """All credential proxy routes, keyed by provider name."""
+        return dict(self._proxy_routes)
+
+    def generate_routes_json(self) -> str:
+        """Generate the ``routes.json`` content for the credential proxy server.
+
+        Returns a JSON string mapping route prefixes to upstream config.
+        """
+        import json
+
+        routes: dict[str, dict[str, str]] = {}
+        prefix_owners: dict[str, str] = {}
+        for route in self._proxy_routes.values():
+            existing = prefix_owners.get(route.route_prefix)
+            if existing is not None:
+                raise ValueError(
+                    f"Duplicate route prefix {route.route_prefix!r}: "
+                    f"providers {existing!r} and {route.provider!r}"
+                )
+            prefix_owners[route.route_prefix] = route.provider
+            routes[route.route_prefix] = {
+                "upstream": route.upstream,
+                "auth_header": route.auth_header,
+                "auth_prefix": route.auth_prefix,
+            }
+        return json.dumps(routes, indent=2)
+
     def collect_all_auto_approve_env(self) -> dict[str, str]:
         """Merge ``auto_approve.env`` from all providers into one dict."""
         merged: dict[str, str] = {}
@@ -343,6 +428,7 @@ def load_registry() -> AgentRegistry:
 
     providers: dict[str, HeadlessProvider] = {}
     auth_providers: dict[str, AuthProvider] = {}
+    proxy_routes: dict[str, CredentialProxyRoute] = {}
     agent_names: list[str] = []
     all_names: list[str] = []
 
@@ -392,9 +478,15 @@ def load_registry() -> AgentRegistry:
                     label=m.get("label", name),
                 )
 
+        # Credential proxy route
+        proxy_route = _to_proxy_route(name, data)
+        if proxy_route is not None:
+            proxy_routes[name] = proxy_route
+
     return AgentRegistry(
         _providers=providers,
         _auth_providers=auth_providers,
+        _proxy_routes=proxy_routes,
         _mounts=tuple(seen_mounts.values()),
         _agent_names=tuple(agent_names),
         _all_names=tuple(all_names),

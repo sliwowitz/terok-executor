@@ -5,11 +5,16 @@ kind: tool
 label: GitLab CLI
 binary: glab
 
+credential_proxy:
+  route_prefix: gl
+  upstream: https://gitlab.com/api/v4
+  auth_header: PRIVATE-TOKEN
+  auth_prefix: ""
+  credential_type: pat
+  credential_file: config.yml
+
 auth:
   host_dir: _glab-config
   container_mount: /home/dev/.config/glab-cli
-  command: ["glab", "auth", "login"]
-  banner_hint: |-
-    You will be guided through GitLab authentication.
-    You will need a GitLab personal access token.
-    Create one at: https://gitlab.com/-/user_settings/personal_access_tokens
+  modes: [api_key]
+  api_key_hint: "Create a personal access token at: https://gitlab.com/-/user_settings/personal_access_tokens"

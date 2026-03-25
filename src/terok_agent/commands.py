@@ -148,10 +148,19 @@ def _handle_run(
     print(f"Container: {cname}")
 
 
-def _handle_auth(*, agent: str) -> None:
+def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
     """Run auth flow for an agent."""
+    from .auth import AUTH_PROVIDERS, authenticate, store_api_key
 
-    from .auth import authenticate
+    if api_key is not None:
+        if not api_key.strip():
+            raise SystemExit("API key cannot be empty.")
+        if agent not in AUTH_PROVIDERS:
+            available = ", ".join(AUTH_PROVIDERS)
+            raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
+        store_api_key(agent, api_key.strip())
+        return
+
     from .build import l1_image_tag
 
     # Need an L1 image for the auth container
@@ -226,12 +235,15 @@ AUTH_COMMAND = CommandDef(
     name="auth",
     help="Authenticate an agent",
     handler=_handle_auth,
-    args=(ArgDef(name="agent", help="Agent or tool name (claude, codex, gh, ...)"),),
+    args=(
+        ArgDef(name="agent", help="Agent or tool name (claude, codex, gh, ...)"),
+        ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
+    ),
 )
 
 AGENTS_COMMAND = CommandDef(
     name="agents",
-    help="List registered agents",
+    help="List registered agents (use --all to include tools like gh, glab)",
     handler=_handle_agents,
     args=(
         ArgDef(name="--all", action="store_true", dest="show_all", help="Include tools (gh, glab)"),

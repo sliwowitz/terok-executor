@@ -26,6 +26,16 @@ session:
 capabilities:
   log_format: plain
 
+credential_proxy:
+  route_prefix: blablador
+  upstream: https://api.helmholtz-blablador.fz-juelich.de
+  auth_header: Authorization
+  auth_prefix: "Bearer "
+  credential_type: api_key
+  credential_file: config.json
+  phantom_env:
+    BLABLADOR_API_KEY: true
+
 opencode:
   display_name: Helmholtz Blablador
   base_url: https://api.helmholtz-blablador.fz-juelich.de/v1

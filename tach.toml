@@ -71,6 +71,7 @@ depends_on = [
 path = "terok_agent.auth"
 depends_on = [
     "terok_agent._util",
+    "terok_agent.credential_extractors",
 ]
 
 # YAML agent registry — loads bundled + user agent definitions
@@ -82,6 +83,11 @@ depends_on = [
     "terok_agent.config_stack",
     "terok_agent.headless_providers",
 ]
+
+# Credential extractors — per-provider credential file parsers
+[[modules]]
+path = "terok_agent.credential_extractors"
+depends_on = []
 
 # Build resource staging — standalone, reads from resources only
 [[modules]]
@@ -126,6 +132,7 @@ depends_on = [
     "terok_agent.build",
     "terok_agent.commands",
     "terok_agent.config_stack",
+    "terok_agent.credential_extractors",
     "terok_agent.headless_providers",
     "terok_agent.instructions",
     "terok_agent.registry",
