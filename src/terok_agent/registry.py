@@ -264,6 +264,9 @@ class CredentialProxyRoute:
     base_url_env: str = ""
     """Env var to override with proxy URL (e.g. ``"ANTHROPIC_BASE_URL"``)."""
 
+    shared_config_patch: dict | None = None
+    """Optional shared config patch applied after auth (e.g. Vibe's config.toml)."""
+
 
 def _to_proxy_route(name: str, data: dict) -> CredentialProxyRoute | None:
     """Parse the ``credential_proxy:`` YAML section into a route config."""
@@ -287,6 +290,7 @@ def _to_proxy_route(name: str, data: dict) -> CredentialProxyRoute | None:
         credential_file=cp.get("credential_file", ""),
         phantom_env=cp.get("phantom_env", {}),
         base_url_env=cp.get("base_url_env", ""),
+        shared_config_patch=cp.get("shared_config_patch"),
     )
 
 
@@ -381,7 +385,7 @@ class AgentRegistry:
                     f"providers {existing!r} and {route.provider!r}"
                 )
             prefix_owners[route.route_prefix] = route.provider
-            routes[route.route_prefix] = {
+            routes[route.provider] = {
                 "upstream": route.upstream,
                 "auth_header": route.auth_header,
                 "auth_prefix": route.auth_prefix,

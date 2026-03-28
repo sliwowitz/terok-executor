@@ -76,11 +76,10 @@ class TestGenerateRoutesJson:
         for prefix, cfg in routes.items():
             assert "upstream" in cfg, f"Route '{prefix}' missing upstream"
 
-    def test_glab_uses_gl_prefix(self) -> None:
-        """GitLab route uses 'gl' as the path prefix (not 'glab')."""
+    def test_glab_keyed_by_provider_name(self) -> None:
+        """GitLab route is keyed by provider name 'glab'."""
         routes = json.loads(get_registry().generate_routes_json())
-        assert "gl" in routes
-        assert "glab" not in routes
+        assert "glab" in routes
 
 
 class TestEnsureProxyRoutes:

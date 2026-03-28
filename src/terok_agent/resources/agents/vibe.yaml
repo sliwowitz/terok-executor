@@ -36,6 +36,11 @@ credential_proxy:
   credential_file: .env
   phantom_env:
     MISTRAL_API_KEY: true
+  shared_config_patch:
+    file: config.toml
+    toml_table: providers
+    toml_match: {name: mistral}
+    toml_set: {api_base: "{proxy_url}/v1"}
 
 auth:
   host_dir: _vibe-config

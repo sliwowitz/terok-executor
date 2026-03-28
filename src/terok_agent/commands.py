@@ -159,16 +159,19 @@ def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
             available = ", ".join(AUTH_PROVIDERS)
             raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
         store_api_key(agent, api_key.strip())
-        return
+    else:
+        from .build import l1_image_tag
 
-    from .build import l1_image_tag
+        image = l1_image_tag("ubuntu:24.04")
+        from terok_sandbox import SandboxConfig
 
-    # Need an L1 image for the auth container
-    image = l1_image_tag("ubuntu:24.04")
-    from terok_sandbox import SandboxConfig
+        cfg = SandboxConfig()
+        authenticate("standalone", agent, envs_base_dir=cfg.effective_envs_dir, image=image)
 
-    cfg = SandboxConfig()
-    authenticate("standalone", agent, envs_base_dir=cfg.effective_envs_dir, image=image)
+    # Write proxy URLs to shared config files (e.g. Vibe config.toml, gh config.yml)
+    from .proxy_config import write_proxy_config
+
+    write_proxy_config(agent)
 
 
 def _handle_ls() -> None:

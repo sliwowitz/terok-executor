@@ -253,6 +253,7 @@ def _capture_credentials(provider_name: str, auth_dir: Path, credential_set: str
     except Exception as exc:
         print(f"\nWarning: failed to store credentials: {exc}")
         print("The auth flow completed but credentials were not saved to the proxy DB.")
+        return
 
 
 def store_api_key(

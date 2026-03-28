@@ -17,6 +17,7 @@ Gate is on by default (safe-by-default egress control).
 
 from __future__ import annotations
 
+import logging
 import shlex
 import tempfile
 import uuid
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
     from terok_sandbox import LifecycleHooks, Sandbox
 
     from .registry import AgentRegistry
+
+_logger = logging.getLogger(__name__)
 
 
 def _generate_task_id() -> str:
@@ -104,16 +107,26 @@ class AgentRunner:
         return images.l1
 
     def _shared_mounts(self, envs_dir: Path) -> list[str]:
-        """Derive shared config volume mounts from the agent registry.
+        """Derive shared volume mounts from the agent registry.
 
-        Each registry entry with an ``auth.host_dir`` and ``auth.container_mount``
-        becomes a bind mount so that auth credentials persist across runs.
+        Includes both auth config mounts (per-provider) and general mounts
+        (e.g. OpenCode runtime dirs) from the ``mounts:`` YAML section.
         """
+        seen: set[str] = set()
         mounts = []
         for _name, ap in sorted(self.registry.auth_providers.items()):
             host_dir = envs_dir / ap.host_dir_name
             host_dir.mkdir(parents=True, exist_ok=True)
-            mounts.append(f"{host_dir}:{ap.container_mount}:z")
+            mount = f"{host_dir}:{ap.container_mount}:z"
+            if ap.host_dir_name not in seen:
+                mounts.append(mount)
+                seen.add(ap.host_dir_name)
+        for m in self.registry.mounts:
+            if m.host_dir not in seen:
+                host_dir = envs_dir / m.host_dir
+                host_dir.mkdir(parents=True, exist_ok=True)
+                mounts.append(f"{host_dir}:{m.container_path}:z")
+                seen.add(m.host_dir)
         return mounts
 
     def _setup_gate(self, repo_url: str, task_id: str) -> str:
@@ -154,6 +167,104 @@ class AgentRunner:
         self.sandbox.ensure_gate()
         token = self.sandbox.create_token(repo_key, task_id)
         return self.sandbox.gate_url(gate_path, token)
+
+    def _credential_proxy_env(self, task_id: str) -> dict[str, str]:
+        """Inject phantom tokens and base URL overrides if the proxy is running.
+
+        Unlike terok (which hard-fails when the proxy is down), the standalone
+        runner silently skips proxy integration — credentials may come from
+        shared config mounts instead.
+
+        The proxy listens on a TCP port on the host; containers reach it via
+        ``host.containers.internal:<port>`` (same pattern as the gate server).
+        """
+        from terok_sandbox import (
+            CredentialDB,
+            get_proxy_port,
+            is_proxy_running,
+            is_proxy_socket_active,
+        )
+
+        cfg = self.sandbox.config
+        if not (is_proxy_socket_active() or is_proxy_running(cfg)):
+            return {}
+
+        proxy_routes = self.registry.proxy_routes
+        db = CredentialDB(cfg.proxy_db_path)
+        try:
+            credential_set = "default"
+            stored_providers = set(db.list_credentials(credential_set))
+            routed = stored_providers & proxy_routes.keys()
+            if not routed:
+                return {}
+            # Per-provider phantom tokens — each token encodes the provider
+            tokens = {
+                name: db.create_proxy_token("standalone", task_id, credential_set, name)
+                for name in routed
+            }
+        finally:
+            db.close()
+
+        port = get_proxy_port(cfg)
+        proxy_base = f"http://host.containers.internal:{port}"
+        env: dict[str, str] = {}
+
+        for name, route in proxy_routes.items():
+            if name not in routed:
+                continue
+            for env_var in route.phantom_env:
+                env[env_var] = tokens[name]
+            if route.base_url_env:
+                env[route.base_url_env] = proxy_base
+            # Override OpenCode base URL for proxied providers
+            provider = self.registry.providers.get(name)
+            if provider and provider.opencode_config:
+                oc_base_key = f"TEROK_OC_{name.upper()}_BASE_URL"
+                env[oc_base_key] = f"{proxy_base}/v1"
+            # glab: redirect API to proxy via env vars
+            if name == "glab":
+                env["GITLAB_API_HOST"] = f"host.containers.internal:{port}"
+                env["API_PROTOCOL"] = "http"
+
+        # Signal for init script to start socat bridges
+        if routed:
+            env["TEROK_PROXY_PORT"] = str(port)
+
+        _logger.debug("Credential proxy: injected %d env vars for %s", len(env), stored_providers)
+        return env
+
+    @staticmethod
+    def _stream_headless(cname: str, timeout: float) -> None:
+        """Stream container logs to stdout and print exit code when done."""
+        import subprocess
+        import sys
+
+        try:
+            proc = subprocess.Popen(
+                ["podman", "logs", "-f", cname],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                sys.stdout.buffer.write(line)
+                sys.stdout.buffer.flush()
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            print("Agent timed out", file=sys.stderr)
+        except (FileNotFoundError, OSError):
+            pass
+
+        # Retrieve exit code from the container itself
+        try:
+            result = subprocess.run(["podman", "wait", cname], capture_output=True, timeout=10)
+            exit_code = int(result.stdout.decode().strip()) if result.stdout else 1
+        except (subprocess.TimeoutExpired, ValueError, FileNotFoundError):
+            exit_code = 1
+
+        if exit_code != 0:
+            print(f"Agent exited with code {exit_code}")
 
     def _base_env(self, task_id: str, provider_name: str) -> dict[str, str]:
         """Assemble the base environment variables for a container."""
@@ -436,6 +547,9 @@ class AgentRunner:
         # Shared auth mounts (derived from registry)
         volumes += self._shared_mounts(envs_dir)
 
+        # Credential proxy: inject phantom tokens and base URL overrides
+        env.update(self._credential_proxy_env(task_id))
+
         # Agent config mount
         volumes.append(f"{agent_config_dir}:/home/dev/.terok:Z")
 
@@ -452,7 +566,11 @@ class AgentRunner:
             )
             command = ["bash", "-lc", cmd_str]
         elif mode == "interactive":
-            command = ["bash", "-lc", "init-ssh-and-repo.sh && echo __CLI_READY__; exec bash -l"]
+            command = [
+                "bash",
+                "-lc",
+                "init-ssh-and-repo.sh && echo __CLI_READY__; tail -f /dev/null",
+            ]
         elif mode == "web":
             toad_cmd = "init-ssh-and-repo.sh && toad --serve -H 0.0.0.0 -p 8080"
             if public_url:
@@ -481,9 +599,7 @@ class AgentRunner:
 
         # Follow output if requested
         if follow and mode == "headless":
-            exit_code = self.sandbox.wait_for_exit(cname, timeout=float(timeout + 60))
-            if exit_code != 0:
-                print(f"Agent exited with code {exit_code}")
+            self._stream_headless(cname, timeout=float(timeout + 60))
         elif mode == "interactive":
             from terok_sandbox import READY_MARKER
 

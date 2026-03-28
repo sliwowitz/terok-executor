@@ -25,7 +25,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
             curl ca-certificates gnupg \
             python-is-python3 python3 python3-pip python3-venv pipx \
-            nodejs fd-find jq wget; \
+            nodejs fd-find jq wget socat; \
     rm -rf /var/lib/apt/lists/*
 
 # Binary tools: yq (YAML processor), ast-grep (structural code search via AST),

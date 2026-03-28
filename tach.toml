@@ -18,7 +18,7 @@ ignore_type_checking_imports = true
 #   _util (standalone) ← config_stack ← {agent_config, instructions, agents}
 #   headless_providers (standalone, pure dataclasses)
 #   agents → _util + headless_providers
-#   auth → _util + headless_providers
+#   auth → _util + credential_extractors
 #   instructions → agent_config
 #   resources (data files, no code deps)
 
@@ -74,6 +74,13 @@ depends_on = [
     "terok_agent.credential_extractors",
 ]
 
+# Post-auth shared config patching (proxy URL writes)
+[[modules]]
+path = "terok_agent.proxy_config"
+depends_on = [
+    "terok_agent.registry",
+]
+
 # YAML agent registry — loads bundled + user agent definitions
 [[modules]]
 path = "terok_agent.registry"
@@ -111,6 +118,7 @@ path = "terok_agent.commands"
 depends_on = [
     "terok_agent.auth",
     "terok_agent.build",
+    "terok_agent.proxy_config",
     "terok_agent.registry",
     "terok_agent.runner",
 ]
