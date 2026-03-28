@@ -58,6 +58,20 @@ class TestProxyRoutesParsed:
         """Copilot has no credential_proxy section (tier-3, no base URL support)."""
         assert get_registry().proxy_routes.get("copilot") is None
 
+    def test_claude_has_oauth_refresh(self) -> None:
+        """Claude has oauth_refresh config for proactive token refresh."""
+        route = get_registry().proxy_routes.get("claude")
+        assert route is not None
+        assert route.oauth_refresh is not None
+        assert "token_url" in route.oauth_refresh
+        assert "client_id" in route.oauth_refresh
+
+    def test_codex_has_no_oauth_refresh(self) -> None:
+        """Codex does not yet have oauth_refresh configured."""
+        route = get_registry().proxy_routes.get("codex")
+        assert route is not None
+        assert route.oauth_refresh is None
+
 
 class TestGenerateRoutesJson:
     """Verify routes.json generation."""
@@ -80,6 +94,17 @@ class TestGenerateRoutesJson:
         """GitLab route is keyed by provider name 'glab'."""
         routes = json.loads(get_registry().generate_routes_json())
         assert "glab" in routes
+
+    def test_claude_routes_json_includes_oauth_refresh(self) -> None:
+        """Claude's routes.json entry includes oauth_refresh config."""
+        routes = json.loads(get_registry().generate_routes_json())
+        assert "oauth_refresh" in routes["claude"]
+        assert routes["claude"]["oauth_refresh"]["client_id"]
+
+    def test_gh_routes_json_omits_oauth_refresh(self) -> None:
+        """Providers without oauth_refresh omit it from routes.json."""
+        routes = json.loads(get_registry().generate_routes_json())
+        assert "oauth_refresh" not in routes["gh"]
 
 
 class TestEnsureProxyRoutes:
