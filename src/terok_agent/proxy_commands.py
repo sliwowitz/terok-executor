@@ -46,9 +46,36 @@ def _handle_stop() -> None:
     print("Credential proxy stopped.")
 
 
+def scan_leaked_credentials(envs_base: Path) -> list[tuple[str, Path]]:
+    """Return ``(provider, host_path)`` for credential files found in shared mounts.
+
+    When the credential proxy is active, real secrets should only live in the
+    proxy's sqlite DB — not in the shared config directories that get mounted
+    into containers.  This function checks each routed provider's mount for
+    credential files that would leak real tokens alongside phantom ones.
+    """
+    from .registry import get_registry
+
+    registry = get_registry()
+    leaked: list[tuple[str, Path]] = []
+    for name, route in registry.proxy_routes.items():
+        if not route.credential_file:
+            continue
+        auth = registry.auth_providers.get(name)
+        if not auth:
+            continue
+        try:
+            path = envs_base / auth.host_dir_name / route.credential_file
+            if path.is_file() and path.stat().st_size > 0:
+                leaked.append((name, path))
+        except (OSError, TypeError):
+            continue
+    return leaked
+
+
 def _handle_status() -> None:
     """Show credential proxy status."""
-    from terok_sandbox import get_proxy_status, is_proxy_systemd_available
+    from terok_sandbox import SandboxConfig, get_proxy_status, is_proxy_systemd_available
 
     status = get_proxy_status()
     state = "running" if status.running else "stopped"
@@ -63,6 +90,14 @@ def _handle_status() -> None:
         print("Credentials: none stored")
     if not status.running and status.mode == "none" and is_proxy_systemd_available():
         print("\nHint: run 'install' to set up systemd socket activation.")
+
+    leaked = scan_leaked_credentials(SandboxConfig().effective_envs_dir)
+    if leaked:
+        print("\nWARNING: Real credentials found in shared config mounts:")
+        for provider, path in leaked:
+            print(f"  {provider}: {path}")
+        print("These files are mounted into containers alongside proxy phantom tokens.")
+        print("Run 'clean' to remove them.")
 
 
 def _handle_install() -> None:
@@ -98,6 +133,19 @@ def _handle_routes() -> None:
         print(f"Routes written to {path}")
 
 
+def _handle_clean() -> None:
+    """Remove leaked credential files from shared config mounts."""
+    from terok_sandbox import SandboxConfig
+
+    leaked = scan_leaked_credentials(SandboxConfig().effective_envs_dir)
+    if not leaked:
+        print("No leaked credential files found.")
+        return
+    for provider, path in leaked:
+        path.unlink()
+        print(f"Removed {provider}: {path}")
+
+
 PROXY_COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="start", help="Start the credential proxy daemon", handler=_handle_start, group="proxy"
@@ -121,6 +169,12 @@ PROXY_COMMANDS: tuple[CommandDef, ...] = (
         name="routes",
         help="Regenerate routes.json from YAML registry",
         handler=_handle_routes,
+        group="proxy",
+    ),
+    CommandDef(
+        name="clean",
+        help="Remove leaked credential files from shared mounts",
+        handler=_handle_clean,
         group="proxy",
     ),
 )

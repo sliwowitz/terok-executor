@@ -94,7 +94,7 @@ from .headless_providers import (
 
 # -- Instructions --------------------------------------------------------------
 from .instructions import bundled_default_instructions, resolve_instructions
-from .proxy_commands import PROXY_COMMANDS
+from .proxy_commands import PROXY_COMMANDS, scan_leaked_credentials
 from .registry import CredentialProxyRoute, ensure_proxy_routes, get_registry
 
 # -- Runner facade -------------------------------------------------------------
@@ -169,6 +169,7 @@ __all__ = [
     "AGENT_COMMANDS",
     "PROXY_COMMANDS",
     "CommandDef",
+    "scan_leaked_credentials",
     # Runner facade
     "AgentRunner",
 ]
