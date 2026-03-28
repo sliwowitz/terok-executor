@@ -267,6 +267,9 @@ class CredentialProxyRoute:
     shared_config_patch: dict | None = None
     """Optional shared config patch applied after auth (e.g. Vibe's config.toml)."""
 
+    oauth_refresh: dict | None = None
+    """OAuth refresh config: ``{token_url, client_id, scope}``."""
+
 
 def _to_proxy_route(name: str, data: dict) -> CredentialProxyRoute | None:
     """Parse the ``credential_proxy:`` YAML section into a route config."""
@@ -291,6 +294,7 @@ def _to_proxy_route(name: str, data: dict) -> CredentialProxyRoute | None:
         phantom_env=cp.get("phantom_env", {}),
         base_url_env=cp.get("base_url_env", ""),
         shared_config_patch=cp.get("shared_config_patch"),
+        oauth_refresh=cp.get("oauth_refresh"),
     )
 
 
@@ -375,7 +379,7 @@ class AgentRegistry:
         """
         import json
 
-        routes: dict[str, dict[str, str]] = {}
+        routes: dict[str, dict[str, object]] = {}
         prefix_owners: dict[str, str] = {}
         for route in self._proxy_routes.values():
             existing = prefix_owners.get(route.route_prefix)
@@ -385,11 +389,14 @@ class AgentRegistry:
                     f"providers {existing!r} and {route.provider!r}"
                 )
             prefix_owners[route.route_prefix] = route.provider
-            routes[route.provider] = {
+            entry: dict[str, object] = {
                 "upstream": route.upstream,
                 "auth_header": route.auth_header,
                 "auth_prefix": route.auth_prefix,
             }
+            if route.oauth_refresh:
+                entry["oauth_refresh"] = route.oauth_refresh
+            routes[route.provider] = entry
         return json.dumps(routes, indent=2)
 
     def collect_all_auto_approve_env(self) -> dict[str, str]:

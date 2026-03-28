@@ -40,6 +40,10 @@ credential_proxy:
   auth_prefix: ""
   credential_type: oauth
   credential_file: .credentials.json
+  oauth_refresh:
+    token_url: https://platform.claude.com/v1/oauth/token
+    client_id: 9d1c250a-e61b-44d9-88ed-5944d1962f5e
+    scope: "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
   phantom_env:
     ANTHROPIC_API_KEY: true
   base_url_env: ANTHROPIC_BASE_URL
