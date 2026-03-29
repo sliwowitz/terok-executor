@@ -125,9 +125,9 @@ class TestScanLeakedCredentials:
         from terok_agent import get_roster
         from terok_agent.proxy_commands import scan_leaked_credentials
 
-        registry = get_roster()
-        auth = registry.auth_providers.get("claude")
-        route = registry.proxy_routes.get("claude")
+        roster = get_roster()
+        auth = roster.auth_providers.get("claude")
+        route = roster.proxy_routes.get("claude")
         assert auth is not None and route is not None
 
         cred_dir = tmp_path / auth.host_dir_name
@@ -144,9 +144,9 @@ class TestScanLeakedCredentials:
         from terok_agent import get_roster
         from terok_agent.proxy_commands import scan_leaked_credentials
 
-        registry = get_roster()
-        auth = registry.auth_providers["claude"]
-        route = registry.proxy_routes["claude"]
+        roster = get_roster()
+        auth = roster.auth_providers["claude"]
+        route = roster.proxy_routes["claude"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -160,13 +160,13 @@ class TestScanLeakedCredentials:
 
         from terok_agent.proxy_commands import scan_leaked_credentials
 
-        # Mock a registry with a provider that has a proxy route but no credential_file
-        mock_registry = MagicMock()
+        # Mock a roster with a provider that has a proxy route but no credential_file
+        mock_roster = MagicMock()
         mock_route = MagicMock()
         mock_route.credential_file = ""
-        mock_registry.proxy_routes = {"fake-provider": mock_route}
-        mock_registry.auth_providers = {"fake-provider": MagicMock(host_dir_name="_fake")}
-        monkeypatch.setattr("terok_agent.roster.get_roster", lambda: mock_registry)
+        mock_roster.proxy_routes = {"fake-provider": mock_route}
+        mock_roster.auth_providers = {"fake-provider": MagicMock(host_dir_name="_fake")}
+        monkeypatch.setattr("terok_agent.roster.get_roster", lambda: mock_roster)
 
         assert scan_leaked_credentials(tmp_path) == []
 
@@ -177,9 +177,9 @@ class TestScanLeakedCredentials:
         from terok_agent import get_roster
         from terok_agent.proxy_commands import _handle_clean
 
-        registry = get_roster()
-        auth = registry.auth_providers["claude"]
-        route = registry.proxy_routes["claude"]
+        roster = get_roster()
+        auth = roster.auth_providers["claude"]
+        route = roster.proxy_routes["claude"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()

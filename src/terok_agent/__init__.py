@@ -113,10 +113,10 @@ def _bootstrap_roster() -> None:
 
     from .roster import get_roster
 
-    reg = get_roster()
-    HEADLESS_PROVIDERS.update(reg.providers)
-    AUTH_PROVIDERS.update(reg.auth_providers)
-    PROVIDER_NAMES = _hp.PROVIDER_NAMES = reg.agent_names
+    roster = get_roster()
+    HEADLESS_PROVIDERS.update(roster.providers)
+    AUTH_PROVIDERS.update(roster.auth_providers)
+    PROVIDER_NAMES = _hp.PROVIDER_NAMES = roster.agent_names
 
 
 _bootstrap_roster()
