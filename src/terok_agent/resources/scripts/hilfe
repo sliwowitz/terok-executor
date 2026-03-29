@@ -19,6 +19,15 @@ case "$_mode" in
         ;;
 esac
 
+_terok_credential_warning() {
+    if [[ -n "${TEROK_LEAKED_CREDENTIALS:-}" ]]; then
+        printf '\n\033[1;31m[!] Real credentials detected in shared mounts\033[0m\n'
+        printf '    Providers: \033[33m%s\033[0m\n' "$TEROK_LEAKED_CREDENTIALS"
+        printf '    These files bypass the credential proxy and expose secrets to this container.\n'
+        printf '    On the host: \033[36mterokctl credentials clean\033[0m — then restart the container.\n'
+    fi
+}
+
 _terok_permission_mode() {
     if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
         printf '\n\033[1mPermission mode:\033[0m \033[32munrestricted\033[0m\n'
@@ -57,6 +66,7 @@ _terok_notes() {
     printf '  - the container is disposable; \033[36msudo\033[0m works without a password\n'
 }
 
+_terok_credential_warning
 _terok_permission_mode
 _terok_agents
 
