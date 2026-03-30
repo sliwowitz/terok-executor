@@ -25,10 +25,6 @@ if [[ -n "${TEROK_SSH_AGENT_PORT:-}" ]] && [[ -n "${TEROK_SSH_AGENT_TOKEN:-}" ]]
   rm -f /tmp/ssh-agent.sock
   socat "UNIX-LISTEN:/tmp/ssh-agent.sock,fork" "SYSTEM:ssh-agent-bridge.sh" &
   export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
-  # Persist for shells spawned after init (exec bash, podman exec, agent subshells).
-  # Sourced by terok-env.sh on every shell startup.
-  mkdir -p "${HOME}/.local/share/terok"
-  echo "export SSH_AUTH_SOCK=/tmp/ssh-agent.sock" > "${HOME}/.local/share/terok/ssh-auth-env"
   echo ">> SSH agent bridge started (socat PID: $!, SSH_AUTH_SOCK=${SSH_AUTH_SOCK})"
 
   # Warm GitHub known_hosts (uses the agent for authentication)

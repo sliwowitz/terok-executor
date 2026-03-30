@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Basic dev tooling common to all projects
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg git locales openssh-client sudo \
+      ca-certificates curl gnupg git locales openssh-client socat sudo \
       ripgrep vim tmux \
     && rm -rf /var/lib/apt/lists/*
 

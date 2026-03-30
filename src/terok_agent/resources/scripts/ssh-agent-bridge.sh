@@ -21,6 +21,15 @@ set -euo pipefail
 : "${TEROK_SSH_AGENT_TOKEN:?missing}"
 : "${TEROK_SSH_AGENT_PORT:?missing}"
 
+[[ "${TEROK_SSH_AGENT_TOKEN}" =~ ^[[:xdigit:]]{32}$ ]] || {
+  echo "TEROK_SSH_AGENT_TOKEN must be 32 hex characters" >&2
+  exit 2
+}
+[[ "${TEROK_SSH_AGENT_PORT}" =~ ^[0-9]+$ ]] || {
+  echo "TEROK_SSH_AGENT_PORT must be numeric" >&2
+  exit 2
+}
+
 # The nested socat connects to the TCP server, but we need to send the
 # token prefix before relaying.  Use printf piped into socat's stdin
 # concatenated with our own stdin (the SSH client data).
