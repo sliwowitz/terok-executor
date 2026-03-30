@@ -35,6 +35,8 @@ BRIDGE_EOF
   socat UNIX-LISTEN:/tmp/ssh-agent.sock,fork \
     "EXEC:/tmp/ssh-agent-bridge.sh!!TCP:host.containers.internal:${TEROK_SSH_AGENT_PORT}" &
   export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
+  # Persist for shells spawned after init (exec bash, podman exec, agent subshells)
+  echo "export SSH_AUTH_SOCK=/tmp/ssh-agent.sock" > /etc/profile.d/ssh-agent.sh
   echo ">> SSH agent bridge started (socat PID: $!, SSH_AUTH_SOCK=${SSH_AUTH_SOCK})"
 
   # Warm GitHub known_hosts (uses the agent for authentication)
