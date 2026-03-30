@@ -27,6 +27,17 @@ if [[ -n "${TEROK_SSH_AGENT_PORT:-}" ]] && [[ -n "${TEROK_SSH_AGENT_TOKEN:-}" ]]
   export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
   echo ">> SSH agent bridge started (socat PID: $!, SSH_AUTH_SOCK=${SSH_AUTH_SOCK})"
 
+  # Generate minimal ~/.ssh/config — the agent proxy handles keys, so no
+  # IdentityFile is needed.  StrictHostKeyChecking=accept-new prevents
+  # interactive prompts on first connect while still pinning known hosts.
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+  cat > "$HOME/.ssh/config" << 'SSHEOF'
+Host *
+  StrictHostKeyChecking accept-new
+SSHEOF
+  chmod 644 "$HOME/.ssh/config"
+
   # Warm GitHub known_hosts (uses the agent for authentication)
   if command -v ssh >/dev/null 2>&1; then
     if [[ -n "${CODE_REPO:-}" && "${CODE_REPO}" == *"github.com"* ]]; then
