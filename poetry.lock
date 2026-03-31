@@ -2429,8 +2429,8 @@ platformdirs = ">=4.0"
 terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.5.2/terok_shield-0.5.2-py3-none-any.whl"}
 
 [package.source]
-type = "file"
-url = "../../..https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.22/terok_sandbox-0.0.22-py3-none-any.whl"
+type = "url"
+url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.22/terok_sandbox-0.0.22-py3-none-any.whl"
 
 [[package]]
 name = "terok-shield"
@@ -2815,4 +2815,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "106f4bdd070ea7ed435ed55093d070747e0d4c80bfb50a58990c122e74867b29"
+content-hash = "b39dd2caa3d121566e3aa036faef5b6072a82a1d9becf9b9ff5934c407fdda42"
