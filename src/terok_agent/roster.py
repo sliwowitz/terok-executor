@@ -13,7 +13,7 @@ Directory layout::
     resources/agents/claude.yaml      (bundled, shipped in wheel)
     resources/agents/codex.yaml
     ...
-    ~/.config/terok-agent/agents/     (user overrides / additions)
+    ~/.config/terok/agent/agents/      (user overrides / additions)
 """
 
 from __future__ import annotations
@@ -38,12 +38,14 @@ _USER_AGENTS_DIR_NAME = "agents"
 
 
 def _user_agents_dir() -> Path:
-    """Return ``~/.config/terok-agent/agents/``."""
+    """Return ``~/.config/terok/agent/agents/``."""
+    from .paths import _SUBDIR, _UMBRELLA
+
     try:
         from platformdirs import user_config_dir
     except ImportError:  # pragma: no cover
-        return Path.home() / ".config" / "terok-agent" / _USER_AGENTS_DIR_NAME
-    return Path(user_config_dir("terok-agent")) / _USER_AGENTS_DIR_NAME
+        return Path.home() / ".config" / _UMBRELLA / _SUBDIR / _USER_AGENTS_DIR_NAME
+    return Path(user_config_dir(_UMBRELLA)) / _SUBDIR / _USER_AGENTS_DIR_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +76,7 @@ def _load_bundled_agents() -> dict[str, dict]:
 
 
 def _load_user_agents() -> dict[str, dict]:
-    """Load user override/addition YAML files from ``~/.config/terok-agent/agents/``."""
+    """Load user override/addition YAML files from ``~/.config/terok/agent/agents/``."""
     agents: dict[str, dict] = {}
     user_dir = _user_agents_dir()
     if not user_dir.is_dir():
@@ -435,7 +437,7 @@ def load_roster() -> AgentRoster:
     """Load the agent roster from bundled YAML + user overrides.
 
     Bundled agents in ``resources/agents/*.yaml`` are loaded first, then
-    user files in ``~/.config/terok-agent/agents/*.yaml`` are deep-merged
+    user files in ``~/.config/terok/agent/agents/*.yaml`` are deep-merged
     on top (allowing field-level overrides or entirely new agents).
     """
     raw = _load_bundled_agents()

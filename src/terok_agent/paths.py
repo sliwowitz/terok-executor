@@ -19,6 +19,9 @@ except ImportError:  # optional dependency
 
 APP_NAME = "terok-agent"
 
+_UMBRELLA = "terok"
+_SUBDIR = "agent"
+
 
 def _is_root() -> bool:
     """Return True if the current process is running as root."""
@@ -31,21 +34,21 @@ def _is_root() -> bool:
 def state_root() -> Path:
     """Writable state root for agent-owned data.
 
-    Priority: ``TEROK_AGENT_STATE_DIR`` → ``/var/lib/terok-agent`` (root)
-    → ``platformdirs.user_data_dir()`` → ``$XDG_DATA_HOME/terok-agent``
-    → ``~/.local/share/terok-agent``.
+    Priority: ``TEROK_AGENT_STATE_DIR`` → ``/var/lib/terok/agent`` (root)
+    → ``platformdirs.user_data_dir()`` → ``$XDG_DATA_HOME/terok/agent``
+    → ``~/.local/share/terok/agent``.
     """
     env = os.getenv("TEROK_AGENT_STATE_DIR")
     if env:
         return Path(env).expanduser()
     if _is_root():
-        return Path("/var/lib") / APP_NAME
+        return Path("/var/lib") / _UMBRELLA / _SUBDIR
     if _user_data_dir is not None:
-        return Path(_user_data_dir(APP_NAME))
+        return Path(_user_data_dir(_UMBRELLA)) / _SUBDIR
     xdg = os.getenv("XDG_DATA_HOME")
     if xdg:
-        return Path(xdg) / APP_NAME
-    return Path.home() / ".local" / "share" / APP_NAME
+        return Path(xdg) / _UMBRELLA / _SUBDIR
+    return Path.home() / ".local" / "share" / _UMBRELLA / _SUBDIR
 
 
 def mounts_dir() -> Path:

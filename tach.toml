@@ -95,6 +95,7 @@ depends_on = [
     "terok_agent.auth",
     "terok_agent.config_stack",
     "terok_agent.headless_providers",
+    "terok_agent.paths",
 ]
 
 # Credential extractors — per-provider credential file parsers
