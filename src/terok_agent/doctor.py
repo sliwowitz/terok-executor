@@ -183,8 +183,9 @@ def _make_phantom_token_checks(roster: AgentRoster) -> list[DoctorCheck]:
                 def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:
                     """Check if env var looks like a phantom token."""
                     val = stdout.strip()
-                    if not val:
-                        return CheckVerdict("warn", f"{env_var}: not set")
+                    if rc != 0 or not val:
+                        hint = "not set" if rc != 0 else "empty"
+                        return CheckVerdict("warn", f"{env_var}: {hint}")
                     if _PHANTOM_TOKEN_RE.match(val):
                         return CheckVerdict("ok", f"{env_var}: phantom token ({pname})")
                     for prefix in _REAL_KEY_PREFIXES:

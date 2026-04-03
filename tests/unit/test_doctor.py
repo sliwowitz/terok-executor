@@ -63,6 +63,10 @@ class TestGhProxyBridgeCheck:
         check = _make_gh_proxy_bridge_check()
         assert check.fix_cmd is not None
 
+    def test_category_is_bridge(self) -> None:
+        check = _make_gh_proxy_bridge_check()
+        assert check.category == "bridge"
+
 
 class TestCredentialFileChecks:
     """Known credential file leak detection."""
