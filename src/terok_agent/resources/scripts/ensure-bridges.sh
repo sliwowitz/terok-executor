@@ -4,9 +4,10 @@
 
 # Idempotent socat bridge launcher for container ↔ host-side credential proxy.
 #
-# Manages two bridges:
-#   1. SSH agent  — UNIX socket → ssh-agent-bridge.sh → TCP (phantom-token)
-#   2. gh proxy   — UNIX socket → TCP (plain relay to credential proxy)
+# Manages three bridges:
+#   1. SSH agent   — UNIX socket → ssh-agent-bridge.sh → TCP (phantom-token)
+#   2. gh proxy    — UNIX socket → TCP (plain relay to credential proxy)
+#   3. Claude proxy — UNIX socket → TCP (enables OAuth subscription mode)
 #
 # Uses PID files (not socket existence) to detect dead bridges — stale
 # socket files persist after process death and are unreliable sentinels.
@@ -42,4 +43,16 @@ if [[ -n "${TEROK_PROXY_PORT:-}" ]] && [[ -n "${GH_TOKEN:-}" ]] \
   socat UNIX-LISTEN:/tmp/terok-gh-proxy.sock,fork \
     TCP:host.containers.internal:"${TEROK_PROXY_PORT}" &
   echo $! > "$_TEROK_PIDDIR/gh-proxy.pid"
+fi
+
+# ── Claude credential proxy bridge (ANTHROPIC_UNIX_SOCKET transport) ────
+# Routes Claude API traffic through the credential proxy via a Unix socket
+# instead of ANTHROPIC_BASE_URL (enables OAuth subscription mode in Claude Code).
+if [[ -n "${TEROK_PROXY_PORT:-}" ]] && [[ -n "${ANTHROPIC_UNIX_SOCKET:-}" ]] \
+   && command -v socat >/dev/null 2>&1 \
+   && ! _terok_bridge_alive "$_TEROK_PIDDIR/claude-proxy.pid"; then
+  rm -f "${ANTHROPIC_UNIX_SOCKET}"
+  socat UNIX-LISTEN:"${ANTHROPIC_UNIX_SOCKET}",fork \
+    TCP:host.containers.internal:"${TEROK_PROXY_PORT}" &
+  echo $! > "$_TEROK_PIDDIR/claude-proxy.pid"
 fi
