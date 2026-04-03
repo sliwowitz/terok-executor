@@ -302,6 +302,11 @@ def _capture_credentials(
             print("Subscription metadata written to shared Claude config mount.")
         except Exception as exc:  # noqa: BLE001
             print(f"Warning: could not write .credentials.json: {exc}")
+        print(
+            "\nNote: Claude OAuth uses a shared credential for all tasks."
+            "\n      API calls are routed through the credential proxy — the real"
+            "\n      token never enters any container."
+        )
 
 
 def store_api_key(
