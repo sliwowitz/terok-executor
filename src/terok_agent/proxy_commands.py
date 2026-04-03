@@ -58,7 +58,7 @@ def _is_injected_credentials_file(path: Path) -> bool:
     """
     import json
 
-    from .auth import PHANTOM_CREDENTIALS_MARKER
+    from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

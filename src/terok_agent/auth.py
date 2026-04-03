@@ -19,12 +19,9 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ._util import podman_userns_args
+from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
 
-#: Dummy token written to ``.credentials.json`` in the shared Claude config
-#: mount.  Claude Code reads subscription metadata from this file but uses
-#: the per-task ``CLAUDE_CODE_OAUTH_TOKEN`` env var for actual API auth.
-PHANTOM_CREDENTIALS_MARKER = "terok-proxy-phantom-token:credential-proxy-handles-real-auth"
+from ._util import podman_userns_args
 
 # ---------------------------------------------------------------------------
 # Provider descriptor

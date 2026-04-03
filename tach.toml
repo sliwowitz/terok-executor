@@ -125,7 +125,6 @@ depends_on = [
 [[modules]]
 path = "terok_agent.proxy_commands"
 depends_on = [
-    "terok_agent.auth",
     "terok_agent.paths",
     "terok_agent.roster",
 ]
