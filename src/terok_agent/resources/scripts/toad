@@ -63,7 +63,7 @@ fi
 #
 # Toad launches ACP agents by exec-ing the command from run_command."*" in
 # the agent's TOML file.  By default these point to the bare upstream
-# adapters (claude-code-acp, opencode acp, etc.) which bypass terok's
+# adapters (claude-agent-acp, opencode acp, etc.) which bypass terok's
 # per-agent git identity setup.
 #
 # We replace those commands with terok wrappers that configure the

@@ -160,7 +160,7 @@ WORKDIR /home/dev
 RUN set -eux; \
     mkdir -p "$NPM_CONFIG_PREFIX"; \
     npm config set prefix "$NPM_CONFIG_PREFIX"; \
-    npm install -g @openai/codex @github/copilot @zed-industries/claude-code-acp; \
+    npm install -g @openai/codex @github/copilot @agentclientprotocol/claude-agent-acp; \
     npm cache clean --force
 RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -fsSL https://opencode.ai/install | bash
