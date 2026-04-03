@@ -19,6 +19,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
+
 from ._util import podman_userns_args
 
 # ---------------------------------------------------------------------------
@@ -217,7 +219,41 @@ def _run_auth_container(
         _capture_credentials(provider.name, host_dir, credential_set)
 
 
-def _capture_credentials(provider_name: str, auth_dir: Path, credential_set: str) -> None:
+def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
+    """Write a static ``.credentials.json`` with subscription metadata.
+
+    The file lets Claude Code determine the subscription tier locally
+    (``subscriptionType``, ``scopes``, ``rateLimitTier``) without
+    exposing the real OAuth token.  ``accessToken`` is set to a dummy
+    marker — actual API auth uses the per-task phantom token from the
+    ``CLAUDE_CODE_OAUTH_TOKEN`` env var.
+    """
+    import json
+
+    claude_dir = mounts_base / "_claude-config"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+
+    creds = {
+        "claudeAiOauth": {
+            "accessToken": PHANTOM_CREDENTIALS_MARKER,
+            "refreshToken": "",
+            "expiresAt": None,
+            "scopes": cred_data.get("scopes", ""),
+            "subscriptionType": cred_data.get("subscription_type"),
+            "rateLimitTier": cred_data.get("rate_limit_tier"),
+        }
+    }
+    (claude_dir / ".credentials.json").write_text(
+        json.dumps(creds, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _capture_credentials(
+    provider_name: str,
+    auth_dir: Path,
+    credential_set: str,
+    mounts_base: Path | None = None,
+) -> None:
     """Extract credentials from *auth_dir* and store in the credential DB.
 
     Uses the per-provider extractors from :mod:`credential_extractors`.
@@ -254,6 +290,23 @@ def _capture_credentials(provider_name: str, auth_dir: Path, credential_set: str
         print(f"\nWarning: failed to store credentials: {exc}")
         print("The auth flow completed but credentials were not saved to the proxy DB.")
         return
+
+    # Write static .credentials.json for OAuth subscription mode detection
+    if provider_name == "claude" and cred_data.get("type") == "oauth":
+        if mounts_base is None:
+            from .paths import mounts_dir
+
+            mounts_base = mounts_dir()
+        try:
+            _write_claude_credentials_file(cred_data, mounts_base)
+            print("Subscription metadata written to shared Claude config mount.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not write .credentials.json: {exc}")
+        print(
+            "\nNote: Claude OAuth uses a shared credential for all tasks."
+            "\n      API calls are routed through the credential proxy — the real"
+            "\n      token never enters any container."
+        )
 
 
 def store_api_key(
