@@ -331,7 +331,8 @@ class TestCredentialProxyEnv:
             env = runner._credential_proxy_env("task-1")
 
         assert "ANTHROPIC_API_KEY" in env
-        assert len(env["ANTHROPIC_API_KEY"]) == 32
+        assert env["ANTHROPIC_API_KEY"].startswith("terok-p-")
+        assert len(env["ANTHROPIC_API_KEY"]) == 40
         assert "ANTHROPIC_BASE_URL" in env
         assert (
             f"host.containers.internal:{cfg.proxy_port}"

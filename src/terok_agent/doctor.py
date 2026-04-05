@@ -33,8 +33,8 @@ _SSH_AGENT_SOCKET = "/tmp/ssh-agent.sock"  # nosec B108
 _GH_PROXY_PIDFILE = f"{_BRIDGE_PIDDIR}/gh-proxy.pid"
 _GH_PROXY_SOCKET = "/tmp/terok-gh-proxy.sock"  # nosec B108
 
-# Matches 32-character hexadecimal phantom tokens
-_PHANTOM_TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+# Matches phantom tokens: "terok-p-" prefix + 32 hex chars
+_PHANTOM_TOKEN_RE = re.compile(r"^terok-p-[0-9a-fA-F]{32}$")
 
 # Known real API key prefixes (obvious non-phantom patterns)
 _REAL_KEY_PREFIXES = ("sk-ant-", "sk-", "gho_", "ghp_", "ghs_", "glpat-")
@@ -194,8 +194,8 @@ def _make_phantom_token_checks(roster: AgentRoster) -> list[DoctorCheck]:
                                 "error",
                                 f"{env_var}: real API key detected — restart task",
                             )
-                    # Unknown format — could be a new phantom token format or custom key
-                    return CheckVerdict("ok", f"{env_var}: non-standard format ({pname})")
+                    # Unknown format — not a recognised phantom token
+                    return CheckVerdict("warn", f"{env_var}: unrecognised token format ({pname})")
 
                 return _eval
 

@@ -118,7 +118,8 @@ class TestPhantomTokenChecks:
     """Phantom token integrity verification."""
 
     def test_phantom_token_regex(self) -> None:
-        assert _PHANTOM_TOKEN_RE.match("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4")
+        assert _PHANTOM_TOKEN_RE.match("terok-p-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4")
+        assert not _PHANTOM_TOKEN_RE.match("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4")
         assert not _PHANTOM_TOKEN_RE.match("sk-ant-something")
         assert not _PHANTOM_TOKEN_RE.match("too-short")
 
@@ -132,8 +133,16 @@ class TestPhantomTokenChecks:
         roster = get_roster()
         checks = _make_phantom_token_checks(roster)
         if checks:
-            verdict = checks[0].evaluate(0, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4\n", "")
+            verdict = checks[0].evaluate(0, "terok-p-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4\n", "")
             assert verdict.severity == "ok"
+
+    def test_warn_for_unrecognised_format(self) -> None:
+        roster = get_roster()
+        checks = _make_phantom_token_checks(roster)
+        if checks:
+            verdict = checks[0].evaluate(0, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4\n", "")
+            assert verdict.severity == "warn"
+            assert "unrecognised" in verdict.detail
 
     def test_error_for_real_key(self) -> None:
         roster = get_roster()
