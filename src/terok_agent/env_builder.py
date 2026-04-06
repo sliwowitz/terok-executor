@@ -150,7 +150,8 @@ class ContainerEnvResult:
     """Volume mount strings (``host:container[:opts]``)."""
 
     task_dir: Path
-    """Host-side task directory (may have been auto-created)."""
+    """Host-side task directory.  When ``spec.task_dir`` was ``None``, this is
+    an auto-created temporary directory — the **caller owns cleanup**."""
 
 
 # ---------------------------------------------------------------------------
