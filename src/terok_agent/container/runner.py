@@ -30,7 +30,7 @@ from .build import BuildError, build_base_images
 if TYPE_CHECKING:
     from terok_sandbox import LifecycleHooks, Sandbox
 
-    from .roster import AgentRoster
+    from terok_agent.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class AgentRunner:
     def roster(self) -> AgentRoster:
         """Lazy-init agent roster."""
         if self._roster is None:
-            from .roster import get_roster
+            from terok_agent.roster.loader import get_roster
 
             self._roster = get_roster()
         return self._roster
@@ -252,8 +252,8 @@ class AgentRunner:
         *project_root* is passed to :func:`resolve_instructions` so that
         ``<repo>/instructions.md`` is appended when present.
         """
-        from .agents import AgentConfigSpec, prepare_agent_config_dir
-        from .instructions import resolve_instructions
+        from terok_agent.provider.agents import AgentConfigSpec, prepare_agent_config_dir
+        from terok_agent.provider.instructions import resolve_instructions
 
         resolved_instructions = instructions or resolve_instructions(
             {}, provider, project_root=project_root
@@ -505,8 +505,9 @@ class AgentRunner:
         shared_mount: str = "/shared",
     ) -> str:
         """Unified launch flow for all modes (headless, interactive, web, tool)."""
-        from .env_builder import ContainerEnvSpec, assemble_container_env
-        from .paths import mounts_dir
+        from terok_agent.paths import mounts_dir
+
+        from .env import ContainerEnvSpec, assemble_container_env
 
         is_tool = mode == "tool"
         task_id = _generate_task_id()
@@ -517,7 +518,7 @@ class AgentRunner:
             sidecar_spec = self.roster.get_sidecar_spec(provider)
             image_tag = self._ensure_sidecar_image(sidecar_spec.tool_name)
         else:
-            from .headless_providers import build_headless_command
+            from terok_agent.provider.headless import build_headless_command
 
             agent = self.roster.get_provider(provider)
             image_tag = self._ensure_images()

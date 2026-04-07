@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .roster import AgentRoster
+    from terok_agent.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
 
@@ -291,7 +291,7 @@ def assemble_container_env(
     Returns:
         Assembled env dict, volume tuple, and resolved task_dir.
     """
-    from .paths import mounts_dir as _mounts_dir
+    from terok_agent.paths import mounts_dir as _mounts_dir
 
     env: dict[str, str] = {}
     volumes: list[str] = []

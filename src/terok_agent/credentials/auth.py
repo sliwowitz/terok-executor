@@ -22,7 +22,7 @@ from pathlib import Path
 
 from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
 
-from ._util import podman_userns_args
+from terok_agent._util import podman_userns_args
 
 # ---------------------------------------------------------------------------
 # Provider descriptor
@@ -261,7 +261,7 @@ def _capture_credentials(
     If extraction fails (no credential file, malformed), prints a warning
     but does not raise — the auth flow succeeded, the user can retry.
     """
-    from .credential_extractors import extract_credential
+    from .extractors import extract_credential
 
     try:
         cred_data = extract_credential(provider_name, auth_dir)
@@ -309,7 +309,7 @@ def _capture_credentials(
     # Write static .credentials.json for OAuth subscription mode detection
     if provider_name == "claude" and cred_data.get("type") == "oauth":
         if mounts_base is None:
-            from .paths import mounts_dir
+            from terok_agent.paths import mounts_dir
 
             mounts_base = mounts_dir()
         try:

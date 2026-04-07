@@ -12,15 +12,15 @@ exact = true
 forbid_circular_dependencies = true
 ignore_type_checking_imports = true
 
-# ── Module Boundaries ───────────────────────────────────────────────
+# ── Module Boundaries ─────���─────────────────────────────────────────
 #
-# Dependency flow:
-#   _util (standalone) ← config_stack ← {agent_config, instructions, agents}
-#   headless_providers (standalone, pure dataclasses)
-#   agents → _util + headless_providers
-#   auth → _util + credential_extractors + paths
-#   instructions → agent_config
-#   resources (data files, no code deps)
+# Four domain packages + foundation + CLI surface:
+#   roster/      — agent catalog (YAML loading, config resolution)
+#   provider/    — AI provider behavior (headless, wrappers, instructions)
+#   container/   — container lifecycle (build, env, run)
+#   credentials/ — authentication, extraction, credential proxy
+
+# ── Foundation ──────────────────────────────────────────────────────
 
 # Path resolution — standalone XDG/FHS helpers
 [[modules]]
@@ -37,116 +37,133 @@ depends_on = []
 path = "terok_agent.resources"
 depends_on = []
 
-# Headless provider registry + dispatch
-[[modules]]
-path = "terok_agent.headless_providers"
-depends_on = [
-    "terok_agent.agent_config",
-]
+# ── roster/ — agent catalog ────────���────────────────────────────────
 
-# Config stack — generic layered resolution
+# Generic layered config resolution
 [[modules]]
-path = "terok_agent.config_stack"
+path = "terok_agent.roster.config_stack"
 depends_on = [
     "terok_agent._util",
-]
-
-# Provider-aware config value extraction
-[[modules]]
-path = "terok_agent.agent_config"
-depends_on = []
-
-# Instruction resolution (resources accessed via importlib.resources, not import)
-[[modules]]
-path = "terok_agent.instructions"
-depends_on = [
-    "terok_agent.agent_config",
-]
-
-# Agent config dir preparation + wrapper generation
-[[modules]]
-path = "terok_agent.agents"
-depends_on = [
-    "terok_agent._util",
-    "terok_agent.headless_providers",
-]
-
-# Auth flows
-[[modules]]
-path = "terok_agent.auth"
-depends_on = [
-    "terok_agent._util",
-    "terok_agent.credential_extractors",
-    "terok_agent.paths",
-]
-
-# Post-auth shared config patching (proxy URL writes)
-[[modules]]
-path = "terok_agent.proxy_config"
-depends_on = [
-    "terok_agent.paths",
-    "terok_agent.roster",
 ]
 
 # YAML agent roster — loads bundled + user agent definitions
 [[modules]]
-path = "terok_agent.roster"
+path = "terok_agent.roster.loader"
 depends_on = [
     "terok_agent._util",
-    "terok_agent.auth",
-    "terok_agent.config_stack",
-    "terok_agent.headless_providers",
+    "terok_agent.credentials.auth",
+    "terok_agent.roster.config_stack",
+    "terok_agent.provider.headless",
     "terok_agent.paths",
 ]
 
-# Credential extractors — per-provider credential file parsers
+# Roster package waypoint (re-exports from loader)
 [[modules]]
-path = "terok_agent.credential_extractors"
+path = "terok_agent.roster"
+depends_on = [
+    "terok_agent.roster.loader",
+]
+
+# ── provider/ — AI provider behavior ──────────���─────────────────────
+
+# Provider-aware config value extraction
+[[modules]]
+path = "terok_agent.provider.config"
 depends_on = []
 
-# Build resource staging — standalone, reads from resources only
+# Headless provider registry + dispatch
 [[modules]]
-path = "terok_agent.build"
+path = "terok_agent.provider.headless"
+depends_on = [
+    "terok_agent.provider.config",
+]
+
+# Instruction resolution
+[[modules]]
+path = "terok_agent.provider.instructions"
+depends_on = [
+    "terok_agent.provider.config",
+]
+
+# Agent config dir preparation + wrapper generation
+[[modules]]
+path = "terok_agent.provider.agents"
+depends_on = [
+    "terok_agent._util",
+    "terok_agent.provider.headless",
+]
+
+# ── container/ — container lifecycle ────────────────────────────────
+
+# Build resource staging — standalone
+[[modules]]
+path = "terok_agent.container.build"
 depends_on = []
 
 # Container environment assembly — single source of truth for env + volumes
 [[modules]]
-path = "terok_agent.env_builder"
+path = "terok_agent.container.env"
 depends_on = [
     "terok_agent.paths",
 ]
 
 # Agent runner facade — composes sandbox + agent config + container launch
 [[modules]]
-path = "terok_agent.runner"
+path = "terok_agent.container.runner"
 depends_on = [
-    "terok_agent.agents",
-    "terok_agent.build",
-    "terok_agent.env_builder",
-    "terok_agent.headless_providers",
-    "terok_agent.instructions",
+    "terok_agent.container.build",
+    "terok_agent.container.env",
     "terok_agent.paths",
-    "terok_agent.roster",
+    "terok_agent.provider.agents",
+    "terok_agent.provider.headless",
+    "terok_agent.provider.instructions",
+    "terok_agent.roster.loader",
+]
+
+# ── credentials/ — authentication + credential proxy ────────────────
+
+# Credential extractors — per-provider credential file parsers
+[[modules]]
+path = "terok_agent.credentials.extractors"
+depends_on = []
+
+# Auth flows
+[[modules]]
+path = "terok_agent.credentials.auth"
+depends_on = [
+    "terok_agent._util",
+    "terok_agent.credentials.extractors",
+    "terok_agent.paths",
+]
+
+# Post-auth shared config patching (proxy URL writes)
+[[modules]]
+path = "terok_agent.credentials.proxy_config"
+depends_on = [
+    "terok_agent.paths",
+    "terok_agent.roster.loader",
 ]
 
 # Credential proxy CLI commands — wraps sandbox lifecycle + route generation
 [[modules]]
-path = "terok_agent.proxy_commands"
+path = "terok_agent.credentials.proxy_commands"
 depends_on = [
     "terok_agent.paths",
-    "terok_agent.roster",
+    "terok_agent.roster.loader",
 ]
+
+# ── CLI surface ─────────────────────────────��───────────────────────
 
 # Command registry — defines all CLI commands
 [[modules]]
 path = "terok_agent.commands"
 depends_on = [
-    "terok_agent.auth",
-    "terok_agent.build",
+    "terok_agent.container.build",
+    "terok_agent.container.runner",
+    "terok_agent.credentials.auth",
+    "terok_agent.credentials.proxy_config",
     "terok_agent.paths",
-    "terok_agent.proxy_config",
-    "terok_agent.roster",
-    "terok_agent.runner",
+    "terok_agent.roster.loader",
 ]
 
 # CLI entry point — wires command registry to argparse
@@ -154,25 +171,31 @@ depends_on = [
 path = "terok_agent.cli"
 depends_on = [
     "terok_agent.commands",
-    "terok_agent.proxy_commands",
+    "terok_agent.credentials.proxy_commands",
 ]
+
+# Agent-level container health checks
+[[modules]]
+path = "terok_agent.doctor"
+depends_on = []
 
 # Package root — public API re-exports + roster bootstrap
 [[modules]]
 path = "terok_agent"
 depends_on = [
-    "terok_agent.agent_config",
-    "terok_agent.agents",
-    "terok_agent.auth",
-    "terok_agent.build",
     "terok_agent.commands",
-    "terok_agent.config_stack",
-    "terok_agent.credential_extractors",
-    "terok_agent.env_builder",
-    "terok_agent.headless_providers",
-    "terok_agent.instructions",
+    "terok_agent.container.build",
+    "terok_agent.container.env",
+    "terok_agent.container.runner",
+    "terok_agent.credentials.auth",
+    "terok_agent.credentials.extractors",
+    "terok_agent.credentials.proxy_commands",
+    "terok_agent.doctor",
     "terok_agent.paths",
-    "terok_agent.proxy_commands",
+    "terok_agent.provider.agents",
+    "terok_agent.provider.config",
+    "terok_agent.provider.headless",
+    "terok_agent.provider.instructions",
     "terok_agent.roster",
-    "terok_agent.runner",
+    "terok_agent.roster.config_stack",
 ]

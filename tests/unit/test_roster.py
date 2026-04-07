@@ -10,15 +10,17 @@ from unittest.mock import patch
 
 import pytest
 
-from terok_agent.auth import AuthProvider
-from terok_agent.headless_providers import HeadlessProvider
+from terok_agent.credentials.auth import AuthProvider
+from terok_agent.provider.headless import HeadlessProvider
 from terok_agent.roster import (
     SidecarSpec,
+    load_roster,
+)
+from terok_agent.roster.loader import (
     _load_bundled_agents,
     _to_auth_provider,
     _to_headless_provider,
     _to_sidecar_spec,
-    load_roster,
 )
 
 
@@ -26,7 +28,7 @@ from terok_agent.roster import (
 def _isolate_user_agents_dir(tmp_path: Path) -> None:
     """Prevent real ~/.config/terok/agent/agents/ from leaking into tests."""
     isolated = tmp_path / "empty-agents"
-    with patch("terok_agent.roster._user_agents_dir", return_value=isolated):
+    with patch("terok_agent.roster.loader._user_agents_dir", return_value=isolated):
         yield
 
 
@@ -334,7 +336,7 @@ class TestUserOverrides:
         user_dir.mkdir()
         (user_dir / "claude.yaml").write_text("tier: 99\n")
 
-        with patch("terok_agent.roster._user_agents_dir", return_value=user_dir):
+        with patch("terok_agent.roster.loader._user_agents_dir", return_value=user_dir):
             reg = load_roster()
 
         # Provider still loads correctly, tier is just metadata
@@ -354,7 +356,7 @@ class TestUserOverrides:
             "capabilities:\n  log_format: plain\n"
         )
 
-        with patch("terok_agent.roster._user_agents_dir", return_value=user_dir):
+        with patch("terok_agent.roster.loader._user_agents_dir", return_value=user_dir):
             reg = load_roster()
 
         assert "custom" in reg.agent_names
@@ -373,7 +375,7 @@ class TestUserOverrides:
             "  banner_hint: Authenticate.\n"
         )
 
-        with patch("terok_agent.roster._user_agents_dir", return_value=user_dir):
+        with patch("terok_agent.roster.loader._user_agents_dir", return_value=user_dir):
             reg = load_roster()
 
         assert "mytool" in reg.all_names
@@ -383,7 +385,9 @@ class TestUserOverrides:
 
     def test_no_user_dir_ok(self, tmp_path: Path) -> None:
         """Missing user dir is fine — only bundled agents are loaded."""
-        with patch("terok_agent.roster._user_agents_dir", return_value=tmp_path / "nonexistent"):
+        with patch(
+            "terok_agent.roster.loader._user_agents_dir", return_value=tmp_path / "nonexistent"
+        ):
             reg = load_roster()
 
         assert "claude" in reg.agent_names

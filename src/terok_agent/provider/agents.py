@@ -15,8 +15,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
-from .headless_providers import WrapperConfig
+from terok_agent._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
+
+from .headless import WrapperConfig
 
 # TODO: future — support global agent definitions in terok-config.yml (agent.subagents).
 # When implemented, global subagents would be merged with per-project subagents before
@@ -432,7 +433,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Returns the agent_config_dir path.
     """
-    from .headless_providers import get_provider as _get_provider
+    from .headless import get_provider as _get_provider
 
     resolved = _get_provider(spec.provider, default_agent=spec.default_agent)
 
@@ -469,7 +470,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     # Inject instructions path into opencode.json configs on the host so
     # all OpenCode-based providers discover them natively (works for both
     # interactive and headless modes).
-    from .headless_providers import HEADLESS_PROVIDERS
+    from .headless import HEADLESS_PROVIDERS
 
     mounts_base = spec.mounts_base
     if mounts_base is None:
@@ -483,7 +484,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     # Write shell wrapper functions for ALL providers so interactive CLI users
     # can invoke any agent (each provider gets its own shell function).
-    from .headless_providers import generate_all_wrappers
+    from .headless import generate_all_wrappers
 
     def _claude_wrapper_with_instructions(cfg: WrapperConfig) -> str:
         """Wrap _generate_claude_wrapper with the resolved has_instructions flag."""

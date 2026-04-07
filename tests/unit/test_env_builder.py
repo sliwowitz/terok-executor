@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from terok_agent.env_builder import (
+from terok_agent.container.env import (
     ContainerEnvResult,
     ContainerEnvSpec,
     _resolve_git_identity,

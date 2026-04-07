@@ -64,7 +64,7 @@ class TestProxyRoutesParsed:
 
     def test_partial_socket_config_rejected(self) -> None:
         """Setting only socket_path or only socket_env raises ValueError."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         base = {"route_prefix": "test", "upstream": "https://example.com"}
         with pytest.raises(ValueError, match="both.*together"):
@@ -138,14 +138,14 @@ class TestScanLeakedCredentials:
 
     def test_empty_when_no_files(self, tmp_path) -> None:
         """Returns empty list when no credential files exist."""
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         assert scan_leaked_credentials(tmp_path) == []
 
     def test_detects_nonempty_credential_file(self, tmp_path) -> None:
         """Returns (provider, path) when a credential file is present and non-empty."""
         from terok_agent import get_roster
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         roster = get_roster()
         auth = roster.auth_providers.get("claude")
@@ -164,7 +164,7 @@ class TestScanLeakedCredentials:
     def test_skips_empty_files(self, tmp_path) -> None:
         """Empty credential files are not flagged."""
         from terok_agent import get_roster
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         roster = get_roster()
         auth = roster.auth_providers["claude"]
@@ -180,7 +180,7 @@ class TestScanLeakedCredentials:
         """Providers whose proxy route has no credential_file are skipped."""
         from unittest.mock import MagicMock
 
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         # Mock a roster with a provider that has a proxy route but no credential_file
         mock_roster = MagicMock()
@@ -197,7 +197,7 @@ class TestScanLeakedCredentials:
         from unittest.mock import patch
 
         from terok_agent import get_roster
-        from terok_agent.proxy_commands import _handle_clean
+        from terok_agent.credentials.proxy_commands import _handle_clean
 
         roster = get_roster()
         auth = roster.auth_providers["claude"]
@@ -218,7 +218,7 @@ class TestScanLeakedCredentials:
         from pathlib import Path
         from unittest.mock import patch
 
-        from terok_agent.proxy_commands import _handle_clean
+        from terok_agent.credentials.proxy_commands import _handle_clean
 
         with patch("terok_agent.paths.mounts_dir", return_value=Path("/nonexistent")):
             _handle_clean()
@@ -230,11 +230,11 @@ class TestProxyCommandHandlers:
     """Verify proxy CLI command handlers."""
 
     @patch("terok_sandbox.start_proxy")
-    @patch("terok_agent.proxy_commands._ensure_routes")
+    @patch("terok_agent.credentials.proxy_commands._ensure_routes")
     @patch("terok_sandbox.is_proxy_running", return_value=False)
     def test_start_generates_routes_and_starts(self, _running, _routes, _start, capsys) -> None:
         """start generates routes then starts the daemon."""
-        from terok_agent.proxy_commands import _handle_start
+        from terok_agent.credentials.proxy_commands import _handle_start
 
         _handle_start()
         _routes.assert_called_once()
@@ -244,7 +244,7 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_running", return_value=True)
     def test_start_already_running_exits(self, _running) -> None:
         """start exits if proxy is already running."""
-        from terok_agent.proxy_commands import _handle_start
+        from terok_agent.credentials.proxy_commands import _handle_start
 
         with pytest.raises(SystemExit):
             _handle_start()
@@ -253,7 +253,7 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_running", return_value=True)
     def test_stop_stops_daemon(self, _running, _stop, capsys) -> None:
         """stop calls stop_proxy when running."""
-        from terok_agent.proxy_commands import _handle_stop
+        from terok_agent.credentials.proxy_commands import _handle_stop
 
         _handle_stop()
         _stop.assert_called_once()
@@ -262,12 +262,12 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_running", return_value=False)
     def test_stop_not_running(self, _running, capsys) -> None:
         """stop prints info when not running."""
-        from terok_agent.proxy_commands import _handle_stop
+        from terok_agent.credentials.proxy_commands import _handle_stop
 
         _handle_stop()
         assert "not running" in capsys.readouterr().out
 
-    @patch("terok_agent.proxy_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_agent.credentials.proxy_commands.scan_leaked_credentials", return_value=[])
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=False)
     @patch("terok_sandbox.get_proxy_status")
     def test_status_prints_info(self, mock_status, _sd, _scan, capsys) -> None:
@@ -281,7 +281,7 @@ class TestProxyCommandHandlers:
             routes_configured=3,
             credentials_stored=("claude", "gh"),
         )
-        from terok_agent.proxy_commands import _handle_status
+        from terok_agent.credentials.proxy_commands import _handle_status
 
         _handle_status()
         out = capsys.readouterr().out
@@ -289,11 +289,11 @@ class TestProxyCommandHandlers:
         assert "claude" in out
 
     @patch("terok_sandbox.install_proxy_systemd")
-    @patch("terok_agent.proxy_commands._ensure_routes")
+    @patch("terok_agent.credentials.proxy_commands._ensure_routes")
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=True)
     def test_install_generates_routes_and_installs(self, _sd, _routes, _install, capsys) -> None:
         """install generates routes then installs systemd units."""
-        from terok_agent.proxy_commands import _handle_install
+        from terok_agent.credentials.proxy_commands import _handle_install
 
         _handle_install()
         _routes.assert_called_once()
@@ -303,7 +303,7 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=False)
     def test_install_no_systemd_exits(self, _sd) -> None:
         """install exits when systemd unavailable."""
-        from terok_agent.proxy_commands import _handle_install
+        from terok_agent.credentials.proxy_commands import _handle_install
 
         with pytest.raises(SystemExit):
             _handle_install()
@@ -312,7 +312,7 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=True)
     def test_uninstall_removes_units(self, _sd, _uninstall, capsys) -> None:
         """uninstall removes systemd units."""
-        from terok_agent.proxy_commands import _handle_uninstall
+        from terok_agent.credentials.proxy_commands import _handle_uninstall
 
         _handle_uninstall()
         _uninstall.assert_called_once()
@@ -321,21 +321,24 @@ class TestProxyCommandHandlers:
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=False)
     def test_uninstall_no_systemd_exits(self, _sd) -> None:
         """uninstall exits when systemd unavailable."""
-        from terok_agent.proxy_commands import _handle_uninstall
+        from terok_agent.credentials.proxy_commands import _handle_uninstall
 
         with pytest.raises(SystemExit):
             _handle_uninstall()
 
-    @patch("terok_agent.proxy_commands._ensure_routes", return_value=Path("/tmp/routes.json"))
+    @patch(
+        "terok_agent.credentials.proxy_commands._ensure_routes",
+        return_value=Path("/tmp/routes.json"),
+    )
     def test_routes_prints_path(self, _routes, capsys) -> None:
         """routes prints the written path."""
-        from terok_agent.proxy_commands import _handle_routes
+        from terok_agent.credentials.proxy_commands import _handle_routes
 
         _handle_routes()
         assert "routes.json" in capsys.readouterr().out
 
     @patch(
-        "terok_agent.proxy_commands.scan_leaked_credentials",
+        "terok_agent.credentials.proxy_commands.scan_leaked_credentials",
         return_value=[("claude", Path("/envs/_claude-config/.credentials.json"))],
     )
     @patch("terok_sandbox.is_proxy_systemd_available", return_value=False)
@@ -351,7 +354,7 @@ class TestProxyCommandHandlers:
             routes_configured=3,
             credentials_stored=("claude",),
         )
-        from terok_agent.proxy_commands import _handle_status
+        from terok_agent.credentials.proxy_commands import _handle_status
 
         _handle_status()
         out = capsys.readouterr().out
@@ -365,8 +368,8 @@ class TestInjectedCredentialsFile:
 
     def test_recognises_injected_file(self, tmp_path: Path) -> None:
         """Correctly identifies a terok-injected .credentials.json."""
-        from terok_agent.auth import PHANTOM_CREDENTIALS_MARKER
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.auth import PHANTOM_CREDENTIALS_MARKER
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         cred = {
             "claudeAiOauth": {
@@ -382,7 +385,7 @@ class TestInjectedCredentialsFile:
 
     def test_rejects_real_credentials(self, tmp_path: Path) -> None:
         """Real OAuth tokens are NOT identified as injected."""
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         cred = {"claudeAiOauth": {"accessToken": "sk-ant-real-token", "refreshToken": "rt-real"}}
         cred_file = tmp_path / ".credentials.json"
@@ -391,8 +394,8 @@ class TestInjectedCredentialsFile:
 
     def test_rejects_phantom_token_with_refresh(self, tmp_path: Path) -> None:
         """Phantom accessToken with a non-empty refreshToken is suspicious — flag it."""
-        from terok_agent.auth import PHANTOM_CREDENTIALS_MARKER
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.auth import PHANTOM_CREDENTIALS_MARKER
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         cred = {
             "claudeAiOauth": {
@@ -406,7 +409,7 @@ class TestInjectedCredentialsFile:
 
     def test_handles_malformed_json(self, tmp_path: Path) -> None:
         """Malformed JSON falls through to False (treat as potential leak)."""
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         cred_file = tmp_path / ".credentials.json"
         cred_file.write_text("{not valid json")
@@ -414,13 +417,13 @@ class TestInjectedCredentialsFile:
 
     def test_handles_missing_file(self, tmp_path: Path) -> None:
         """Missing file returns False."""
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         assert _is_injected_credentials_file(tmp_path / "nonexistent.json") is False
 
     def test_handles_non_dict_oauth_section(self, tmp_path: Path) -> None:
         """Non-dict claudeAiOauth returns False."""
-        from terok_agent.proxy_commands import _is_injected_credentials_file
+        from terok_agent.credentials.proxy_commands import _is_injected_credentials_file
 
         cred_file = tmp_path / ".credentials.json"
         cred_file.write_text(json.dumps({"claudeAiOauth": "not a dict"}))
@@ -433,8 +436,8 @@ class TestScanSkipsInjectedFile:
     def test_skips_injected_credentials(self, tmp_path: Path) -> None:
         """Injected phantom credentials are NOT flagged as leaked."""
         from terok_agent import get_roster
-        from terok_agent.auth import PHANTOM_CREDENTIALS_MARKER
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.auth import PHANTOM_CREDENTIALS_MARKER
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         roster = get_roster()
         auth = roster.auth_providers["claude"]
@@ -456,7 +459,7 @@ class TestScanSkipsInjectedFile:
     def test_still_detects_real_credentials(self, tmp_path: Path) -> None:
         """Real OAuth tokens are still flagged even when file structure matches."""
         from terok_agent import get_roster
-        from terok_agent.proxy_commands import scan_leaked_credentials
+        from terok_agent.credentials.proxy_commands import scan_leaked_credentials
 
         roster = get_roster()
         auth = roster.auth_providers["claude"]
@@ -480,8 +483,8 @@ class TestCleanSkipsInjectedFile:
         from unittest.mock import patch
 
         from terok_agent import get_roster
-        from terok_agent.auth import PHANTOM_CREDENTIALS_MARKER
-        from terok_agent.proxy_commands import _handle_clean
+        from terok_agent.credentials.auth import PHANTOM_CREDENTIALS_MARKER
+        from terok_agent.credentials.proxy_commands import _handle_clean
 
         roster = get_roster()
         auth = roster.auth_providers["claude"]
@@ -512,7 +515,7 @@ class TestFormatCredentials:
         """Formats credentials as 'name (type)' from the DB."""
         from terok_sandbox import CredentialDB
 
-        from terok_agent.proxy_commands import _format_credentials
+        from terok_agent.credentials.proxy_commands import _format_credentials
 
         db_path = tmp_path / "creds.db"
         db = CredentialDB(db_path)
@@ -531,7 +534,7 @@ class TestFormatCredentials:
         """Credentials without a type field show 'unknown'."""
         from terok_sandbox import CredentialDB
 
-        from terok_agent.proxy_commands import _format_credentials
+        from terok_agent.credentials.proxy_commands import _format_credentials
 
         db_path = tmp_path / "creds.db"
         db = CredentialDB(db_path)
@@ -543,14 +546,14 @@ class TestFormatCredentials:
 
     def test_empty_credentials(self) -> None:
         """Returns 'none stored' when no credentials exist."""
-        from terok_agent.proxy_commands import _format_credentials
+        from terok_agent.credentials.proxy_commands import _format_credentials
 
         status = MagicMock(credentials_stored=())
         assert _format_credentials(status) == "none stored"
 
     def test_status_display_degrades_gracefully_on_db_error(self) -> None:
         """Status display shows plain names when its read-only DB connection fails."""
-        from terok_agent.proxy_commands import _format_credentials
+        from terok_agent.credentials.proxy_commands import _format_credentials
 
         status = MagicMock(
             credentials_stored=("claude", "gh"),
@@ -564,7 +567,7 @@ class TestToProxyRoute:
 
     def test_both_socket_fields_accepted(self) -> None:
         """Both socket_path and socket_env together are valid."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         route = _to_proxy_route(
             "test",
@@ -583,7 +586,7 @@ class TestToProxyRoute:
 
     def test_neither_socket_field_accepted(self) -> None:
         """Omitting both socket fields is valid (no socket transport)."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         route = _to_proxy_route(
             "test",
@@ -600,7 +603,7 @@ class TestToProxyRoute:
 
     def test_oauth_phantom_env_parsed(self) -> None:
         """oauth_phantom_env is parsed from YAML data."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         route = _to_proxy_route(
             "test",
@@ -617,7 +620,7 @@ class TestToProxyRoute:
 
     def test_missing_required_field_raises(self) -> None:
         """Missing route_prefix or upstream raises ValueError."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         with pytest.raises(ValueError, match="route_prefix"):
             _to_proxy_route("test", {"credential_proxy": {"upstream": "https://x.com"}})
@@ -626,7 +629,7 @@ class TestToProxyRoute:
 
     def test_no_credential_proxy_returns_none(self) -> None:
         """Agent without credential_proxy section returns None."""
-        from terok_agent.roster import _to_proxy_route
+        from terok_agent.roster.loader import _to_proxy_route
 
         assert _to_proxy_route("test", {}) is None
         assert _to_proxy_route("test", {"credential_proxy": {}}) is None
@@ -671,7 +674,7 @@ class TestProxyHandlerCfgSignatures:
     def test_all_handlers_accept_cfg(self) -> None:
         import inspect
 
-        from terok_agent.proxy_commands import PROXY_COMMANDS
+        from terok_agent.credentials.proxy_commands import PROXY_COMMANDS
 
         for cmd in PROXY_COMMANDS:
             sig = inspect.signature(cmd.handler)

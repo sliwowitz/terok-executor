@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from terok_agent.auth import (
+from terok_agent.credentials.auth import (
     PHANTOM_CREDENTIALS_MARKER,
     _capture_credentials,
     _write_claude_credentials_file,

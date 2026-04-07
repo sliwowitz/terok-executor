@@ -30,8 +30,8 @@ from .config_stack import deep_merge
 if TYPE_CHECKING:
     from terok_sandbox import SandboxConfig
 
-    from .auth import AuthProvider
-    from .headless_providers import HeadlessProvider, OpenCodeProviderConfig
+    from terok_agent.credentials.auth import AuthProvider
+    from terok_agent.provider.headless import HeadlessProvider, OpenCodeProviderConfig
 
 # ---------------------------------------------------------------------------
 # User config root
@@ -42,7 +42,7 @@ _USER_AGENTS_DIR_NAME = "agents"
 
 def _user_agents_dir() -> Path:
     """Return ``~/.config/terok/agent/agents/``."""
-    from .paths import _SUBDIR, _UMBRELLA
+    from terok_agent.paths import _SUBDIR, _UMBRELLA
 
     try:
         from platformdirs import user_config_dir
@@ -58,7 +58,7 @@ def _user_agents_dir() -> Path:
 
 def _load_yaml(text: str) -> dict:
     """Parse YAML text into a dict via ruamel.yaml round-trip loader."""
-    from ._util import yaml_load
+    from terok_agent._util import yaml_load
 
     result = yaml_load(text)
     return result if isinstance(result, dict) else {}
@@ -115,7 +115,7 @@ def _load_user_agents() -> dict[str, dict]:
 
 def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
     """Deserialize the ``opencode:`` YAML section."""
-    from .headless_providers import OpenCodeProviderConfig
+    from terok_agent.provider.headless import OpenCodeProviderConfig
 
     return OpenCodeProviderConfig(
         display_name=data["display_name"],
@@ -130,7 +130,7 @@ def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
 
 def _to_headless_provider(name: str, data: dict) -> HeadlessProvider:
     """Deserialize a full agent YAML dict into a ``HeadlessProvider``."""
-    from .headless_providers import HeadlessProvider
+    from terok_agent.provider.headless import HeadlessProvider
 
     hl = data.get("headless", {})
     aa = data.get("auto_approve", {})
@@ -172,7 +172,7 @@ def _to_headless_provider(name: str, data: dict) -> HeadlessProvider:
 
 def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
     """Deserialize the ``auth:`` YAML section into an ``AuthProvider``."""
-    from .auth import AuthKeyConfig, AuthProvider, _api_key_command
+    from terok_agent.credentials.auth import AuthKeyConfig, AuthProvider, _api_key_command
 
     auth = data.get("auth", {})
     if not auth:
@@ -214,7 +214,7 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
 
 def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
     """Auto-derive an auth provider for an OpenCode-based agent."""
-    from .auth import AuthProvider
+    from terok_agent.credentials.auth import AuthProvider
 
     oc = data.get("opencode")
     if not oc:

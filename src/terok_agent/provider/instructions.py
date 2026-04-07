@@ -75,7 +75,7 @@ def resolve_instructions(
 
     Returns the final instructions text.
     """
-    from .agent_config import resolve_provider_value
+    from .config import resolve_provider_value
 
     val = config.get("instructions")
     default = bundled_default_instructions()

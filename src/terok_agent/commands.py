@@ -51,7 +51,7 @@ def _handle_agents(*, show_all: bool = False) -> None:
     """List registered agents."""
     import sys
 
-    from .roster import _load_bundled_agents, _load_user_agents, get_roster
+    from .roster.loader import _load_bundled_agents, _load_user_agents, get_roster
 
     roster = get_roster()
     names = roster.all_names if show_all else roster.agent_names
@@ -87,7 +87,7 @@ def _handle_build(
     sidecar: bool = False,
 ) -> None:
     """Build L0+L1 container images (optionally include sidecar L1)."""
-    from .build import BuildError, build_base_images, build_sidecar_image
+    from .container.build import BuildError, build_base_images, build_sidecar_image
 
     try:
         images = build_base_images(base, rebuild=rebuild, full_rebuild=full_rebuild)
@@ -148,7 +148,7 @@ def _handle_run(
     shared_mount: str = "/shared",
 ) -> None:
     """Run an agent in a hardened container."""
-    from .runner import AgentRunner
+    from .container.runner import AgentRunner
 
     # Resolve human identity from host git config if requested
     human_name = human_email = authorship = None
@@ -202,7 +202,7 @@ def _handle_run(
 
 def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
     """Run auth flow for an agent."""
-    from .auth import AUTH_PROVIDERS, authenticate, store_api_key
+    from .credentials.auth import AUTH_PROVIDERS, authenticate, store_api_key
 
     if api_key is not None:
         if not api_key.strip():
@@ -212,7 +212,7 @@ def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
             raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
         store_api_key(agent, api_key.strip())
     else:
-        from .build import l1_image_tag
+        from .container.build import l1_image_tag
 
         image = l1_image_tag("ubuntu:24.04")
         from .paths import mounts_dir
@@ -220,7 +220,7 @@ def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
         authenticate("standalone", agent, mounts_dir=mounts_dir(), image=image)
 
     # Write proxy URLs to shared config files (e.g. Vibe config.toml, gh config.yml)
-    from .proxy_config import write_proxy_config
+    from .credentials.proxy_config import write_proxy_config
 
     write_proxy_config(agent)
 
@@ -237,7 +237,7 @@ def _handle_run_tool(
     tool_args: list[str] | None = None,
 ) -> None:
     """Run a tool in a sidecar container."""
-    from .runner import AgentRunner
+    from .container.runner import AgentRunner
 
     effective_gate = gate and not no_gate
     runner = AgentRunner()

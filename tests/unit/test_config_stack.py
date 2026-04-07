@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_agent.config_stack import (
+from terok_agent.roster.config_stack import (
     ConfigScope,
     ConfigStack,
     deep_merge,

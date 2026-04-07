@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from terok_agent.runner import AgentRunner, _generate_task_id, _resolve_repo
+from terok_agent.container.runner import AgentRunner, _generate_task_id, _resolve_repo
 
 
 class TestResolveRepo:
@@ -192,7 +192,7 @@ class TestAgentRunner:
         """GpuConfigError from sandbox.run() is wrapped as BuildError."""
         from terok_sandbox import GpuConfigError
 
-        from terok_agent.build import BuildError
+        from terok_agent.container.build import BuildError
 
         sandbox = _mock_sandbox()
         sandbox.run.side_effect = GpuConfigError("CDI broken")

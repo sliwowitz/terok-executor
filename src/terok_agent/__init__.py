@@ -32,10 +32,10 @@ Public API::
 
 Internal symbols (available via submodule import for white-box tests)::
 
-    from terok_agent.headless_providers import generate_agent_wrapper, generate_all_wrappers
-    from terok_agent.headless_providers import OpenCodeProviderConfig, ProviderConfig, WrapperConfig
-    from terok_agent.config_stack import deep_merge, load_yaml_scope, load_json_scope
-    from terok_agent.instructions import has_custom_instructions
+    from terok_agent.provider.headless import generate_agent_wrapper, generate_all_wrappers
+    from terok_agent.provider.headless import OpenCodeProviderConfig, ProviderConfig, WrapperConfig
+    from terok_agent.roster.config_stack import deep_merge, load_yaml_scope, load_json_scope
+    from terok_agent.provider.instructions import has_custom_instructions
     from terok_agent._util import podman_userns_args
 """
 
@@ -53,22 +53,11 @@ except PackageNotFoundError:
 # Re-export protocol types from terok-sandbox for convenience
 from terok_sandbox.doctor import CheckVerdict, DoctorCheck
 
-from .agent_config import resolve_provider_value
-
-# -- Agent config preparation --------------------------------------------------
-from .agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
-
-# -- Auth ----------------------------------------------------------------------
-from .auth import (
-    AUTH_PROVIDERS,
-    PHANTOM_CREDENTIALS_MARKER,
-    AuthProvider,
-    authenticate,
-    store_api_key,
-)
+# -- Command registry ----------------------------------------------------------
+from .commands import COMMANDS as AGENT_COMMANDS, CommandDef
 
 # -- Build: image construction + resource staging ------------------------------
-from .build import (
+from .container.build import (
     DEFAULT_BASE_IMAGE,
     BuildError,
     ImageSet,
@@ -82,20 +71,32 @@ from .build import (
     stage_tmux_config,
     stage_toad_agents,
 )
+from .container.env import ContainerEnvResult, ContainerEnvSpec, assemble_container_env
 
-# -- Command registry ----------------------------------------------------------
-from .commands import COMMANDS as AGENT_COMMANDS, CommandDef
+# -- Runner facade -------------------------------------------------------------
+from .container.runner import AgentRunner
 
-# -- Config stack --------------------------------------------------------------
-from .config_stack import ConfigScope, ConfigStack
+# -- Auth ----------------------------------------------------------------------
+from .credentials.auth import (
+    AUTH_PROVIDERS,
+    PHANTOM_CREDENTIALS_MARKER,
+    AuthProvider,
+    authenticate,
+    store_api_key,
+)
 
 # -- Credential proxy ----------------------------------------------------------
-from .credential_extractors import extract_credential
+from .credentials.extractors import extract_credential
+from .credentials.proxy_commands import PROXY_COMMANDS, scan_leaked_credentials
 from .doctor import agent_doctor_checks
-from .env_builder import ContainerEnvResult, ContainerEnvSpec, assemble_container_env
+from .paths import mounts_dir
+
+# -- Agent config preparation --------------------------------------------------
+from .provider.agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
+from .provider.config import resolve_provider_value
 
 # -- Provider registry ---------------------------------------------------------
-from .headless_providers import (
+from .provider.headless import (
     HEADLESS_PROVIDERS,
     PROVIDER_NAMES,
     CLIOverrides,
@@ -108,13 +109,11 @@ from .headless_providers import (
 )
 
 # -- Instructions --------------------------------------------------------------
-from .instructions import bundled_default_instructions, resolve_instructions
-from .paths import mounts_dir
-from .proxy_commands import PROXY_COMMANDS, scan_leaked_credentials
+from .provider.instructions import bundled_default_instructions, resolve_instructions
 from .roster import CredentialProxyRoute, SidecarSpec, ensure_proxy_routes, get_roster
 
-# -- Runner facade -------------------------------------------------------------
-from .runner import AgentRunner
+# -- Config stack --------------------------------------------------------------
+from .roster.config_stack import ConfigScope, ConfigStack
 
 # -- Bootstrap YAML roster into module-level dicts ---------------------------
 # HEADLESS_PROVIDERS and AUTH_PROVIDERS are empty dicts populated here to avoid
@@ -125,7 +124,7 @@ def _bootstrap_roster() -> None:
     """Populate module-level provider dicts from the YAML roster."""
     global PROVIDER_NAMES  # noqa: PLW0603 — tuple requires rebind
 
-    import terok_agent.headless_providers as _hp
+    import terok_agent.provider.headless as _hp
 
     from .roster import get_roster
 

@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
     """Generate routes.json from the YAML agent roster."""
-    from .roster import ensure_proxy_routes
+    from terok_agent.roster.loader import ensure_proxy_routes
 
     return ensure_proxy_routes(cfg=cfg)
 
@@ -87,7 +87,7 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     Files injected by :func:`~terok_agent.auth._write_claude_credentials_file`
     are recognised by their dummy ``accessToken`` marker and skipped.
     """
-    from .roster import get_roster
+    from terok_agent.roster.loader import get_roster
 
     roster = get_roster()
     leaked: list[tuple[str, Path]] = []
@@ -140,7 +140,7 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show credential proxy status."""
     from terok_sandbox import get_proxy_status, is_proxy_systemd_available
 
-    from .paths import mounts_dir
+    from terok_agent.paths import mounts_dir
 
     status = get_proxy_status(cfg=cfg)
     state = "running" if status.running else "stopped"
@@ -200,7 +200,7 @@ def _handle_routes(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_clean(*, cfg: SandboxConfig | None = None) -> None:  # noqa: ARG001
     """Remove leaked credential files from shared config mounts."""
-    from .paths import mounts_dir
+    from terok_agent.paths import mounts_dir
 
     leaked = scan_leaked_credentials(mounts_dir())
     if not leaked:

@@ -14,7 +14,7 @@ import argparse
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
 from .commands import COMMANDS, ArgDef, CommandDef
-from .proxy_commands import PROXY_COMMANDS
+from .credentials.proxy_commands import PROXY_COMMANDS
 
 try:
     __version__ = _meta_version("terok-agent")

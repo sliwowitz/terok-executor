@@ -296,7 +296,7 @@ def apply_provider_config(
     """
     if overrides is None:
         overrides = CLIOverrides()
-    from .agent_config import resolve_provider_value
+    from .config import resolve_provider_value
 
     warnings: list[str] = []
     prompt_parts: list[str] = []

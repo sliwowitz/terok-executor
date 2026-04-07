@@ -18,7 +18,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._util import yaml_load as _yaml_load
+from terok_agent._util import yaml_load as _yaml_load
 
 # ---------------------------------------------------------------------------
 # Merge helpers

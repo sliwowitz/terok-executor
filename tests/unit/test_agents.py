@@ -11,7 +11,7 @@ import unittest.mock
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from terok_agent.agents import (
+from terok_agent.provider.agents import (
     AgentConfigSpec,
     _generate_claude_wrapper,
     _inject_opencode_instructions,
@@ -20,7 +20,7 @@ from terok_agent.agents import (
     parse_md_agent,
     prepare_agent_config_dir,
 )
-from terok_agent.headless_providers import WrapperConfig
+from terok_agent.provider.headless import WrapperConfig
 from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,
@@ -250,7 +250,7 @@ class TestPrepareAgentConfigDir:
             **kwargs,
         )
 
-    @unittest.mock.patch("terok_agent.agents._write_session_hook")
+    @unittest.mock.patch("terok_agent.provider.agents._write_session_hook")
     def test_writes_instructions(self, _mock: object, tmp_path: Path) -> None:
         """Instructions text is written to instructions.md."""
         with tempfile.TemporaryDirectory() as envs:
@@ -261,7 +261,7 @@ class TestPrepareAgentConfigDir:
             d = prepare_agent_config_dir(spec)
             assert (d / "instructions.md").read_text(encoding="utf-8") == "Custom."
 
-    @unittest.mock.patch("terok_agent.agents._write_session_hook")
+    @unittest.mock.patch("terok_agent.provider.agents._write_session_hook")
     def test_default_instructions_when_none(self, _mock: object, tmp_path: Path) -> None:
         """Default instructions.md written when instructions is None."""
         with tempfile.TemporaryDirectory() as envs:
@@ -270,7 +270,7 @@ class TestPrepareAgentConfigDir:
             d = prepare_agent_config_dir(spec)
             assert "conventions" in (d / "instructions.md").read_text(encoding="utf-8")
 
-    @unittest.mock.patch("terok_agent.agents._write_session_hook")
+    @unittest.mock.patch("terok_agent.provider.agents._write_session_hook")
     def test_wrapper_has_append_system_prompt(self, _mock: object, tmp_path: Path) -> None:
         """Claude wrapper includes --append-system-prompt when instructions given."""
         with tempfile.TemporaryDirectory() as envs:
