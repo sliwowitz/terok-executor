@@ -59,7 +59,7 @@ plugins:
       ref_pages: true
       ref_pages_path: reference
   - literate-nav:
-      nav_file: SUMMARY.md
+      nav_file: summary.md
   - section-index
 
 markdown_extensions:
