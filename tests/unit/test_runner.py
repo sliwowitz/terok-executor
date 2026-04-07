@@ -204,6 +204,23 @@ class TestAgentRunner:
         ):
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
 
+    def test_shared_mount_must_be_absolute(self, tmp_path: Path) -> None:
+        """Relative shared_mount is rejected with SystemExit."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.raises(SystemExit, match="absolute path"),
+        ):
+            runner.run_headless(
+                "claude",
+                str(tmp_path),
+                prompt="test",
+                follow=False,
+                shared_dir=tmp_path / "ipc",
+                shared_mount="relative/path",
+            )
+
     def test_shared_dir_in_container_env(self, tmp_path: Path) -> None:
         """shared_dir kwarg produces TEROK_SHARED_DIR and a volume mount."""
         sandbox = _mock_sandbox()

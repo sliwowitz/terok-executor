@@ -590,6 +590,10 @@ class AgentRunner:
             if authorship:
                 spec_kwargs["authorship"] = authorship
             if shared_dir:
+                if not shared_mount.startswith("/"):
+                    raise SystemExit(
+                        f"--shared-mount must be an absolute path, got: {shared_mount!r}"
+                    )
                 spec_kwargs["shared_dir"] = shared_dir
                 spec_kwargs["shared_mount"] = shared_mount
 

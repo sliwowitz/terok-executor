@@ -162,6 +162,7 @@ def _handle_run(
 
     effective_gate = gate and not no_gate
     runner = AgentRunner()
+    resolved_shared_dir = Path(shared_dir) if shared_dir else None
     common: dict = {
         "gate": effective_gate,
         "name": name,
@@ -171,9 +172,10 @@ def _handle_run(
         "human_name": human_name,
         "human_email": human_email,
         "authorship": authorship,
-        "shared_dir": Path(shared_dir) if shared_dir else None,
-        "shared_mount": shared_mount,
+        "shared_dir": resolved_shared_dir,
     }
+    if resolved_shared_dir:
+        common["shared_mount"] = shared_mount
 
     if web:
         cname = runner.run_web(repo, port=port, **common)
