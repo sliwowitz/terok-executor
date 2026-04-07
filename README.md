@@ -79,8 +79,11 @@ User-defined agents go in `~/.config/terok/agent/agents/` as YAML files.
 
 - **Egress firewall** — gate is on by default; agents cannot reach the
   internet except through allowed domains
-- **Credential proxy** — no real API keys enter containers; phantom tokens
-  are resolved host-side (see [Credential Proxy](https://terok-ai.github.io/terok-agent/credential-proxy/))
+- **Credential proxy** — no real API keys or SSH private keys enter
+  containers; phantom tokens are resolved host-side by the credential
+  proxy and SSH agent proxy in
+  [terok-sandbox](https://terok-ai.github.io/terok-sandbox/)
+  (see [Credential Proxy](https://terok-ai.github.io/terok-agent/credential-proxy/))
 - **Restricted mode** (`--restricted`) — disables auto-approve and sets
   `--no-new-privileges`
 - **Rootless Podman** — containers run without root privileges

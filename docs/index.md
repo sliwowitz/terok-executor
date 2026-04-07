@@ -73,9 +73,11 @@ See the [API Reference](reference/) for the full agent roster schema.
 - **Egress firewall (gate)** — on by default. Containers cannot reach the
   internet except through explicitly allowed domains. Disable with
   `--no-gate` for development.
-- **[Credential proxy](credential-proxy.md)** — no real API keys enter
-  containers. Phantom tokens are resolved host-side by the credential
-  proxy. See the dedicated page for architecture details.
+- **[Credential proxy](credential-proxy.md)** — no real API keys or SSH
+  private keys enter containers. Phantom tokens are resolved host-side
+  by the credential proxy and SSH agent proxy in
+  [terok-sandbox](https://terok-ai.github.io/terok-sandbox/).
+  See the dedicated page for architecture details.
 - **Restricted mode** (`--restricted`) — disables auto-approve flags and
   sets `--no-new-privileges` on the container.
 - **Rootless Podman** — all containers run without root privileges.

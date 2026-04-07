@@ -10,9 +10,14 @@ API keys, OAuth tokens, or SSH private keys from these shared mounts.
 
 No real secret enters a task container. Instead:
 
-1. **Credential DB** (sqlite3, host-side) stores API keys and OAuth tokens
-2. **Credential proxy** (aiohttp, TCP+Unix socket) injects real auth headers
+1. **Credential DB** (host-side) stores API keys and OAuth tokens
+2. **Credential proxy** ([terok-sandbox](https://terok-ai.github.io/terok-sandbox/))
+   resolves phantom tokens to real credentials and forwards requests upstream
 3. **Per-provider phantom tokens** (per-task, per-provider) are what containers see
+4. **SSH agent proxy** ([terok-sandbox](https://terok-ai.github.io/terok-sandbox/))
+   lets containers sign with host-side SSH keys without the private keys
+   entering the container. A socat bridge inside the container relays
+   SSH agent requests over TCP to the host-side proxy.
 
 ## Architecture
 
@@ -25,29 +30,20 @@ Credential DB (sqlite3)                   Per-provider phantom tokens (env vars)
     (token, project, task,                  GH_TOKEN=<gh-phantom>
      credential_set, provider)              GITLAB_TOKEN=<glab-phantom>
 
-Credential Proxy (aiohttp)                Agent / tool makes API request
-  TCP: 127.0.0.1:18731                      with phantom token in auth header
-  Unix: $XDG_RUNTIME_DIR/terok/sock
-  1. Extracts phantom token                 Routing is by token, not URL path.
-  2. Looks up provider from token           Token encodes which provider it's for.
-  3. Loads real credential from DB
-  4. Injects real auth header
-  5. Forwards to upstream (genuine TLS)
+Credential Proxy (terok-sandbox)          Agent / tool makes API request
+  TCP + Unix socket listeners                with phantom token in auth header
+  Resolves phantom → real credential
+  Injects auth header, forwards             Routing is by token, not URL path.
+  to upstream over TLS                       Token encodes which provider it's for.
 ```
 
 ### Why TCP, not Unix sockets?
 
-SELinux blocks `connect()` on Unix sockets mounted into rootless Podman
-containers. The `connectto` process label check denies `container_t ->
-unconfined_t` regardless of file relabeling. This is intentional per
-Red Hat's container security model.
-
-TCP via `host.containers.internal:<port>` is the same pattern the gate
-server uses. The phantom token provides authentication. Shield's
-`loopback_ports` allows the proxy port through the nftables firewall.
-
-See: [Podman #23972](https://github.com/containers/podman/discussions/23972),
-[Dan Walsh: SELinux and Containers](https://danwalsh.livejournal.com/78643.html).
+SELinux blocks `connect()` on host Unix sockets mounted into rootless
+Podman containers (`container_t -> unconfined_t` denied). Containers
+reach the proxy via TCP (`host.containers.internal:<port>`) instead.
+[terok-shield](https://terok-ai.github.io/terok-shield/) allows the
+proxy port through the nftables firewall via `loopback_ports`.
 
 ### Per-provider phantom token routing
 
@@ -153,10 +149,6 @@ credential_proxy:
   and `GH_TOKEN` are both set. The socket path is hardcoded to
   `/tmp/terok-gh-proxy.sock` (matching the `shared_config_patch`).
 
-- **anthropic-beta header**: The proxy appends `oauth-2025-04-20` to the
-  `anthropic-beta` header for OAuth credentials. Claude Code sends its own
-  beta features in this header, so the proxy must append (not replace).
-
 ## Auth Flow
 
 ### Three auth paths
@@ -193,18 +185,18 @@ After storing credentials, `write_proxy_config()` applies any
 
 ## Known Limitations
 
-- **Codex**: Needs WebSocket support (proxy only handles HTTP) and OAuth
-  token refresh (Codex refreshes via `auth.openai.com`).
-
-- **OAuth token refresh**: Claude and Codex OAuth tokens expire (~1h). The
-  proxy does not refresh them automatically. Re-auth required after expiry.
+- **Codex**: The credential proxy only handles HTTP. Codex needs WebSocket
+  support for its realtime protocol, which the proxy does not yet provide.
 
 - **Copilot**: Not proxied yet. No `credential_proxy` section in YAML.
 
-- **SSH keys**: Still bind-mounted as files. An SSH agent proxy is planned.
-
 ## Package Boundaries
 
-- **terok-sandbox**: Credential DB, proxy server, TCP+Unix listener, lifecycle
-- **terok-agent**: YAML registry, extractors, auth interceptor, runner proxy env
-- **terok**: Environment builder, phantom token injection for full-stack tasks
+- **[terok-sandbox](https://terok-ai.github.io/terok-sandbox/)**: Credential
+  DB, proxy server (HTTP forwarding, phantom token resolution, OAuth token
+  refresh, SSH agent proxy), TCP+Unix listeners, lifecycle management
+- **terok-agent** (this package): YAML agent registry, credential extractors,
+  auth CLI, container environment wiring (phantom env vars, base URL overrides,
+  socat bridges, `shared_config_patch`)
+- **[terok](https://terok-ai.github.io/terok/)**: Environment builder, phantom
+  token injection for full-stack multi-agent tasks
