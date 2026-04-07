@@ -13,7 +13,7 @@
 # stdin/stdout = the SSH client's Unix socket side (provided by socat)
 #
 # Expects env:
-#   TEROK_SSH_AGENT_TOKEN  - phantom token (32-char hex)
+#   TEROK_SSH_AGENT_TOKEN  - phantom token (terok-p-<32hex> or raw 32-char hex)
 #   TEROK_SSH_AGENT_PORT   - TCP port on host.containers.internal
 
 set -euo pipefail
@@ -21,19 +21,23 @@ set -euo pipefail
 : "${TEROK_SSH_AGENT_TOKEN:?missing}"
 : "${TEROK_SSH_AGENT_PORT:?missing}"
 
-[[ "${TEROK_SSH_AGENT_TOKEN}" =~ ^[[:xdigit:]]{32}$ ]] || {
-  echo "TEROK_SSH_AGENT_TOKEN must be 32 hex characters" >&2
-  exit 2
-}
 [[ "${TEROK_SSH_AGENT_PORT}" =~ ^[0-9]+$ ]] || {
   echo "TEROK_SSH_AGENT_PORT must be numeric" >&2
   exit 2
 }
 
+# Compute 4-byte big-endian length header dynamically — the server-side
+# _read_handshake() accepts any token length 1–1024 and does a DB lookup.
+TOKEN_LEN=${#TEROK_SSH_AGENT_TOKEN}
+
 # The nested socat connects to the TCP server, but we need to send the
-# token prefix before relaying.  Use printf piped into socat's stdin
-# concatenated with our own stdin (the SSH client data).
+# token handshake before relaying SSH agent traffic.
+# Length header: 4 bytes big-endian, then the token as ASCII.
 {
-  printf '\x00\x00\x00\x20%s' "${TEROK_SSH_AGENT_TOKEN}"
+  printf "\\x$(printf '%02x' $((TOKEN_LEN >> 24 & 0xFF)))"
+  printf "\\x$(printf '%02x' $((TOKEN_LEN >> 16 & 0xFF)))"
+  printf "\\x$(printf '%02x' $((TOKEN_LEN >> 8  & 0xFF)))"
+  printf "\\x$(printf '%02x' $((TOKEN_LEN       & 0xFF)))"
+  printf '%s' "${TEROK_SSH_AGENT_TOKEN}"
   cat
 } | socat - "TCP:host.containers.internal:${TEROK_SSH_AGENT_PORT}"
