@@ -71,13 +71,15 @@ their SDK supports:
 
 | Agent | How it reaches the proxy | Notes |
 |-------|-------------------------|-------|
-| **Claude** | `ANTHROPIC_BASE_URL=http://host.containers.internal:<proxy_port> (default: 18731)` | Anthropic SDK respects this env var |
-| **Codex** | `OPENAI_BASE_URL=http://host.containers.internal:18731` | OpenAI SDK respects this env var (deprecated in Codex v0.117, needs config.toml) |
+| **Claude** | `ANTHROPIC_BASE_URL=http://host.containers.internal:<port>` | Anthropic SDK respects this env var (default port: 18731) |
+| **Codex** | `OPENAI_BASE_URL=http://host.containers.internal:18731` | OpenAI SDK respects this env var |
 | **Vibe** | `config.toml` with `api_base` in shared `~/.vibe` mount | Mistral SDK ignores URL path in api_base, only uses host:port. Written by `shared_config_patch` in YAML |
 | **KISSKI** | `TEROK_OC_KISSKI_BASE_URL` env var override | OpenCode reads this; overridden from the real upstream to proxy |
 | **Blablador** | `TEROK_OC_BLABLADOR_BASE_URL` env var override | Same pattern as KISSKI |
 | **gh** | `http_unix_socket` in `~/.config/gh/config.yml` + socat bridge | gh routes ALL API traffic through a Unix socket. socat bridges it to TCP. See below. |
 | **glab** | `GITLAB_API_HOST` + `API_PROTOCOL=http` env vars | glab sends to `http://<api_host>/api/v4/...` |
+| **CodeRabbit** | `CODERABBIT_API_KEY` phantom env | Sidecar tool; runs in a separate L1 container with real API key from env_map |
+| **SonarCloud** | `SONAR_HOST_URL` + `SONAR_TOKEN` phantom env | Tool agent; scanner uses host URL override |
 
 ### gh: socat bridge pattern
 
@@ -177,28 +179,29 @@ After storing credentials, `write_proxy_config()` applies any
 
 ## Per-Provider Credential Extractors
 
-| Provider  | File               | Key fields                    |
-|-----------|--------------------|-------------------------------|
-| Claude    | `.credentials.json`| access_token, refresh_token   |
-| Codex     | `auth.json`        | access_token, refresh_token   |
-| Vibe      | `.env`             | key (MISTRAL_API_KEY)         |
-| Blablador | `config.json`      | key (api_key)                 |
-| KISSKI    | `config.json`      | key (api_key)                 |
-| gh        | `hosts.yml`        | token (oauth_token)           |
-| glab      | `config.yml`       | token (per-host)              |
+| Provider   | File                | Key fields                    |
+|------------|---------------------|-------------------------------|
+| Claude     | `.credentials.json` | access_token, refresh_token   |
+| Codex      | `auth.json`         | access_token, refresh_token   |
+| Vibe       | `.env`              | key (MISTRAL_API_KEY)         |
+| Blablador  | `config.json`       | key (api_key)                 |
+| KISSKI     | `config.json`       | key (api_key)                 |
+| gh         | `hosts.yml`         | token (oauth_token)           |
+| glab       | `config.yml`        | token (per-host)              |
+| CodeRabbit | —                   | API key via `--api-key`       |
+| SonarCloud | —                   | API key via `--api-key`       |
 
 ## Known Limitations
 
-- **Codex**: Needs WebSocket support (proxy only handles HTTP), OAuth token
-  refresh (Codex refreshes via `auth.openai.com`), and config.toml base URL
-  (env var deprecated in v0.117). Filed as bug issues.
+- **Codex**: Needs WebSocket support (proxy only handles HTTP) and OAuth
+  token refresh (Codex refreshes via `auth.openai.com`).
 
 - **OAuth token refresh**: Claude and Codex OAuth tokens expire (~1h). The
   proxy does not refresh them automatically. Re-auth required after expiry.
 
 - **Copilot**: Not proxied yet. No `credential_proxy` section in YAML.
 
-- **SSH keys**: Still bind-mounted as files. SSH agent proxy planned (#551).
+- **SSH keys**: Still bind-mounted as files. An SSH agent proxy is planned.
 
 ## Package Boundaries
 
