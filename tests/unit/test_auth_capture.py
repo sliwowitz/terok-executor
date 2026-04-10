@@ -318,6 +318,47 @@ class TestCaptureAppliesPostCaptureState:
         # No .claude.json should exist — post_capture_state is empty
         assert not (mounts / "_claude-config" / ".claude.json").exists()
 
+    def test_capture_degrades_to_warning_on_post_capture_error(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """Post-capture state failure logs a warning but doesn't abort capture."""
+        from terok_agent.credentials.auth import AuthProvider
+
+        provider = AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="../../escape",  # will trigger path traversal guard
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="",
+            modes=("api_key",),
+            post_capture_state={".claude.json": {"hasCompletedOnboarding": True}},
+        )
+
+        cred = {"claudeAiOauth": {"accessToken": "sk-test"}}
+        (tmp_path / ".credentials.json").write_text(json.dumps(cred))
+
+        mounts = tmp_path / "mounts"
+        db_path = tmp_path / "proxy" / "credentials.db"
+        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+            mock_cfg_cls.return_value.proxy_db_path = db_path
+            # Should NOT raise — error is caught and printed
+            _capture_credentials(
+                "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
+            )
+
+        err = capsys.readouterr().err
+        assert "Warning" in err
+        assert "post_capture_state" in err
+
+        # Verify credentials were still stored in the DB
+        from terok_sandbox import CredentialDB
+
+        db = CredentialDB(db_path)
+        stored = db.load_credential("default", "claude")
+        db.close()
+        assert stored is not None
+
 
 class TestCaptureWritesCredentialsFile:
     """Verify _capture_credentials writes .credentials.json for Claude OAuth."""

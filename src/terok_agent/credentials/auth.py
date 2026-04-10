@@ -376,11 +376,17 @@ def _capture_credentials(
 
     # Apply declarative post-capture state from roster YAML
     if auth_provider and auth_provider.post_capture_state:
-        _apply_post_capture_state(
-            auth_provider.host_dir_name,
-            auth_provider.post_capture_state,
-            mounts_base,
-        )
+        try:
+            _apply_post_capture_state(
+                auth_provider.host_dir_name,
+                auth_provider.post_capture_state,
+                mounts_base,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"Warning: could not apply post_capture_state for {provider_name}: {exc}",
+                file=sys.stderr,
+            )
 
 
 def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
