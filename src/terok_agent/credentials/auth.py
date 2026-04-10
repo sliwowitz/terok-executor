@@ -63,6 +63,14 @@ class AuthProvider:
     api_key_hint: str = ""
     """Hint shown when prompting for an API key (URL to get one)."""
 
+    post_capture_state: dict[str, dict] = field(default_factory=dict)
+    """JSON state files to write after credential capture.
+
+    Maps filename → key-value dict to merge into a JSON file in the auth
+    mount directory.  Example: ``{".claude.json": {"hasCompletedOnboarding": true}}``
+    marks Claude Code onboarding as complete so the first-run wizard is skipped.
+    """
+
     @property
     def supports_oauth(self) -> bool:
         """Whether this provider supports OAuth (container-based) auth."""
@@ -260,7 +268,13 @@ def _run_auth_container(
             return
 
         # Extract credentials from the temp dir and store in DB
-        _capture_credentials(provider.name, host_dir, credential_set, mounts_base=mounts_dir)
+        _capture_credentials(
+            provider.name,
+            host_dir,
+            credential_set,
+            mounts_base=mounts_dir,
+            auth_provider=provider,
+        )
 
 
 def _check_podman() -> None:
@@ -290,6 +304,7 @@ def _capture_credentials(
     auth_dir: Path,
     credential_set: str,
     mounts_base: Path | None = None,
+    auth_provider: AuthProvider | None = None,
 ) -> None:
     """Extract credentials from *auth_dir* and store in the credential DB.
 
@@ -359,6 +374,20 @@ def _capture_credentials(
             "\n      token never enters any container."
         )
 
+    # Apply declarative post-capture state from roster YAML
+    if auth_provider and auth_provider.post_capture_state:
+        try:
+            _apply_post_capture_state(
+                auth_provider.host_dir_name,
+                auth_provider.post_capture_state,
+                mounts_base,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"Warning: could not apply post_capture_state for {provider_name}: {exc}",
+                file=sys.stderr,
+            )
+
 
 def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
     """Write a static ``.credentials.json`` with subscription metadata.
@@ -368,6 +397,9 @@ def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
     exposing the real OAuth token.  ``accessToken`` is set to a dummy
     marker — actual API auth uses the per-task phantom token from the
     ``CLAUDE_CODE_OAUTH_TOKEN`` env var.
+
+    Onboarding state (``.claude.json`` / ``hasCompletedOnboarding``) is
+    applied separately via ``_apply_post_capture_state`` after capture.
     """
     import json
 
@@ -387,6 +419,51 @@ def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
     (claude_dir / ".credentials.json").write_text(
         json.dumps(creds, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def _apply_post_capture_state(
+    host_dir_name: str,
+    patches: dict[str, dict],
+    mounts_base: Path | None,
+) -> None:
+    """Apply ``post_capture_state`` after credential capture.
+
+    Merges key-value pairs into JSON files in the provider's auth mount
+    directory.  Declared in ``auth.post_capture_state`` in the agent YAML.
+    Takes resolved data directly — no roster lookup (avoids circular dep).
+    """
+    import json
+
+    if mounts_base is None:
+        from terok_agent.paths import mounts_dir
+
+        mounts_base = mounts_dir()
+
+    mounts_root = mounts_base.resolve()
+    host_rel = Path(host_dir_name)
+    if host_rel.is_absolute() or ".." in host_rel.parts:
+        raise ValueError(f"Invalid host_dir_name: {host_dir_name!r}")
+    target_dir = (mounts_root / host_rel).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for filename, patch in patches.items():
+        rel = Path(filename)
+        if rel.is_absolute() or ".." in rel.parts:
+            raise ValueError(f"Invalid post_capture_state filename: {filename!r}")
+        path = (target_dir / rel).resolve()
+        state: dict = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                state = loaded if isinstance(loaded, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                state = {}
+
+        if all(state.get(k) == v for k, v in patch.items()):
+            continue  # already up to date
+
+        state.update(patch)
+        path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
 def _api_key_command(cfg: AuthKeyConfig) -> list[str]:

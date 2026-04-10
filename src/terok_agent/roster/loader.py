@@ -561,6 +561,23 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
 
     modes = tuple(auth.get("modes", ("api_key",)))
 
+    raw_pcs = auth.get("post_capture_state", {})
+    if raw_pcs is None:
+        post_capture_state: dict[str, dict] = {}
+    elif isinstance(raw_pcs, dict):
+        post_capture_state = {}
+        for filename, patch in raw_pcs.items():
+            if not isinstance(filename, str) or not isinstance(patch, dict):
+                raise ValueError(
+                    f"Agent {name!r}: auth.post_capture_state must map filename -> mapping"
+                )
+            post_capture_state[filename] = patch
+    else:
+        raise ValueError(
+            f"Agent {name!r}: auth.post_capture_state must be a mapping, "
+            f"got {type(raw_pcs).__name__}"
+        )
+
     return AuthProvider(
         name=name,
         label=data.get("label", name),
@@ -571,6 +588,7 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
         extra_run_args=tuple(auth.get("extra_run_args", ())),
         modes=modes,
         api_key_hint=auth.get("api_key_hint", ""),
+        post_capture_state=post_capture_state,
     )
 
 

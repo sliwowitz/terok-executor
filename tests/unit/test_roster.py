@@ -194,6 +194,52 @@ class TestDeserializeAuth:
         result = _to_auth_provider("test", {"label": "Test"})
         assert result is None
 
+    def test_claude_post_capture_state(self) -> None:
+        """Claude YAML declares post_capture_state for onboarding."""
+        agents = _load_bundled_agents()
+        ap = _to_auth_provider("claude", agents["claude"])
+        assert ap.post_capture_state == {".claude.json": {"hasCompletedOnboarding": True}}
+
+    def test_post_capture_state_rejects_non_dict_root(self) -> None:
+        """Loader rejects post_capture_state that is not a mapping."""
+        import pytest
+
+        data = {
+            "auth": {
+                "host_dir": "_x",
+                "container_mount": "/x",
+                "post_capture_state": "invalid",
+            },
+        }
+        with pytest.raises(ValueError, match="must be a mapping"):
+            _to_auth_provider("test", data)
+
+    def test_post_capture_state_rejects_non_dict_value(self) -> None:
+        """Loader rejects post_capture_state with a non-dict value."""
+        import pytest
+
+        data = {
+            "auth": {
+                "host_dir": "_x",
+                "container_mount": "/x",
+                "post_capture_state": {".foo.json": "not-a-dict"},
+            },
+        }
+        with pytest.raises(ValueError, match="must map filename -> mapping"):
+            _to_auth_provider("test", data)
+
+    def test_post_capture_state_none_coerced_to_empty(self) -> None:
+        """YAML null for post_capture_state is coerced to empty dict."""
+        data = {
+            "auth": {
+                "host_dir": "_x",
+                "container_mount": "/x",
+                "post_capture_state": None,
+            },
+        }
+        ap = _to_auth_provider("test", data)
+        assert ap.post_capture_state == {}
+
 
 # ---------------------------------------------------------------------------
 # Full registry

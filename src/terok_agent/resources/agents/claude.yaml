@@ -64,3 +64,6 @@ auth:
     Claude will guide you through authentication (OAuth or API key).
     After completing auth, exit Claude with /exit or Ctrl+C.
   api_key_hint: "Get your API key at: https://console.anthropic.com/settings/keys"
+  post_capture_state:               # JSON state merged into auth mount after capture
+    .claude.json:
+      hasCompletedOnboarding: true
