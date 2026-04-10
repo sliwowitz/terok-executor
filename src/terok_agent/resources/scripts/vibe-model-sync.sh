@@ -2,6 +2,7 @@
 
 # SPDX-FileCopyrightText: 2025-2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Mistral Model Sync Wrapper Script
 # This script is designed to be called from bashrc to check for new Mistral models

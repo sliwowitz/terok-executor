@@ -2,6 +2,7 @@
 
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Relay between an SSH agent client (via socat SYSTEM: stdin/stdout) and
 # the host-side SSH agent proxy over TCP, injecting the phantom token

@@ -2,6 +2,7 @@
 
 # SPDX-FileCopyrightText: 2025-2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Setup port forwarding for codex auth (port 1455)
 # This script configures port forwarding for OAuth callbacks using socat.

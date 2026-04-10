@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 //
 // SPDX-License-Identifier: Apache-2.0
+// terok:container — this file is deployed into task containers, not used on the host.
 
 // OpenCode plugin that captures the session ID for terok session resume.
 // Writes the session ID to the path specified in TEROK_SESSION_FILE env var.

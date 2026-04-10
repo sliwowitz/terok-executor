@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 #
 # Update all updatable packages inside a terok CLI container.
 # Designed to be run with sudo inside a running container when you want

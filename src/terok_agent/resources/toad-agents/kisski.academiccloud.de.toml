@@ -1,3 +1,5 @@
+# terok:container — this file is deployed into task containers, not used on the host.
+
 identity = "kisski.academiccloud.de"
 name = "KISSKI"
 short_name = "kisski"

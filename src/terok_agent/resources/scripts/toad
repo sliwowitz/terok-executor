@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-FileCopyrightText: 2026 Andreas Knüpfer
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Toad launcher wrapper.
 # Seeds launcher.agents into toad.json before exec-ing the real binary.

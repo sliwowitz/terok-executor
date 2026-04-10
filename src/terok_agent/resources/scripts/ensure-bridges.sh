@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Idempotent socat bridge launcher for container ↔ host-side credential proxy.
 #

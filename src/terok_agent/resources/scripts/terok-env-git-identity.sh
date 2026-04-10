@@ -2,6 +2,7 @@
 
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # Git identity helper for terok task containers (sourced by terok-env.sh).
 #

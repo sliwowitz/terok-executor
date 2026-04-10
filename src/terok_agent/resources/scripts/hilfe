@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-FileCopyrightText: 2026 Andreas Knüpfer
 # SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
 
 # terok container help banner. Called on login as:
 #   _TEROK_LOGIN=1 hilfe --kurz
@@ -35,7 +36,7 @@ _terok_agents() {
     printf '  \033[36mvibe\033[0m       - Mistral Vibe CLI\n'
     printf '  \033[36mblablador\033[0m  - OpenCode with Helmholtz Blablador\n'
     printf '  \033[36mkisski\033[0m     - OpenCode with KISSKI\n'
-    printf '  \033[36mopencode\033[0m   - OpenCode CLI (\033[2mterokctl config import-opencode\033[0m)\n'
+    printf '  \033[36mopencode\033[0m   - OpenCode CLI (\033[2mterok config import-opencode\033[0m)\n'
     printf '  \033[36mblablatoad\033[0m - Blablador via Toad ACP\n'
     printf '  \033[36mkisskitoad\033[0m  - KISSKI via Toad ACP\n'
     printf '  \033[36mtoad\033[0m       - Multi-agent TUI (ACP)\n'
@@ -54,9 +55,9 @@ _terok_notes() {
     printf '  - agent CLI commands above are terok wrappers with git/session defaults\n'
     printf '  - \033[36msudo update-all-the-things\033[0m updates system packages and agent installs\n'
     printf '    in this running container only\n'
-    printf '  - host/TUI: \033[36mRebuild from L1 with fresh agents\033[0m / \033[36mterokctl build --agents <project>\033[0m\n'
+    printf '  - host/TUI: \033[36mRebuild from L1 with fresh agents\033[0m / \033[36mterok build --agents <project>\033[0m\n'
     printf '    refreshes agent installs for new containers only\n'
-    printf '  - host/TUI: \033[36mRebuild from L0 (no cache)\033[0m / \033[36mterokctl build --full-rebuild <project>\033[0m\n'
+    printf '  - host/TUI: \033[36mRebuild from L0 (no cache)\033[0m / \033[36mterok build --full-rebuild <project>\033[0m\n'
     printf '    refreshes the base image + apt packages for new containers only\n'
     printf '  - tmux inside the container uses \033[36m^a\033[0m; host tmux usually uses \033[36m^b\033[0m\n'
     printf '  - the container is disposable; \033[36msudo\033[0m works without a password\n'
