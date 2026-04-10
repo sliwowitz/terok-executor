@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for terok_agent.paths — umbrella directory resolution."""
+"""Tests for terok_agent.paths — namespace directory resolution."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from terok_agent import paths
 
 
 class TestStateRoot:
-    """Verify ``state_root()`` resolution via sandbox umbrella resolver."""
+    """Verify ``state_root()`` resolution via sandbox namespace resolver."""
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """TEROK_AGENT_STATE_DIR takes first priority."""
@@ -61,8 +61,8 @@ class TestMountsDir:
         assert paths.mounts_dir() == tmp_path / "mounts"
 
 
-class TestUmbrellaConstants:
-    """Verify umbrella namespace constants."""
+class TestNamespaceConstants:
+    """Verify namespace constants."""
 
     def test_subdir_is_agent(self) -> None:
         """_SUBDIR is 'agent'."""

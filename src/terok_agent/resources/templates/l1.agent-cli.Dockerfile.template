@@ -56,7 +56,7 @@ RUN mkdir -p /etc/claude-code && chown dev:dev /etc/claude-code
 #   - terok-env-git-identity.sh  — _terok_apply_git_identity() function
 #   - terok-env-wrappers.sh      — per-task agent CLI wrappers (symlink to mount)
 # The COPY here sets up the wiring; the script is also refreshed below the
-# cache bust point so `terokctl build --agents` picks up content changes.
+# cache bust point so `terok build --agents` picks up content changes.
 COPY scripts/terok-env.sh /etc/profile.d/terok-env.sh
 RUN chmod +x /etc/profile.d/terok-env.sh; \
     if [ -f /etc/bash.bashrc ]; then \
