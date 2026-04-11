@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from terok_sandbox import SandboxConfig
 
     from terok_agent.credentials.auth import AuthProvider
-    from terok_agent.provider.headless import HeadlessProvider, OpenCodeProviderConfig
+    from terok_agent.provider.providers import AgentProvider, OpenCodeProviderConfig
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -137,7 +137,7 @@ class AgentRoster:
     Provides the same query API as the legacy hardcoded dicts.
     """
 
-    _providers: dict[str, HeadlessProvider] = field(default_factory=dict)
+    _providers: dict[str, AgentProvider] = field(default_factory=dict)
     _auth_providers: dict[str, AuthProvider] = field(default_factory=dict)
     _proxy_routes: dict[str, CredentialProxyRoute] = field(default_factory=dict)
     _sidecar_specs: dict[str, SidecarSpec] = field(default_factory=dict)
@@ -148,7 +148,7 @@ class AgentRoster:
     # ── Properties ──
 
     @property
-    def providers(self) -> dict[str, HeadlessProvider]:
+    def providers(self) -> dict[str, AgentProvider]:
         """All headless agent providers (``kind: agent`` only)."""
         return dict(self._providers)
 
@@ -188,20 +188,15 @@ class AgentRoster:
 
     # ── Keyed lookups ──
 
-    def get_provider(
-        self, name: str | None, *, default_agent: str | None = None
-    ) -> HeadlessProvider:
-        """Resolve a provider name to a ``HeadlessProvider``.
+    def get_provider(self, name: str | None, *, default_agent: str | None = None) -> AgentProvider:
+        """Resolve a provider name to an ``AgentProvider``.
 
         Falls back to *default_agent*, then ``"claude"``.
         Raises ``SystemExit`` if the resolved name is unknown.
         """
-        resolved = name or default_agent or "claude"
-        provider = self._providers.get(resolved)
-        if provider is None:
-            valid = ", ".join(sorted(self._providers))
-            raise SystemExit(f"Unknown headless provider {resolved!r}. Valid providers: {valid}")
-        return provider
+        from terok_agent.provider.providers import get_provider
+
+        return get_provider(name, default_agent=default_agent)
 
     def get_auth_provider(self, name: str) -> AuthProvider:
         """Look up an auth provider by name.
@@ -301,7 +296,7 @@ def load_roster() -> AgentRoster:
         else:
             raw[name] = user_data
 
-    providers: dict[str, HeadlessProvider] = {}
+    providers: dict[str, AgentProvider] = {}
     auth_providers: dict[str, AuthProvider] = {}
     proxy_routes: dict[str, CredentialProxyRoute] = {}
     sidecar_specs: dict[str, SidecarSpec] = {}
@@ -316,11 +311,11 @@ def load_roster() -> AgentRoster:
         if kind != "runtime":
             all_names.append(name)
 
-        # Agent kinds (native, opencode, bridge) get a HeadlessProvider;
+        # Agent kinds (native, opencode, bridge) get a AgentProvider;
         # tools and runtime entries only contribute auth/mounts.
         if kind not in ("tool", "runtime"):
             agent_names.append(name)
-            providers[name] = _to_headless_provider(name, data)
+            providers[name] = _to_agent_provider(name, data)
 
         # Auth: explicit auth section, or auto-derived from opencode config
         auth_prov = _to_auth_provider(name, data)
@@ -477,7 +472,7 @@ def _load_user_agents() -> dict[str, dict]:
 
 def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
     """Deserialize the ``opencode:`` YAML section."""
-    from terok_agent.provider.headless import OpenCodeProviderConfig
+    from terok_agent.provider.providers import OpenCodeProviderConfig
 
     return OpenCodeProviderConfig(
         display_name=data["display_name"],
@@ -490,9 +485,9 @@ def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
     )
 
 
-def _to_headless_provider(name: str, data: dict) -> HeadlessProvider:
-    """Deserialize a full agent YAML dict into a ``HeadlessProvider``."""
-    from terok_agent.provider.headless import HeadlessProvider
+def _to_agent_provider(name: str, data: dict) -> AgentProvider:
+    """Deserialize a full agent YAML dict into an ``AgentProvider``."""
+    from terok_agent.provider.providers import AgentProvider
 
     hl = data.get("headless", {})
     aa = data.get("auto_approve", {})
@@ -503,7 +498,7 @@ def _to_headless_provider(name: str, data: dict) -> HeadlessProvider:
     oc_data = data.get("opencode")
     oc = _to_opencode_config(oc_data) if oc_data else None
 
-    return HeadlessProvider(
+    return AgentProvider(
         name=name,
         label=data.get("label", name),
         binary=data.get("binary", name),

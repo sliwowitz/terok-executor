@@ -17,7 +17,7 @@ from pathlib import Path
 
 from terok_agent._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
 
-from .headless import WrapperConfig
+from .wrappers import WrapperConfig
 
 # TODO: future — support global agent definitions in terok-config.yml (agent.subagents).
 # When implemented, global subagents would be merged with per-project subagents before
@@ -95,7 +95,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Returns the agent_config_dir path.
     """
-    from .headless import get_provider as _get_provider
+    from .providers import get_provider as _get_provider
 
     resolved = _get_provider(spec.provider, default_agent=spec.default_agent)
 
@@ -132,13 +132,13 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     # Inject instructions path into opencode.json configs on the host so
     # all OpenCode-based providers discover them natively (works for both
     # interactive and headless modes).
-    from .headless import HEADLESS_PROVIDERS
+    from .providers import AGENT_PROVIDERS
 
     mounts_base = spec.mounts_base
     if mounts_base is None:
         raise ValueError("mounts_base is required in AgentConfigSpec")
     _inject_opencode_instructions(mounts_base / "_opencode-config" / "opencode.json")
-    for _p in HEADLESS_PROVIDERS.values():
+    for _p in AGENT_PROVIDERS.values():
         if _p.opencode_config is not None:
             _inject_opencode_instructions(
                 mounts_base / f"_{_p.name}-config" / "opencode" / "opencode.json"
@@ -146,7 +146,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     # Write shell wrapper functions for ALL providers so interactive CLI users
     # can invoke any agent (each provider gets its own shell function).
-    from .headless import generate_all_wrappers
+    from .wrappers import generate_all_wrappers
 
     def _claude_wrapper_with_instructions(cfg: WrapperConfig) -> str:
         """Wrap _generate_claude_wrapper with the resolved has_instructions flag."""

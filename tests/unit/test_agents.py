@@ -20,7 +20,7 @@ from terok_agent.provider.agents import (
     parse_md_agent,
     prepare_agent_config_dir,
 )
-from terok_agent.provider.headless import WrapperConfig
+from terok_agent.provider.wrappers import WrapperConfig
 from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,

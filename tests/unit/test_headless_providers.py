@@ -10,14 +10,18 @@ import pytest
 from terok_agent.provider.agents import _generate_claude_wrapper
 from terok_agent.provider.config import resolve_provider_value
 from terok_agent.provider.headless import (
-    HEADLESS_PROVIDERS,
-    PROVIDER_NAMES,
     apply_provider_config,
     build_headless_command,
+)
+from terok_agent.provider.providers import (
+    AGENT_PROVIDERS,
+    PROVIDER_NAMES,
     collect_all_auto_approve_env,
+    get_provider,
+)
+from terok_agent.provider.wrappers import (
     generate_agent_wrapper,
     generate_all_wrappers,
-    get_provider,
 )
 from tests.constants import CONTAINER_TEROK_DIR
 
@@ -30,7 +34,7 @@ def _provider_wrapper(
     """Generate a wrapper for a provider under test."""
     kwargs = {"claude_wrapper_fn": _generate_claude_wrapper} if name == "claude" else {}
     return generate_agent_wrapper(
-        HEADLESS_PROVIDERS[name],
+        AGENT_PROVIDERS[name],
         has_agents=has_agents,
         **kwargs,
     )
@@ -44,22 +48,22 @@ def _all_wrappers(*, has_agents: bool = False) -> str:
     )
 
 
-class TestHeadlessProviderRegistry:
-    """Tests for the HEADLESS_PROVIDERS registry."""
+class TestAgentProviderRegistry:
+    """Tests for the AGENT_PROVIDERS registry."""
 
     def test_all_seven_providers_exist(self) -> None:
         """Registry contains exactly the seven expected providers."""
         expected = {"claude", "codex", "copilot", "vibe", "blablador", "opencode", "kisski"}
-        assert set(HEADLESS_PROVIDERS.keys()) == expected
+        assert set(AGENT_PROVIDERS.keys()) == expected
 
     def test_provider_names_tuple(self) -> None:
         """PROVIDER_NAMES is a tuple matching registry keys."""
         assert isinstance(PROVIDER_NAMES, tuple)
-        assert set(PROVIDER_NAMES) == set(HEADLESS_PROVIDERS.keys())
+        assert set(PROVIDER_NAMES) == set(AGENT_PROVIDERS.keys())
 
     def test_providers_are_frozen(self) -> None:
-        """HeadlessProvider instances are immutable."""
-        provider = HEADLESS_PROVIDERS["claude"]
+        """AgentProvider instances are immutable."""
+        provider = AGENT_PROVIDERS["claude"]
         with pytest.raises(FrozenInstanceError):
             provider.name = "changed"  # type: ignore[misc]
 
@@ -94,7 +98,7 @@ class TestBuildHeadlessCommand:
 
     def test_all_commands_start_with_init(self) -> None:
         """All provider commands start with init-ssh-and-repo.sh."""
-        for _name, p in HEADLESS_PROVIDERS.items():
+        for _name, p in AGENT_PROVIDERS.items():
             cmd = build_headless_command(p, timeout=1800)
             assert cmd.startswith("init-ssh-and-repo.sh")
 
@@ -110,13 +114,13 @@ class TestGenerateAgentWrapper:
 
     def test_claude_wrapper_requires_fn(self) -> None:
         """Claude provider without claude_wrapper_fn raises ValueError."""
-        p = HEADLESS_PROVIDERS["claude"]
+        p = AGENT_PROVIDERS["claude"]
         with pytest.raises(ValueError):
             generate_agent_wrapper(p, has_agents=False)
 
     def test_generic_wrapper_has_timeout_support(self) -> None:
         """All non-Claude wrappers support --terok-timeout."""
-        for name in HEADLESS_PROVIDERS:
+        for name in AGENT_PROVIDERS:
             if name == "claude":
                 continue
             wrapper = _provider_wrapper(name)
@@ -125,10 +129,24 @@ class TestGenerateAgentWrapper:
     def test_session_resume_uses_explicit_id(self) -> None:
         """Providers with session_file use --session/--resume with explicit ID."""
         for name in ("vibe", "opencode", "blablador", "kisski"):
-            p = HEADLESS_PROVIDERS[name]
+            p = AGENT_PROVIDERS[name]
             wrapper = _provider_wrapper(name)
             assert p.resume_flag in wrapper, f"{name} missing resume flag"
             assert f"cat {CONTAINER_TEROK_DIR}/{p.session_file}" in wrapper
+
+    def test_vibe_wrapper_has_lazy_model_sync(self) -> None:
+        """Vibe wrapper includes lazy Mistral model sync with mtime check."""
+        wrapper = _provider_wrapper("vibe")
+        assert "vibe-model-sync" in wrapper
+        assert "mmin +1440" in wrapper
+
+    def test_non_vibe_wrappers_lack_model_sync(self) -> None:
+        """Only vibe gets the model sync block."""
+        for name in AGENT_PROVIDERS:
+            if name in ("claude", "vibe"):
+                continue
+            wrapper = _provider_wrapper(name)
+            assert "vibe-model-sync" not in wrapper, f"{name} should not have model sync"
 
 
 class TestResolveProviderValue:
@@ -161,19 +179,19 @@ class TestApplyProviderConfig:
 
     def test_model_from_config(self) -> None:
         """Model value is read from config when no CLI override."""
-        p = HEADLESS_PROVIDERS["claude"]
+        p = AGENT_PROVIDERS["claude"]
         pcfg = apply_provider_config(p, {"model": "opus"})
         assert pcfg.model == "opus"
 
     def test_timeout_default(self) -> None:
         """Missing timeout defaults to 1800."""
-        p = HEADLESS_PROVIDERS["claude"]
+        p = AGENT_PROVIDERS["claude"]
         pcfg = apply_provider_config(p, {})
         assert pcfg.timeout == 1800
 
     def test_max_turns_unsupported_injects_prompt(self) -> None:
         """Provider without max_turns_flag gets prompt injection + warning."""
-        p = HEADLESS_PROVIDERS["codex"]
+        p = AGENT_PROVIDERS["codex"]
         pcfg = apply_provider_config(p, {"max_turns": 30})
         assert pcfg.max_turns is None
         assert "30 steps" in pcfg.prompt_extra
@@ -185,7 +203,7 @@ class TestGenerateAllWrappers:
     def test_all_providers_in_output(self) -> None:
         """Output contains wrapper functions for all providers."""
         wrapper = _all_wrappers()
-        for name, p in HEADLESS_PROVIDERS.items():
+        for name, p in AGENT_PROVIDERS.items():
             assert f"{p.binary}()" in wrapper, f"Missing wrapper for {name}"
 
     def test_all_wrappers_valid_bash_syntax(self) -> None:

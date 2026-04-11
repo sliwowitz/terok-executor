@@ -53,7 +53,7 @@ depends_on = [
     "terok_agent._util",
     "terok_agent.credentials.auth",
     "terok_agent.roster.config_stack",
-    "terok_agent.provider.headless",
+    "terok_agent.provider.providers",
 ]
 
 # Roster package waypoint (re-exports from loader)
@@ -70,11 +70,24 @@ depends_on = [
 path = "terok_agent.provider.config"
 depends_on = []
 
-# Headless provider registry + dispatch
+# Agent provider definitions + registry
+[[modules]]
+path = "terok_agent.provider.providers"
+depends_on = []
+
+# Shell wrapper generation
+[[modules]]
+path = "terok_agent.provider.wrappers"
+depends_on = [
+    "terok_agent.provider.providers",
+]
+
+# Headless command construction + config resolution
 [[modules]]
 path = "terok_agent.provider.headless"
 depends_on = [
     "terok_agent.provider.config",
+    "terok_agent.provider.providers",
 ]
 
 # Instruction resolution
@@ -89,7 +102,8 @@ depends_on = [
 path = "terok_agent.provider.agents"
 depends_on = [
     "terok_agent._util",
-    "terok_agent.provider.headless",
+    "terok_agent.provider.providers",
+    "terok_agent.provider.wrappers",
 ]
 
 # ── container/ — container lifecycle ────────────────────────────────
@@ -195,6 +209,7 @@ depends_on = [
     "terok_agent.provider.config",
     "terok_agent.provider.headless",
     "terok_agent.provider.instructions",
+    "terok_agent.provider.providers",
     "terok_agent.roster",
     "terok_agent.roster.config_stack",
 ]

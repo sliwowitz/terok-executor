@@ -2,37 +2,18 @@
 # SPDX-FileCopyrightText: 2026 Andreas Knüpfer
 # SPDX-License-Identifier: Apache-2.0
 
-"""Dispatches headless AI agent runs across multiple providers.
+"""Headless (autopilot) command construction and config resolution.
 
-Resolves the active provider, builds the headless CLI command, and generates
-per-provider shell wrappers.  Each provider is a frozen dataclass; the
-``HEADLESS_PROVIDERS`` registry maps names to descriptors.
-
-Instruction delivery
-~~~~~~~~~~~~~~~~~~~~
-Custom instructions are delivered via a provider-specific channel:
-
-- **Claude**: ``--append-system-prompt`` flag (injected by the wrapper).
-- **Codex**: ``model_instructions_file`` config (``-c`` flag in the wrapper).
-- **OpenCode / Blablador / KISSKI**: ``"instructions"`` array in ``opencode.json``
-  pointing to ``/home/dev/.terok/instructions.md`` (injected on the host by
-  :func:`~terok.lib.instrumentation.agents._inject_opencode_instructions`).
-- **Other providers** (Copilot, Vibe, …): best-effort prompt prepending
-  via ``prompt_extra`` in :class:`ProviderConfig`.
-
-The instructions file is always written (with a neutral default when no
-custom text is configured) so that config-file references never dangle.
+Provider definitions live in :mod:`providers`, shell wrapper generation
+lives in :mod:`wrappers`.
 """
 
 from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
+from .providers import AgentProvider
 
 # ── Dataclasses / types ─────────────────────────────────────────────────────
 
@@ -77,197 +58,11 @@ class CLIOverrides:
     """Resolved instructions text. Delivery is provider-aware."""
 
 
-@dataclass(frozen=True)
-class WrapperConfig:
-    """Groups parameters for generating the Claude shell wrapper."""
-
-    has_agents: bool
-    has_instructions: bool = False
-
-
-@dataclass(frozen=True)
-class OpenCodeProviderConfig:
-    """Immutable descriptor for an OpenCode-based provider wrapper."""
-
-    display_name: str
-    """Human-readable display name (e.g., 'Helmholtz Blablador')."""
-
-    base_url: str
-    """Base URL for the OpenAI-compatible API (e.g., 'https://api.helmholtz-blablador.fz-juelich.de/v1')."""
-
-    preferred_model: str
-    """Preferred model ID (e.g., 'alias-huge')."""
-
-    fallback_model: str
-    """Fallback model ID if preferred is unavailable (e.g., 'alias-code')."""
-
-    env_var_prefix: str
-    """Environment variable prefix for API key (e.g., 'BLABLADOR' → BLABLADOR_API_KEY)."""
-
-    config_dir: str
-    """Configuration directory name (e.g., '.blablador')."""
-
-    auth_key_url: str
-    """URL where users can obtain API keys for documentation."""
-
-    def to_env(self, name: str) -> dict[str, str]:
-        """Return env vars for container injection, keyed by TEROK_OC_{NAME}_*."""
-        prefix = f"TEROK_OC_{name.upper()}_"
-        return {
-            f"{prefix}BASE_URL": self.base_url,
-            f"{prefix}PREFERRED_MODEL": self.preferred_model,
-            f"{prefix}FALLBACK_MODEL": self.fallback_model,
-            f"{prefix}DISPLAY_NAME": self.display_name,
-            f"{prefix}ENV_VAR_PREFIX": self.env_var_prefix,
-            f"{prefix}CONFIG_DIR": self.config_dir,
-        }
-
-
-@dataclass(frozen=True)
-class HeadlessProvider:
-    """Describes how to run one AI agent in headless (autopilot) mode."""
-
-    name: str
-    """Short key used in CLI dispatch (e.g. ``"claude"``, ``"codex"``)."""
-
-    label: str
-    """Human-readable display name (e.g. ``"Claude"``, ``"Codex"``)."""
-
-    binary: str
-    """CLI binary name (e.g. ``"claude"``, ``"codex"``, ``"opencode"``)."""
-
-    git_author_name: str
-    """AI identity name for Git author/committer policy application."""
-
-    git_author_email: str
-    """AI identity email for Git author/committer policy application."""
-
-    # -- Headless command construction --
-
-    headless_subcommand: str | None
-    """Subcommand for headless mode (e.g. ``"exec"`` for codex, ``"run"`` for opencode).
-
-    ``None`` means the binary uses flags only (e.g. ``claude -p``).
-    """
-
-    prompt_flag: str
-    """Flag for passing the prompt.
-
-    ``"-p"`` for flag-based, ``""`` for positional (after subcommand).
-    """
-
-    auto_approve_env: dict[str, str]
-    """Environment variables for fully autonomous execution.
-
-    Injected into the container env by ``_apply_unrestricted_env()`` when
-    ``TEROK_UNRESTRICTED=1``.  Read by agents regardless of launch path.
-    Claude uses ``/etc/claude-code/managed-settings.json`` instead.
-    """
-
-    auto_approve_flags: tuple[str, ...]
-    """CLI flags injected by the shell wrapper when ``TEROK_UNRESTRICTED=1``.
-
-    Only for agents that lack an env var or managed config mechanism
-    (currently Codex only).  Empty for all other agents — their env vars
-    and ``/etc/`` config files handle permissions across all launch paths.
-    """
-
-    output_format_flags: tuple[str, ...]
-    """Flags for structured output (e.g. ``("--output-format", "stream-json")``)."""
-
-    model_flag: str | None
-    """Flag for model override (``"--model"``, ``"--agent"``, or ``None``)."""
-
-    max_turns_flag: str | None
-    """Flag for maximum turns (``"--max-turns"`` or ``None``)."""
-
-    verbose_flag: str | None
-    """Flag for verbose output (``"--verbose"`` or ``None``)."""
-
-    # -- Session support --
-
-    supports_session_resume: bool
-    """Whether the provider supports resuming a previous session."""
-
-    resume_flag: str | None
-    """Flag to resume a session (e.g. ``"--resume"``, ``"--session"``)."""
-
-    continue_flag: str | None
-    """Flag to continue a session (e.g. ``"--continue"``)."""
-
-    session_file: str | None
-    """Filename in ``/home/dev/.terok/`` for stored session ID.
-
-    Providers that capture session IDs via plugin or post-run parsing set this
-    to a filename (e.g. ``"opencode-session.txt"``).  Providers with their own
-    hook mechanism (Claude) or no session support set this to ``None``.
-    """
-
-    # -- Claude-specific capabilities --
-
-    supports_agents_json: bool
-    """Whether the provider supports ``--agents`` JSON (Claude only)."""
-
-    supports_session_hook: bool
-    """Whether the provider supports SessionStart hooks (Claude only)."""
-
-    supports_add_dir: bool
-    """Whether the provider supports ``--add-dir "/"`` (Claude only)."""
-
-    # -- Log formatting --
-
-    log_format: str
-    """Log format identifier: ``"claude-stream-json"`` or ``"plain"``."""
-
-    opencode_config: OpenCodeProviderConfig | None = None
-    """Configuration for OpenCode-based providers (Blablador, KISSKI, etc.).
-
-    When set, this provider uses OpenCode with a custom OpenAI-compatible API.
-    The configuration includes API endpoints, model preferences, and provider-specific
-    settings that are injected into the container environment.
-    """
-
-    @property
-    def uses_opencode_instructions(self) -> bool:
-        """Whether the provider uses OpenCode's instruction system."""
-        return self.opencode_config is not None or self.name == "opencode"
-
-
-# ── Constants ────────────────────────────────────────────────────────────────
-
-# ---------------------------------------------------------------------------
-# Provider registry — populated from YAML by __init__.py at package load time
-# ---------------------------------------------------------------------------
-
-HEADLESS_PROVIDERS: dict[str, HeadlessProvider] = {}
-"""All headless agent providers, keyed by name.  Loaded from ``resources/agents/*.yaml``."""
-
-PROVIDER_NAMES: tuple[str, ...] = ()
-
-
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
-def get_provider(name: str | None, *, default_agent: str | None = None) -> HeadlessProvider:
-    """Resolve a provider name to a ``HeadlessProvider``.
-
-    Resolution order:
-      1. Explicit *name* if given
-      2. *default_agent* (from project config)
-      3. ``"claude"`` (ultimate fallback)
-
-    Raises ``SystemExit`` if the resolved name is not in the registry.
-    """
-    resolved = name or default_agent or "claude"
-    provider = HEADLESS_PROVIDERS.get(resolved)
-    if provider is None:
-        valid = ", ".join(sorted(HEADLESS_PROVIDERS))
-        raise SystemExit(f"Unknown headless provider {resolved!r}. Valid providers: {valid}")
-    return provider
-
-
 def apply_provider_config(
-    provider: HeadlessProvider,
+    provider: AgentProvider,
     config: dict,
     overrides: CLIOverrides | None = None,
 ) -> ProviderConfig:
@@ -351,7 +146,7 @@ def apply_provider_config(
 
 
 def build_headless_command(
-    provider: HeadlessProvider,
+    provider: AgentProvider,
     *,
     timeout: int,
     model: str | None = None,
@@ -371,106 +166,11 @@ def build_headless_command(
     return _build_generic_command(provider, timeout=timeout, model=model, max_turns=max_turns)
 
 
-def collect_all_auto_approve_env() -> dict[str, str]:
-    """Collect ``auto_approve_env`` from all providers into one dict.
-
-    Used by task runners to inject these env vars at the container level
-    (not just inside shell wrappers) so that ACP-spawned agents also
-    inherit unrestricted permissions.
-    """
-    merged: dict[str, str] = {}
-    for p in HEADLESS_PROVIDERS.values():
-        for key, value in p.auto_approve_env.items():
-            if key in merged and merged[key] != value:
-                raise ValueError(
-                    f"Conflicting auto_approve_env for {key!r}: "
-                    f"{merged[key]!r} vs {value!r} (provider {p.name!r})"
-                )
-            merged[key] = value
-    return merged
-
-
-def collect_opencode_provider_env() -> dict[str, str]:
-    """Collect environment variables for all OpenCode-based providers.
-
-    Returns a dictionary of environment variables that will be injected into containers
-    to configure OpenCode-based providers. Each provider with opencode_config set
-    contributes variables prefixed with TEROK_OC_{PROVIDER_NAME}_*.
-    """
-    env: dict[str, str] = {}
-    for provider in HEADLESS_PROVIDERS.values():
-        if provider.opencode_config is not None:
-            env.update(provider.opencode_config.to_env(provider.name))
-    return env
-
-
-def generate_agent_wrapper(
-    provider: HeadlessProvider,
-    has_agents: bool,
-    *,
-    claude_wrapper_fn: Callable[[WrapperConfig], str] | None = None,
-) -> str:
-    """Generate the shell wrapper function content for a single provider.
-
-    For Claude, uses *claude_wrapper_fn* (which should be
-    ``agents._generate_claude_wrapper``) to produce the full wrapper with
-    ``--add-dir /``, ``--agents``, and session resume support.  The function is passed in by the caller to
-    avoid a circular import between this module and ``agents``.
-
-    For other providers, produces a simpler wrapper that sets git env vars
-    and delegates to the binary.  Instructions are delivered via
-    ``opencode.json`` (OpenCode/Blablador), ``model_instructions_file``
-    (Codex), or ``--append-system-prompt`` (Claude) — not via the wrapper.
-
-    Args:
-        claude_wrapper_fn: ``(cfg: WrapperConfig) -> str``.
-            Required when ``provider.name == "claude"``.
-
-    See also :func:`generate_all_wrappers` which produces wrappers for every
-    registered provider in one file.
-    """
-    if provider.name == "claude":
-        if claude_wrapper_fn is None:
-            raise ValueError("claude_wrapper_fn is required for Claude provider")
-        return claude_wrapper_fn(WrapperConfig(has_agents=has_agents))
-
-    return _generate_generic_wrapper(provider)
-
-
-def generate_all_wrappers(
-    has_agents: bool,
-    *,
-    claude_wrapper_fn: Callable[[WrapperConfig], str] | None = None,
-) -> str:
-    """Generate shell wrappers for **all** registered providers in one file.
-
-    The output file contains a shell function per provider (``claude()``,
-    ``codex()``, ``vibe()``, etc.), each with correct git env vars, timeout
-    support, and session resume logic.  This allows interactive CLI users to
-    invoke any agent regardless of which provider was configured as default.
-
-    A shared ``_terok_resume_or_fresh`` helper is emitted at the top of the
-    file for stale-session fallback (see :data:`_RESUME_FALLBACK_FN`).
-
-    Args:
-        claude_wrapper_fn: Required — produces the Claude wrapper.
-    """
-    sections: list[str] = [_RESUME_FALLBACK_FN]
-    for provider in HEADLESS_PROVIDERS.values():
-        section = generate_agent_wrapper(
-            provider,
-            has_agents,
-            claude_wrapper_fn=claude_wrapper_fn,
-        )
-        sections.append(section)
-    return "\n".join(sections)
-
-
 # ── Private helpers ──────────────────────────────────────────────────────────
 
 
 def _build_claude_command(
-    provider: HeadlessProvider,
+    provider: AgentProvider,
     *,
     timeout: int,
     model: str | None,
@@ -495,7 +195,7 @@ def _build_claude_command(
 
 
 def _build_generic_command(
-    provider: HeadlessProvider,
+    provider: AgentProvider,
     *,
     timeout: int,
     model: str | None,
@@ -520,8 +220,8 @@ def _build_generic_command(
     if provider.headless_subcommand:
         parts.append(provider.headless_subcommand)
 
-    # Auto-approve flags are injected by the wrapper function based on
-    # TEROK_UNRESTRICTED env var — not here.  See _generate_generic_wrapper().
+    # Auto-approve flags are injected by the shell wrapper (wrappers.py)
+    # based on TEROK_UNRESTRICTED env var — not here.
 
     # Model
     if model and provider.model_flag:
@@ -547,209 +247,3 @@ def _build_generic_command(
     parts.append('"$(cat /home/dev/.terok/prompt.txt)"')
 
     return " ".join(parts)
-
-
-def _auto_approve_block(provider: HeadlessProvider) -> list[str]:
-    """Emit bash lines for auto-approve flag injection (Codex only today)."""
-    if not provider.auto_approve_flags:
-        return []
-    lines = ["    local _approve_args=()"]
-    lines.append('    if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then')
-    for flag in provider.auto_approve_flags:
-        lines.append(f"        _approve_args+=({shlex.quote(flag)})")
-    lines.append("    fi")
-    return lines
-
-
-def _opencode_plugin_block(provider: HeadlessProvider) -> list[str]:
-    """Emit bash lines for OpenCode session plugin symlink setup."""
-    if not (provider.session_file and provider.uses_opencode_instructions):
-        return []
-    if provider.opencode_config is not None:
-        plugin_dir = f"$HOME/{provider.opencode_config.config_dir}/opencode/plugins"
-    else:
-        plugin_dir = "$HOME/.config/opencode/plugins"
-    return [
-        "    # Ensure OpenCode session plugin is installed",
-        "    local _plugin_src=/usr/local/share/terok/opencode-session-plugin.mjs",
-        f"    local _plugin_dir={plugin_dir}",
-        '    if [ -f "$_plugin_src" ]; then',
-        '        mkdir -p "$_plugin_dir"',
-        '        ln -sf "$_plugin_src" "$_plugin_dir/terok-session.mjs"',
-        "    fi",
-    ]
-
-
-def _session_resume_block(provider: HeadlessProvider, session_path: str | None) -> list[str]:
-    """Emit bash lines for session resume arg injection."""
-    if not (session_path and provider.resume_flag):
-        return []
-    return [
-        "    local _resume_args=()",
-        f"    if [ -s {session_path} ] && \\",
-        '       { [ -n "$_timeout" ] || [ $# -eq 0 ]; }; then',
-        f'        _resume_args+=({provider.resume_flag} "$(cat {session_path})")',
-        "    fi",
-    ]
-
-
-def _codex_instr_block(provider: HeadlessProvider) -> list[str]:
-    """Emit bash lines for Codex model_instructions_file injection."""
-    if provider.name != "codex":
-        return []
-    return [
-        "    local _instr_args=()",
-        "    [ -f /home/dev/.terok/instructions.md ] && \\",
-        "        _instr_args+=(-c 'model_instructions_file=\"/home/dev/.terok/instructions.md\"')",
-    ]
-
-
-def _vibe_capture_fn(provider: HeadlessProvider, session_path: str | None) -> list[str]:
-    """Emit bash lines for Vibe post-run session capture helper."""
-    if not (provider.name == "vibe" and session_path):
-        return []
-    return [
-        "    _terok_capture_vibe_session() {",
-        '        python3 -c "',
-        "import json, os, glob",
-        "files = sorted(glob.glob(os.path.expanduser('~/.vibe/logs/session/session_*/meta.json')),",
-        "               key=os.path.getmtime, reverse=True)",
-        "if files:",
-        "    with open(files[0]) as f:",
-        "        sid = json.load(f).get('session_id', '')",
-        "    if sid:",
-        "        print(sid)",
-        f'" > {session_path} 2>/dev/null || true',
-        "    }",
-    ]
-
-
-def _extra_args_expansion(provider: HeadlessProvider, session_path: str | None) -> str:
-    """Build the extra-args shell expansions between the binary and ``"$@"``."""
-    parts: list[str] = []
-    if provider.auto_approve_flags:
-        parts.append('"${_approve_args[@]}"')
-    if session_path and provider.resume_flag:
-        parts.append('"${_resume_args[@]}"')
-    if provider.name == "codex":
-        parts.append('"${_instr_args[@]}"')
-    return (" " + " ".join(parts)) if parts else ""
-
-
-def _wrap_invocation(cmd: str, provider: HeadlessProvider, session_path: str | None) -> str:
-    """Wrap a shell invocation with the stale-session fallback when resume is active."""
-    if session_path and provider.resume_flag:
-        return f"_terok_resume_or_fresh {session_path} {provider.resume_flag} {cmd}"
-    return cmd
-
-
-_RESUME_FALLBACK_FN = """\
-# WORKAROUND: stale-session guard (timing-based heuristic).
-#
-# When a user starts an agent, exits immediately (no real interaction),
-# and re-runs, the captured session ID points to a conversation that was
-# never persisted.  The agent then fails with "No conversation found".
-#
-# This is a best-effort mitigation, not a proper fix: we assume that
-# any non-zero exit within 2 seconds of launch is a stale-session error
-# and retry without --resume.  This heuristic can misfire (e.g. a fast
-# config error would also trigger a retry), but the retry is harmless —
-# it just runs without resume, which is the correct fallback anyway.
-#
-# A proper fix would validate the session ID against the agent's storage
-# before injecting --resume, but that requires agent-specific probes
-# that don't exist yet.
-_terok_resume_or_fresh() {
-    local _session_file="$1" _resume_flag="$2"; shift 2
-    local _start; _start=$(date +%s)
-    "$@"; local _rc=$?
-    local _elapsed=$(( $(date +%s) - _start ))
-    if [ $_rc -ne 0 ] && [ $_elapsed -lt 2 ] && [ -s "$_session_file" ]; then
-        echo "terok: session not found (stale?), retrying without resume" >&2
-        rm -f "$_session_file"
-        local _retry=() _skip=false
-        for _a in "$@"; do
-            if $_skip; then _skip=false; continue; fi
-            if [ "$_a" = "$_resume_flag" ]; then _skip=true; continue; fi
-            _retry+=("$_a")
-        done
-        "${_retry[@]}"; _rc=$?
-    fi
-    return $_rc
-}
-"""
-
-
-def _generate_generic_wrapper(provider: HeadlessProvider) -> str:
-    """Generate a shell wrapper for non-Claude providers.
-
-    Sets git identity env vars and wraps the binary with optional timeout
-    support (``--terok-timeout``), matching the Claude wrapper's interface.
-
-    Session resume logic (for providers with ``session_file``):
-
-    - An OpenCode plugin (or post-run parse for Vibe) captures the session
-      ID to ``/home/dev/.terok/<session_file>``.
-    - Resume args (``--session <id>`` or ``--resume <id>``) are injected
-      only in headless mode (``--terok-timeout`` present) or on bare
-      interactive launch (no user args).
-    - When the user passes their own arguments, passthrough is transparent
-      — no resume args are injected.
-    """
-    author_name = shlex.quote(provider.git_author_name)
-    author_email = shlex.quote(provider.git_author_email)
-    binary = provider.binary
-    session_path = f"/home/dev/.terok/{provider.session_file}" if provider.session_file else None
-    extra = _extra_args_expansion(provider, session_path)
-
-    lines = [
-        "# Generated by terok",
-        f"{binary}() {{",
-        '    local _timeout=""',
-        "    # Extract terok-specific flags (must come before agent flags)",
-        "    while [[ $# -gt 0 ]]; do",
-        '        case "$1" in',
-        '            --terok-timeout) _timeout="$2"; shift 2 ;;',
-        "            *) break ;;",
-        "        esac",
-        "    done",
-        "    [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \\",
-        "        . /usr/local/share/terok/terok-env-git-identity.sh",
-    ]
-
-    lines.extend(_auto_approve_block(provider))
-    lines.extend(_opencode_plugin_block(provider))
-    lines.extend(_session_resume_block(provider, session_path))
-    lines.extend(_codex_instr_block(provider))
-    lines.extend(_vibe_capture_fn(provider, session_path))
-
-    headless_cmd = _wrap_invocation(
-        f'timeout "$_timeout" {binary}{extra} "$@"', provider, session_path
-    )
-    interactive_cmd = _wrap_invocation(f'command {binary}{extra} "$@"', provider, session_path)
-
-    # Headless mode (with timeout)
-    lines.append('    if [ -n "$_timeout" ]; then')
-    lines.append("        (")
-    lines.append(f"            _terok_apply_git_identity {author_name} {author_email}")
-    if session_path:
-        lines.append(f"            export TEROK_SESSION_FILE={session_path}")
-    lines.append(f"        {headless_cmd}")
-    if provider.name == "vibe" and session_path:
-        lines.append("        local _rc=$?; _terok_capture_vibe_session; return $_rc")
-    lines.append("        )")
-
-    # Interactive mode (no timeout)
-    lines.append("    else")
-    lines.append("        (")
-    lines.append(f"            _terok_apply_git_identity {author_name} {author_email}")
-    if session_path:
-        lines.append(f"            export TEROK_SESSION_FILE={session_path}")
-    lines.append(f"        {interactive_cmd}")
-    if provider.name == "vibe" and session_path:
-        lines.append("        local _rc=$?; _terok_capture_vibe_session; return $_rc")
-    lines.append("        )")
-    lines.append("    fi")
-    lines.append("}")
-
-    return "\n".join(lines) + "\n"

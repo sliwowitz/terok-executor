@@ -64,9 +64,8 @@ RUN chmod +x /etc/profile.d/terok-env.sh; \
     else \
       printf '# terok environment (PATH, git identity, agent wrappers)\n. /etc/profile.d/terok-env.sh\n' > /etc/bash.bashrc; \
     fi; \
-    # Interactive-only: help banner and model sync (login shells only)
-    printf '\n# Help banner (interactive login only)\nif [ -t 1 ] && [ -z "$_TEROK_BANNER_SHOWN" ]; then\n  export _TEROK_BANNER_SHOWN=1\n  _TEROK_LOGIN=1 hilfe --kurz 2>/dev/null || true\nfi\n' >> /etc/bash.bashrc; \
-    printf '\n# Mistral model sync (interactive login only)\nif [ -t 1 ] && [ -z "$_MISTRAL_MODEL_SYNC_RUN" ]; then\n  export _MISTRAL_MODEL_SYNC_RUN=1\n  if command -v vibe-model-sync >/dev/null 2>&1; then\n    vibe-model-sync >/dev/null 2>&1 || true\n  fi\nfi\n' >> /etc/bash.bashrc
+    # Interactive-only: help banner (login shells only)
+    printf '\n# Help banner (interactive login only)\nif [ -t 1 ] && [ -z "$_TEROK_BANNER_SHOWN" ]; then\n  export _TEROK_BANNER_SHOWN=1\n  _TEROK_LOGIN=1 hilfe --kurz 2>/dev/null || true\nfi\n' >> /etc/bash.bashrc
 
 # Symlink for per-task agent wrappers (resolved at runtime via mount).
 RUN mkdir -p /usr/local/share/terok && \

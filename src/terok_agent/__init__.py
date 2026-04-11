@@ -67,39 +67,41 @@ from .paths import mounts_dir
 from .provider.agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
 from .provider.config import resolve_provider_value
 from .provider.headless import (
-    HEADLESS_PROVIDERS,
-    PROVIDER_NAMES,
     CLIOverrides,
-    HeadlessProvider,
     apply_provider_config,
     build_headless_command,
+)
+from .provider.instructions import bundled_default_instructions, resolve_instructions
+from .provider.providers import (
+    AGENT_PROVIDERS,
+    PROVIDER_NAMES,
+    AgentProvider,
     collect_all_auto_approve_env,
     collect_opencode_provider_env,
     get_provider,
 )
-from .provider.instructions import bundled_default_instructions, resolve_instructions
 
 # -- Roster (agent catalog + config resolution) --------------------------------
 from .roster import CredentialProxyRoute, SidecarSpec, ensure_proxy_routes, get_roster
 from .roster.config_stack import ConfigScope, ConfigStack
 
 # -- Bootstrap YAML roster into module-level dicts ---------------------------
-# HEADLESS_PROVIDERS and AUTH_PROVIDERS are empty dicts populated here to avoid
-# circular imports (roster → auth/headless_providers → roster).
+# AGENT_PROVIDERS and AUTH_PROVIDERS are empty dicts populated here to avoid
+# circular imports (roster → auth/providers → roster).
 
 
 def _bootstrap_roster() -> None:
     """Populate module-level provider dicts from the YAML roster."""
     global PROVIDER_NAMES  # noqa: PLW0603 — tuple requires rebind
 
-    import terok_agent.provider.headless as _hp
+    import terok_agent.provider.providers as _reg
 
     from .roster import get_roster
 
     roster = get_roster()
-    HEADLESS_PROVIDERS.update(roster.providers)
+    AGENT_PROVIDERS.update(roster.providers)
     AUTH_PROVIDERS.update(roster.auth_providers)
-    PROVIDER_NAMES = _hp.PROVIDER_NAMES = roster.agent_names
+    PROVIDER_NAMES = _reg.PROVIDER_NAMES = roster.agent_names
 
 
 _bootstrap_roster()
@@ -107,9 +109,9 @@ _bootstrap_roster()
 __all__ = [
     "__version__",
     # Provider registry
-    "HEADLESS_PROVIDERS",
+    "AGENT_PROVIDERS",
     "PROVIDER_NAMES",
-    "HeadlessProvider",
+    "AgentProvider",
     "get_provider",
     "CLIOverrides",
     "apply_provider_config",

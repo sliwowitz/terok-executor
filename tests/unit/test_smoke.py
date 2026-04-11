@@ -26,13 +26,13 @@ class TestPackageImport:
         assert isinstance(__version__, str)
         assert len(__version__) > 0
 
-    def test_headless_providers_registry(self) -> None:
-        """HEADLESS_PROVIDERS registry contains expected agents."""
-        from terok_agent import HEADLESS_PROVIDERS
+    def test_agent_providers_registry(self) -> None:
+        """AGENT_PROVIDERS registry contains expected agents."""
+        from terok_agent import AGENT_PROVIDERS
 
-        assert len(HEADLESS_PROVIDERS) >= 7
-        assert "claude" in HEADLESS_PROVIDERS
-        assert "codex" in HEADLESS_PROVIDERS
+        assert len(AGENT_PROVIDERS) >= 7
+        assert "claude" in AGENT_PROVIDERS
+        assert "codex" in AGENT_PROVIDERS
 
     def test_auth_providers_registry(self) -> None:
         """AUTH_PROVIDERS registry contains expected providers."""

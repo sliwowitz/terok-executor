@@ -11,15 +11,15 @@ from unittest.mock import patch
 import pytest
 
 from terok_agent.credentials.auth import AuthProvider
-from terok_agent.provider.headless import HeadlessProvider
+from terok_agent.provider.providers import AgentProvider
 from terok_agent.roster import (
     SidecarSpec,
     load_roster,
 )
 from terok_agent.roster.loader import (
     _load_bundled_agents,
+    _to_agent_provider,
     _to_auth_provider,
-    _to_headless_provider,
     _to_sidecar_spec,
 )
 
@@ -91,13 +91,13 @@ class TestLoadBundledAgents:
 
 
 class TestDeserializeProvider:
-    """Verify YAML → HeadlessProvider conversion."""
+    """Verify YAML → AgentProvider conversion."""
 
     def test_claude_full_fidelity(self) -> None:
         agents = _load_bundled_agents()
-        p = _to_headless_provider("claude", agents["claude"])
+        p = _to_agent_provider("claude", agents["claude"])
 
-        assert isinstance(p, HeadlessProvider)
+        assert isinstance(p, AgentProvider)
         assert p.name == "claude"
         assert p.label == "Claude"
         assert p.binary == "claude"
@@ -123,7 +123,7 @@ class TestDeserializeProvider:
 
     def test_codex_subcommand_and_flags(self) -> None:
         agents = _load_bundled_agents()
-        p = _to_headless_provider("codex", agents["codex"])
+        p = _to_agent_provider("codex", agents["codex"])
 
         assert p.headless_subcommand == "exec"
         assert p.prompt_flag == ""
@@ -132,7 +132,7 @@ class TestDeserializeProvider:
 
     def test_blablador_opencode_config(self) -> None:
         agents = _load_bundled_agents()
-        p = _to_headless_provider("blablador", agents["blablador"])
+        p = _to_agent_provider("blablador", agents["blablador"])
 
         assert p.opencode_config is not None
         assert p.opencode_config.display_name == "Helmholtz Blablador"
@@ -141,7 +141,7 @@ class TestDeserializeProvider:
 
     def test_vibe_session_support(self) -> None:
         agents = _load_bundled_agents()
-        p = _to_headless_provider("vibe", agents["vibe"])
+        p = _to_agent_provider("vibe", agents["vibe"])
 
         assert p.supports_session_resume is True
         assert p.resume_flag == "--resume"
@@ -151,7 +151,7 @@ class TestDeserializeProvider:
 
     def test_defaults_for_omitted_fields(self) -> None:
         """Omitted optional fields get sensible defaults."""
-        p = _to_headless_provider("minimal", {"label": "Test", "binary": "test"})
+        p = _to_agent_provider("minimal", {"label": "Test", "binary": "test"})
 
         assert p.headless_subcommand is None
         assert p.auto_approve_env == {}
@@ -310,7 +310,7 @@ class TestLoadRegistry:
 
     def test_get_provider_unknown_exits(self) -> None:
         reg = load_roster()
-        with pytest.raises(SystemExit, match="Unknown headless provider"):
+        with pytest.raises(SystemExit, match="Unknown provider"):
             reg.get_provider("nonexistent")
 
     def test_get_auth_provider_unknown_exits(self) -> None:
@@ -448,11 +448,11 @@ class TestRegistryBehavior:
     """Verify the registry produces well-formed, usable provider dataclasses."""
 
     def test_every_agent_has_valid_headless_provider(self) -> None:
-        """Each agent deserializes into a HeadlessProvider with required fields."""
+        """Each agent deserializes into a AgentProvider with required fields."""
         reg = load_roster()
         for name in reg.agent_names:
             p = reg.get_provider(name)
-            assert isinstance(p, HeadlessProvider)
+            assert isinstance(p, AgentProvider)
             assert p.name == name
             assert p.binary  # non-empty binary
             assert p.label  # non-empty label
