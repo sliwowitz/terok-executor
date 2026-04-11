@@ -101,6 +101,22 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     echo ">> detected new task marker - will reset to latest HEAD"
   fi
 
+  # Sanity-check: if .git exists on a new task (from clone cache), verify
+  # origin matches the expected repo.  The host-side seed rewrites origin
+  # to CODE_REPO, so a mismatch means the cache was stale or wrong.
+  if [[ -d "${REPO_ROOT}/.git" && "${IS_NEW_TASK}" == "true" ]]; then
+    _actual=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
+    _match=false
+    for _url in "${CODE_REPO}" "${CLONE_FROM:-}"; do
+      [[ -z "${_url}" ]] && continue
+      [[ "${_actual}" == "${_url}" ]] && _match=true && break
+    done
+    if [[ "${_match}" != "true" && -n "${_actual}" ]]; then
+      echo ">> cached .git origin mismatch (got: ${_actual}); wiping for fresh clone"
+      rm -rf "${REPO_ROOT}/.git"
+    fi
+  fi
+
   if [[ ! -d "${REPO_ROOT}/.git" ]]; then
     # No .git directory - perform initial clone
     # Remove marker first so the directory is empty for git clone
@@ -170,10 +186,9 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     fi
 
   elif [[ "${IS_NEW_TASK}" == "true" ]]; then
-    # .git exists but this is a new task (marker present)
-    # This happens when a previous task with the same ID wasn't fully cleaned up.
-    # Reset to latest remote HEAD to ensure fresh state.
-    echo ">> new task with existing .git - resetting to latest HEAD"
+    # .git exists and this is a new task (marker present).
+    # Normal fast path when clone cache pre-populated the workspace.
+    echo ">> new task — updating cached workspace to latest HEAD"
     git -C "${REPO_ROOT}" fetch --all --prune
     TARGET_BRANCH="${GIT_BRANCH:-}"
 

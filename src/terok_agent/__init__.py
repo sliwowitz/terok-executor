@@ -45,6 +45,7 @@ from .container.build import (
     stage_tmux_config,
     stage_toad_agents,
 )
+from .container.cache import seed_workspace_from_clone_cache
 from .container.env import ContainerEnvResult, ContainerEnvSpec, assemble_container_env
 from .container.runner import AgentRunner
 
@@ -171,4 +172,6 @@ __all__ = [
     "ContainerEnvSpec",
     "ContainerEnvResult",
     "assemble_container_env",
+    # Clone cache
+    "seed_workspace_from_clone_cache",
 ]
