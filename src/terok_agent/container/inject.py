@@ -34,7 +34,7 @@ def inject_prompt(container_name: str, prompt_text: str) -> None:
     host-side bind mount is absent.
     """
     subprocess.run(
-        ["podman", "exec", "-i", container_name, "tee", "/home/dev/.terok/prompt.txt"],
+        ["podman", "exec", "-i", container_name, "sh", "-c", "cat > /home/dev/.terok/prompt.txt"],
         input=prompt_text.encode(),
         check=True,
         capture_output=True,
