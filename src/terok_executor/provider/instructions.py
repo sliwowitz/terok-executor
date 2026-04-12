@@ -95,7 +95,7 @@ def has_custom_instructions(
 
 def bundled_default_instructions() -> str:
     """Read and return the bundled default instructions from package resources."""
-    ref = importlib.resources.files("terok_agent.resources.instructions").joinpath("default.md")
+    ref = importlib.resources.files("terok_executor.resources.instructions").joinpath("default.md")
     return ref.read_text(encoding="utf-8")
 
 

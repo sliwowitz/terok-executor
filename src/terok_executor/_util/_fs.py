@@ -25,6 +25,6 @@ def ensure_dir_writable(path: Path, label: str) -> None:
         gid = os.getgid()
         raise SystemExit(
             f"{label} directory is not writable: {path}\n"
-            f"Fix permissions for the user running terok-agent (uid={uid}, gid={gid}). "
+            f"Fix permissions for the user running terok-executor (uid={uid}, gid={gid}). "
             f"Example: sudo chown -R {uid}:{gid} {path}"
         )

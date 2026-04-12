@@ -3,15 +3,15 @@
 
 """Assembles container environment variables and volume mounts for agent launches.
 
-Both ``terok-agent run`` (standalone) and ``terok`` (project orchestrator)
+Both ``terok-executor run`` (standalone) and ``terok`` (project orchestrator)
 construct identical container environments — shared config mounts, credential
 proxy tokens, git identity, unrestricted-mode flags.  This module provides
 the canonical assembly function so that logic lives in one place.
 
 Usage::
 
-    from terok_agent.container.env import ContainerEnvSpec, assemble_container_env
-    from terok_agent import get_roster
+    from terok_executor.container.env import ContainerEnvSpec, assemble_container_env
+    from terok_executor import get_roster
 
     result = assemble_container_env(
         ContainerEnvSpec(task_id="abc", provider_name="claude", workspace_host_path=ws),
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from terok_sandbox import Sharing, VolumeSpec
 
 if TYPE_CHECKING:
-    from terok_agent.roster.loader import AgentRoster
+    from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ def assemble_container_env(
     Returns:
         Assembled env dict, volume tuple, and resolved task_dir.
     """
-    from terok_agent.paths import mounts_dir as _mounts_dir
+    from terok_executor.paths import mounts_dir as _mounts_dir
 
     env: dict[str, str] = {}
     volumes: list[VolumeSpec] = []
@@ -235,7 +235,7 @@ def assemble_container_env(
     volumes.extend(spec.extra_volumes)
 
     # Resolve task_dir
-    task_dir = spec.task_dir or Path(tempfile.mkdtemp(prefix=f"terok-agent-{spec.task_id}-"))
+    task_dir = spec.task_dir or Path(tempfile.mkdtemp(prefix=f"terok-executor-{spec.task_id}-"))
 
     return ContainerEnvResult(env=env, volumes=tuple(volumes), task_dir=task_dir)
 

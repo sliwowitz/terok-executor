@@ -1,10 +1,10 @@
-# terok-agent
+# terok-executor
 
 Single-agent task runner for hardened Podman containers.
 
 ## What it does
 
-**terok-agent** builds container images, launches instrumented Podman
+**terok-executor** builds container images, launches instrumented Podman
 containers, and manages the lifecycle of one AI coding agent at a time.
 Every container runs rootless behind an egress firewall with credential
 isolation — real API keys and SSH private keys never enter the container.
@@ -16,7 +16,7 @@ Use it standalone from the CLI or as a Python library for
 ```text
 terok-shield    nftables egress firewall (security boundary)
 terok-sandbox   hardened container runtime (isolation + credential proxy)
-terok-agent     single-agent task runner (this package)
+terok-executor     single-agent task runner (this package)
 terok           project orchestration (TUI, presets, multi-agent)
 ```
 
@@ -25,14 +25,14 @@ Each layer depends only on the one below it.
 ## Quick start
 
 ```bash
-pip install terok-agent        # requires Python 3.12+, Podman (rootless)
+pip install terok-executor        # requires Python 3.12+, Podman (rootless)
 
-terok-agent build              # build base + agent images
-terok-agent auth claude        # authenticate (OAuth or API key)
+terok-executor build              # build base + agent images
+terok-executor auth claude        # authenticate (OAuth or API key)
 
-terok-agent run claude . -p "Fix the failing test in test_auth.py"
-terok-agent run claude . --interactive   # shell into the container
-terok-agent run claude . --web           # toad web UI
+terok-executor run claude . -p "Fix the failing test in test_auth.py"
+terok-executor run claude . --interactive   # shell into the container
+terok-executor run claude . --web           # toad web UI
 ```
 
 ## Commands
@@ -44,7 +44,7 @@ terok-agent run claude . --web           # toad web UI
 | `agents` | List registered agents (`--all` includes tools like gh, glab) |
 | `build` | Build base + agent container images |
 | `run-tool` | Run a sidecar tool (e.g. CodeRabbit, SonarCloud) |
-| `ls` | List running terok-agent containers |
+| `ls` | List running terok-executor containers |
 | `stop` | Stop a running container |
 | `proxy` | Credential proxy management (start, stop, status, install, routes) |
 
@@ -65,11 +65,11 @@ terok-agent run claude . --web           # toad web UI
 
 ## Documentation
 
-- [Getting started](https://terok-ai.github.io/terok-agent/) — install, build, authenticate, first run
-- [Agents](https://terok-ai.github.io/terok-agent/agents/) — catalog, custom definitions, auth flows
-- [Launch modes](https://terok-ai.github.io/terok-agent/launch-modes/) — headless, interactive, web, tool
-- [Security](https://terok-ai.github.io/terok-agent/security/) — firewall, credential proxy, restricted mode
-- [API Reference](https://terok-ai.github.io/terok-agent/reference/) — Python API docs
+- [Getting started](https://terok-ai.github.io/terok-executor/) — install, build, authenticate, first run
+- [Agents](https://terok-ai.github.io/terok-executor/agents/) — catalog, custom definitions, auth flows
+- [Launch modes](https://terok-ai.github.io/terok-executor/launch-modes/) — headless, interactive, web, tool
+- [Security](https://terok-ai.github.io/terok-executor/security/) — firewall, credential proxy, restricted mode
+- [API Reference](https://terok-ai.github.io/terok-executor/reference/) — Python API docs
 
 ## Development
 

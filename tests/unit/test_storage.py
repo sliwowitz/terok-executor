@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from terok_agent.roster.loader import MountDef
-from terok_agent.storage import (
+from terok_executor.roster.loader import MountDef
+from terok_executor.storage import (
     _dir_bytes,
     _mount_label,
     get_shared_mounts_storage,
@@ -169,7 +169,7 @@ class TestGetSharedMountsStorage:
             MountDef("_claude-config", "/home/dev/.claude", "Claude"),
             MountDef("_codex-config", "/home/dev/.codex", "Codex"),
         )
-        with patch("terok_agent.storage.get_roster") as mock_roster:
+        with patch("terok_executor.storage.get_roster") as mock_roster:
             mock_roster.return_value.mounts = roster_mounts
             results = get_shared_mounts_storage(mounts_tree)
 
@@ -179,11 +179,11 @@ class TestGetSharedMountsStorage:
         assert claude.bytes == 3  # "abc"
 
     def test_missing_base_returns_empty(self):
-        with patch("terok_agent.storage.get_roster"):
+        with patch("terok_executor.storage.get_roster"):
             assert get_shared_mounts_storage(Path("/nonexistent")) == []
 
     def test_sorted_by_name(self, mounts_tree: Path):
-        with patch("terok_agent.storage.get_roster") as mock_roster:
+        with patch("terok_executor.storage.get_roster") as mock_roster:
             mock_roster.return_value.mounts = ()
             results = get_shared_mounts_storage(mounts_tree)
         names = [m.name for m in results]

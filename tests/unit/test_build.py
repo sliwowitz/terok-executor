@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_agent.container.build import (
+from terok_executor.container.build import (
     BuildError,
     ImageSet,
     _base_tag,
@@ -136,8 +136,8 @@ class TestBuildBaseImages:
         from unittest.mock import patch
 
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
         ):
             result = build_base_images()
         assert result.l0.startswith("terok-l0:")
@@ -148,8 +148,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch("subprocess.run") as mock_run,
         ):
             result = build_base_images(build_dir=build_dir)
@@ -169,8 +169,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
             patch("subprocess.run") as mock_run,
         ):
             build_base_images(rebuild=True, build_dir=build_dir)
@@ -183,8 +183,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch("subprocess.run") as mock_run,
         ):
             build_base_images(full_rebuild=True, build_dir=build_dir)
@@ -203,8 +203,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch(
                 "subprocess.run",
                 side_effect=subprocess.CalledProcessError(1, "podman"),
@@ -218,10 +218,10 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch(
-                "terok_agent.container.build.prepare_build_context",
+                "terok_executor.container.build.prepare_build_context",
                 side_effect=OSError("disk full"),
             ),
             pytest.raises(BuildError, match="disk full"),
@@ -242,8 +242,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch("subprocess.run") as mock_run,
         ):
             result = build_base_images("nvidia/cuda:12.4", build_dir=build_dir)
@@ -257,8 +257,8 @@ class TestBuildBaseImages:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
             patch("subprocess.run"),
         ):
             build_base_images(build_dir=build_dir)
@@ -489,8 +489,8 @@ class TestBuildSidecarImage:
         from unittest.mock import patch
 
         with (
-            patch("terok_agent.container.build._check_podman"),
-            patch("terok_agent.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
         ):
             tag = build_sidecar_image()
         assert tag.startswith("terok-l1-sidecar:")
@@ -504,9 +504,9 @@ class TestBuildSidecarImage:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
+            patch("terok_executor.container.build._check_podman"),
             patch(
-                "terok_agent.container.build._image_exists", side_effect=image_exists_side_effect
+                "terok_executor.container.build._image_exists", side_effect=image_exists_side_effect
             ),
             patch("subprocess.run") as mock_run,
         ):
@@ -526,9 +526,9 @@ class TestBuildSidecarImage:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
+            patch("terok_executor.container.build._check_podman"),
             patch(
-                "terok_agent.container.build._image_exists", side_effect=image_exists_side_effect
+                "terok_executor.container.build._image_exists", side_effect=image_exists_side_effect
             ),
             patch("subprocess.run"),
         ):
@@ -546,9 +546,9 @@ class TestBuildSidecarImage:
 
         build_dir = tmp_path / "ctx"
         with (
-            patch("terok_agent.container.build._check_podman"),
+            patch("terok_executor.container.build._check_podman"),
             patch(
-                "terok_agent.container.build._image_exists", side_effect=image_exists_side_effect
+                "terok_executor.container.build._image_exists", side_effect=image_exists_side_effect
             ),
             patch(
                 "subprocess.run",

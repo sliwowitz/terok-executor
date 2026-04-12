@@ -177,7 +177,7 @@ def _build_claude_command(
     max_turns: int | None,
 ) -> str:
     """Build the headless command for Claude using the wrapper function."""
-    # Claude uses the claude() wrapper from terok-agent.sh which handles
+    # Claude uses the claude() wrapper from terok-executor.sh which handles
     # --add-dir, --agents, git env, and timeout
     flags = ""
     if model:
@@ -205,7 +205,7 @@ def _build_generic_command(
 
     Uses the shell wrapper function (e.g. ``codex()``) instead of invoking the
     binary directly, so that git env vars and session resume logic from
-    ``terok-agent.sh`` are applied.  The wrapper parses ``--terok-timeout``
+    ``terok-executor.sh`` are applied.  The wrapper parses ``--terok-timeout``
     to wrap the actual invocation with ``timeout``.
     """
     parts = ["init-ssh-and-repo.sh &&"]

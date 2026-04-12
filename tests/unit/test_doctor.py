@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from terok_sandbox.doctor import DoctorCheck
 
-from terok_agent.doctor import (
+from terok_executor.doctor import (
     _PHANTOM_TOKEN_RE,
     _make_base_url_checks,
     _make_credential_file_checks,
@@ -16,7 +16,7 @@ from terok_agent.doctor import (
     _make_ssh_bridge_check,
     agent_doctor_checks,
 )
-from terok_agent.roster import get_roster
+from terok_executor.roster import get_roster
 
 PROXY_PORT = 18731
 

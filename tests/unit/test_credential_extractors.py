@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_agent.credentials.extractors import (
+from terok_executor.credentials.extractors import (
     extract_api_key_env,
     extract_claude_oauth,
     extract_codex_oauth,

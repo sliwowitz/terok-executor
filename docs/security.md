@@ -1,6 +1,6 @@
 # Security
 
-terok-agent isolates each agent behind four layers: an egress firewall,
+terok-executor isolates each agent behind four layers: an egress firewall,
 a credential proxy, optional restricted mode, and rootless containers.
 
 ## Egress firewall
@@ -12,8 +12,8 @@ package registries, and git hosts. Everything else is blocked at the
 nftables level.
 
 ```bash
-terok-agent run claude . -p "…"         # firewall on (default)
-terok-agent run claude . --no-gate -p "…"  # disable for development
+terok-executor run claude . -p "…"         # firewall on (default)
+terok-executor run claude . --no-gate -p "…"  # disable for development
 ```
 
 ## Credential proxy
@@ -38,18 +38,18 @@ architecture, per-agent routing table, and YAML configuration.
 ### Managing the proxy
 
 ```bash
-terok-agent proxy status      # health check
-terok-agent proxy start       # start manually
-terok-agent proxy stop        # stop
-terok-agent proxy install     # install systemd unit
-terok-agent proxy routes      # show active routes
-terok-agent proxy clean       # remove stale tokens
+terok-executor proxy status      # health check
+terok-executor proxy start       # start manually
+terok-executor proxy stop        # stop
+terok-executor proxy install     # install systemd unit
+terok-executor proxy routes      # show active routes
+terok-executor proxy clean       # remove stale tokens
 ```
 
 ## Restricted mode
 
 ```bash
-terok-agent run claude . --restricted -p "…"
+terok-executor run claude . --restricted -p "…"
 ```
 
 Disables auto-approve flags and sets `--no-new-privileges` on the

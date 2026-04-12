@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from terok_agent.container.cache import (
+from terok_executor.container.cache import (
     _copy_tree,
     _resolve_cache_dir,
     _wipe_workspace_contents,
@@ -42,7 +42,7 @@ class TestCopyTree:
         src.mkdir()
         dst.mkdir()
 
-        with patch("terok_agent.container.cache.subprocess.run") as mock_run:
+        with patch("terok_executor.container.cache.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             _copy_tree(src, dst)
 
@@ -57,7 +57,7 @@ class TestCopyTree:
         (src / "file.txt").write_text("hello")
 
         with patch(
-            "terok_agent.container.cache.subprocess.run",
+            "terok_executor.container.cache.subprocess.run",
             side_effect=FileNotFoundError("cp"),
         ):
             _copy_tree(src, dst)
@@ -98,8 +98,8 @@ class TestSeedWorkspaceFromCloneCache:
         cfg = SimpleNamespace(clone_cache_base_path=cache_base)
 
         with (
-            patch("terok_agent.container.cache._copy_tree") as mock_copy,
-            patch("terok_agent.container.cache._rewrite_origin") as mock_rewrite,
+            patch("terok_executor.container.cache._copy_tree") as mock_copy,
+            patch("terok_executor.container.cache._rewrite_origin") as mock_rewrite,
         ):
             # Simulate _copy_tree creating .git in workspace
             def fake_copy(src, dst):
@@ -145,7 +145,7 @@ class TestSeedWorkspaceFromCloneCache:
             (dst / "README.md").write_text("partial")
             raise OSError("disk full")
 
-        with patch("terok_agent.container.cache._copy_tree", side_effect=partial_copy):
+        with patch("terok_executor.container.cache._copy_tree", side_effect=partial_copy):
             result = seed_workspace_from_clone_cache(ws, "proj", cfg=cfg)
 
         assert result is False

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_agent.provider.instructions import (
+from terok_executor.provider.instructions import (
     bundled_default_instructions,
     has_custom_instructions,
     resolve_instructions,

@@ -30,8 +30,8 @@ from terok_sandbox.config_stack import deep_merge
 if TYPE_CHECKING:
     from terok_sandbox import SandboxConfig
 
-    from terok_agent.credentials.auth import AuthProvider
-    from terok_agent.provider.providers import AgentProvider, OpenCodeProviderConfig
+    from terok_executor.credentials.auth import AuthProvider
+    from terok_executor.provider.providers import AgentProvider, OpenCodeProviderConfig
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -194,7 +194,7 @@ class AgentRoster:
         Falls back to *default_agent*, then ``"claude"``.
         Raises ``SystemExit`` if the resolved name is unknown.
         """
-        from terok_agent.provider.providers import resolve_provider
+        from terok_executor.provider.providers import resolve_provider
 
         return resolve_provider(self._providers, name, default_agent=default_agent)
 
@@ -417,7 +417,7 @@ def _user_agents_dir() -> Path:
 
 def _load_yaml(text: str) -> dict:
     """Parse YAML text into a dict via ruamel.yaml round-trip loader."""
-    from terok_agent._util import yaml_load
+    from terok_executor._util import yaml_load
 
     result = yaml_load(text)
     return result if isinstance(result, dict) else {}
@@ -426,7 +426,7 @@ def _load_yaml(text: str) -> dict:
 def _load_bundled_agents() -> dict[str, dict]:
     """Load all ``*.yaml`` files from the bundled ``resources/agents/`` package."""
     agents: dict[str, dict] = {}
-    pkg = importlib.resources.files("terok_agent.resources.agents")
+    pkg = importlib.resources.files("terok_executor.resources.agents")
     for item in pkg.iterdir():
         if not hasattr(item, "name") or not item.name.endswith(".yaml"):
             continue
@@ -472,7 +472,7 @@ def _load_user_agents() -> dict[str, dict]:
 
 def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
     """Deserialize the ``opencode:`` YAML section."""
-    from terok_agent.provider.providers import OpenCodeProviderConfig
+    from terok_executor.provider.providers import OpenCodeProviderConfig
 
     return OpenCodeProviderConfig(
         display_name=data["display_name"],
@@ -487,7 +487,7 @@ def _to_opencode_config(data: dict) -> OpenCodeProviderConfig:
 
 def _to_agent_provider(name: str, data: dict) -> AgentProvider:
     """Deserialize a full agent YAML dict into an ``AgentProvider``."""
-    from terok_agent.provider.providers import AgentProvider
+    from terok_executor.provider.providers import AgentProvider
 
     hl = data.get("headless", {})
     aa = data.get("auto_approve", {})
@@ -529,7 +529,7 @@ def _to_agent_provider(name: str, data: dict) -> AgentProvider:
 
 def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
     """Deserialize the ``auth:`` YAML section into an ``AuthProvider``."""
-    from terok_agent.credentials.auth import AuthKeyConfig, AuthProvider, _api_key_command
+    from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, _api_key_command
 
     auth = data.get("auth", {})
     if not auth:
@@ -589,7 +589,7 @@ def _to_auth_provider(name: str, data: dict) -> AuthProvider | None:
 
 def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
     """Auto-derive an auth provider for an OpenCode-based agent."""
-    from terok_agent.credentials.auth import AuthProvider
+    from terok_executor.credentials.auth import AuthProvider
 
     oc = data.get("opencode")
     if not oc:

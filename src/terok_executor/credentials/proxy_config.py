@@ -21,7 +21,7 @@ def write_proxy_config(provider_name: str) -> None:
     to redirect API traffic through the credential proxy.  The patch spec
     is declared in the agent YAML — no provider-specific code needed.
     """
-    from terok_agent.roster.loader import get_roster
+    from terok_executor.roster.loader import get_roster
 
     roster = get_roster()
     route = roster.proxy_routes.get(provider_name)
@@ -34,7 +34,7 @@ def write_proxy_config(provider_name: str) -> None:
 
     from terok_sandbox import SandboxConfig, get_proxy_port
 
-    from terok_agent.paths import mounts_dir
+    from terok_executor.paths import mounts_dir
 
     cfg = SandboxConfig()
     port = get_proxy_port(cfg)

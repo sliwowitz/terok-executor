@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the terok-agent CLI."""
+"""Tests for the terok-executor CLI."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from terok_agent.cli import main
+from terok_executor.cli import main
 
 
 def _run_cli(*args: str) -> tuple[str, str, int]:
@@ -19,7 +19,7 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
     code = 0
     with (
-        patch("sys.argv", ["terok-agent", *args]),
+        patch("sys.argv", ["terok-executor", *args]),
         patch("sys.stdout", stdout),
         patch("sys.stderr", stderr),
     ):
@@ -31,7 +31,7 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
 
 
 class TestAgentsCommand:
-    """Verify ``terok-agent agents`` output."""
+    """Verify ``terok-executor agents`` output."""
 
     def test_agents_lists_agents_only(self) -> None:
         out, _, rc = _run_cli("agents")
@@ -88,14 +88,14 @@ class TestSharedDirArgs:
 
     def test_shared_dir_arg_accepted(self) -> None:
         """--shared-dir is recognized by the argument parser."""
-        from terok_agent.commands import RUN_COMMAND
+        from terok_executor.commands import RUN_COMMAND
 
         arg_names = [a.name for a in RUN_COMMAND.args]
         assert "--shared-dir" in arg_names
 
     def test_shared_mount_default(self) -> None:
         """--shared-mount defaults to /shared."""
-        from terok_agent.commands import RUN_COMMAND
+        from terok_executor.commands import RUN_COMMAND
 
         for a in RUN_COMMAND.args:
             if a.name == "--shared-mount":
@@ -106,11 +106,11 @@ class TestSharedDirArgs:
 
     def test_handle_run_forwards_shared_dir(self) -> None:
         """_handle_run passes shared_dir to runner, omits shared_mount when no dir."""
-        from terok_agent.commands import _handle_run
+        from terok_executor.commands import _handle_run
 
-        with patch("terok_agent.container.runner.AgentRunner") as mock_cls:
+        with patch("terok_executor.container.runner.AgentRunner") as mock_cls:
             mock_runner = mock_cls.return_value
-            mock_runner.run_headless.return_value = "terok-agent-test"
+            mock_runner.run_headless.return_value = "terok-executor-test"
             _handle_run(
                 agent="claude",
                 repo=".",
@@ -124,11 +124,11 @@ class TestSharedDirArgs:
 
     def test_handle_run_omits_shared_mount_when_no_dir(self) -> None:
         """_handle_run omits shared_mount from common dict when shared_dir is None."""
-        from terok_agent.commands import _handle_run
+        from terok_executor.commands import _handle_run
 
-        with patch("terok_agent.container.runner.AgentRunner") as mock_cls:
+        with patch("terok_executor.container.runner.AgentRunner") as mock_cls:
             mock_runner = mock_cls.return_value
-            mock_runner.run_headless.return_value = "terok-agent-test"
+            mock_runner.run_headless.return_value = "terok-executor-test"
             _handle_run(agent="claude", repo=".", prompt="test")
         call_kwargs = mock_runner.run_headless.call_args
         assert call_kwargs.kwargs["shared_dir"] is None
@@ -139,7 +139,7 @@ class TestResolveHostGitIdentity:
     """Verify _resolve_host_git_identity reads from host git config."""
 
     def test_reads_name_and_email(self) -> None:
-        from terok_agent.commands import _resolve_host_git_identity
+        from terok_executor.commands import _resolve_host_git_identity
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -152,7 +152,7 @@ class TestResolveHostGitIdentity:
         assert email == "jane@example.com"
 
     def test_returns_none_on_missing_config(self) -> None:
-        from terok_agent.commands import _resolve_host_git_identity
+        from terok_executor.commands import _resolve_host_git_identity
 
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
@@ -165,7 +165,7 @@ class TestResolveHostGitIdentity:
         assert email is None
 
     def test_returns_none_when_git_not_found(self) -> None:
-        from terok_agent.commands import _resolve_host_git_identity
+        from terok_executor.commands import _resolve_host_git_identity
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
             name, email = _resolve_host_git_identity()

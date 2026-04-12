@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""terok-agent: single-agent task runner for hardened Podman containers.
+"""terok-executor: single-agent task runner for hardened Podman containers.
 
 Builds agent images, launches instrumented containers, and manages the
 lifecycle of one AI coding agent at a time.  Designed for standalone use
-(``terok-agent run claude .``) and as a library for terok orchestration.
+(``terok-executor run claude .``) and as a library for terok orchestration.
 
 The public surface is ``__all__`` below.  Key entry points:
 
@@ -20,7 +20,7 @@ __version__: str = "0.0.0"  # placeholder; replaced at build time
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
 try:
-    __version__ = _meta_version("terok-agent")
+    __version__ = _meta_version("terok-executor")
 except PackageNotFoundError:
     pass  # editable install or running from source without metadata
 
@@ -105,7 +105,7 @@ def _bootstrap_roster() -> None:
     """Populate module-level provider dicts from the YAML roster."""
     global PROVIDER_NAMES  # noqa: PLW0603 — tuple requires rebind
 
-    import terok_agent.provider.providers as _reg
+    import terok_executor.provider.providers as _reg
 
     from .roster import get_roster
 

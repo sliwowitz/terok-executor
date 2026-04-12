@@ -69,7 +69,7 @@ RUN chmod +x /etc/profile.d/terok-env.sh; \
 
 # Symlink for per-task agent wrappers (resolved at runtime via mount).
 RUN mkdir -p /usr/local/share/terok && \
-    ln -s /home/dev/.terok/terok-agent.sh /usr/local/share/terok/terok-env-wrappers.sh
+    ln -s /home/dev/.terok/terok-executor.sh /usr/local/share/terok/terok-env-wrappers.sh
 
 # === Cache bust point ===
 # Changing AGENT_CACHE_BUST invalidates all layers below: terok scripts,

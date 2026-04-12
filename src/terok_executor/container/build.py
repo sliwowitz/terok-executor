@@ -12,16 +12,16 @@ staging, image naming, and ``podman build`` invocation.
     L1  (agent)  — All AI agent CLIs, shell environment, ACP wrappers
                    L1 is self-sufficient for standalone use — all user
                    config (repo URL, SSH, branch, gate) is runtime.
-    ─── boundary: above owned by terok-agent, below by terok ───
+    ─── boundary: above owned by terok-executor, below by terok ───
     L2  (project)— Optional: user Dockerfile snippet (custom packages)
                    Only built when project has docker snippet config.
 
-``terok-agent run claude .`` launches directly on the L1 image — no L2
+``terok-executor run claude .`` launches directly on the L1 image — no L2
 build needed.  terok adds L2 only for project-specific image customisation.
 
 Usage as a library::
 
-    from terok_agent import build_base_images
+    from terok_executor import build_base_images
 
     images = build_base_images("ubuntu:24.04")
     # images.l0 = "terok-l0:ubuntu-24.04"
@@ -121,7 +121,7 @@ def build_base_images(
     import tempfile
 
     own_tmp = build_dir is None
-    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-agent-build-"))
+    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-build-"))
 
     try:
         prepare_build_context(context)
@@ -212,7 +212,7 @@ def build_sidecar_image(
     import tempfile
 
     own_tmp = build_dir is None
-    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-agent-sidecar-"))
+    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-sidecar-"))
 
     try:
         prepare_build_context(context)
@@ -313,13 +313,13 @@ def render_l1_sidecar(
 def stage_scripts(dest: Path) -> None:
     """Stage container helper scripts into *dest*.
 
-    Copies all files from ``terok_agent/resources/scripts/`` into the given
+    Copies all files from ``terok_executor/resources/scripts/`` into the given
     directory, replacing any existing contents.  Python bytecode caches and
     ``__init__.py`` markers are excluded.
     """
     if dest.exists():
         shutil.rmtree(dest)
-    _copy_package_tree("terok_agent", "resources/scripts", dest)
+    _copy_package_tree("terok_executor", "resources/scripts", dest)
     _clean_packaging_artifacts(dest)
 
 
@@ -331,7 +331,7 @@ def stage_toad_agents(dest: Path) -> None:
     """
     if dest.exists():
         shutil.rmtree(dest)
-    _copy_package_tree("terok_agent", "resources/toad-agents", dest)
+    _copy_package_tree("terok_executor", "resources/toad-agents", dest)
     _clean_packaging_artifacts(dest)
 
 
@@ -343,7 +343,7 @@ def stage_tmux_config(dest: Path) -> None:
     """
     if dest.exists():
         shutil.rmtree(dest)
-    _copy_package_tree("terok_agent", "resources/tmux", dest)
+    _copy_package_tree("terok_executor", "resources/tmux", dest)
     _clean_packaging_artifacts(dest)
 
 
@@ -407,7 +407,7 @@ def _render_template(template_name: str, variables: dict[str, str]) -> str:
     """
     from jinja2 import BaseLoader, Environment
 
-    raw = (resources.files("terok_agent") / "resources" / "templates" / template_name).read_text(
+    raw = (resources.files("terok_executor") / "resources" / "templates" / template_name).read_text(
         encoding="utf-8"
     )
     env = Environment(  # nosec B701 — Dockerfile output, not HTML

@@ -4,7 +4,7 @@
 """Prepares agent config directories with wrappers, instructions, and sub-agent definitions.
 
 Parses .md frontmatter for sub-agent definitions, converts them to Claude's
-``--agents`` JSON format, and generates the ``terok-agent.sh`` wrapper that
+``--agents`` JSON format, and generates the ``terok-executor.sh`` wrapper that
 sets up git identity and CLI flags inside task containers.
 """
 
@@ -15,7 +15,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from terok_agent._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
+from terok_executor._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
 
 from .wrappers import WrapperConfig
 
@@ -82,7 +82,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     """Create and populate the agent-config directory for a task.
 
     Writes:
-    - terok-agent.sh (always) — wrapper functions with git env vars
+    - terok-executor.sh (always) — wrapper functions with git env vars
     - agents.json (only when provider supports it and sub-agents are non-empty)
     - prompt.txt (if prompt given, headless only)
     - instructions.md (always) — custom instructions or a neutral default
@@ -161,7 +161,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
         has_agents,
         claude_wrapper_fn=_claude_wrapper_with_instructions,
     )
-    (agent_config_dir / "terok-agent.sh").write_text(wrapper, encoding="utf-8")
+    (agent_config_dir / "terok-executor.sh").write_text(wrapper, encoding="utf-8")
 
     # Write SessionStart hook — only for providers that support it (Claude)
     if resolved.supports_session_hook:
@@ -333,7 +333,7 @@ def _inject_opencode_instructions(config_path: Path) -> None:
 
 
 def _generate_claude_wrapper(cfg: WrapperConfig) -> str:
-    """Generate the terok-agent.sh wrapper function content for Claude.
+    """Generate the terok-executor.sh wrapper function content for Claude.
 
     Always includes git env vars and --add-dir /; includes --agents when configured.
 

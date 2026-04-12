@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from terok_agent.credentials.auth import (
+from terok_executor.credentials.auth import (
     PHANTOM_CREDENTIALS_MARKER,
     _apply_post_capture_state,
     _capture_credentials,
@@ -262,7 +262,7 @@ class TestCaptureAppliesPostCaptureState:
 
     def test_capture_triggers_post_capture_state(self, tmp_path: Path) -> None:
         """When auth_provider has post_capture_state, it is applied after capture."""
-        from terok_agent.credentials.auth import AuthProvider
+        from terok_executor.credentials.auth import AuthProvider
 
         provider = AuthProvider(
             name="claude",
@@ -293,7 +293,7 @@ class TestCaptureAppliesPostCaptureState:
 
     def test_capture_skips_post_capture_when_empty(self, tmp_path: Path) -> None:
         """No post_capture_state means no extra files are written."""
-        from terok_agent.credentials.auth import AuthProvider
+        from terok_executor.credentials.auth import AuthProvider
 
         provider = AuthProvider(
             name="claude",
@@ -323,7 +323,7 @@ class TestCaptureAppliesPostCaptureState:
         self, tmp_path: Path, capsys
     ) -> None:
         """Post-capture state failure logs a warning but doesn't abort capture."""
-        from terok_agent.credentials.auth import AuthProvider
+        from terok_executor.credentials.auth import AuthProvider
 
         provider = AuthProvider(
             name="claude",

@@ -12,7 +12,7 @@ on:
 jobs:
   unit-tests:
     name: Unit tests
-    if: github.repository == 'terok-ai/terok-agent'
+    if: github.repository == 'terok-ai/terok-executor'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -94,7 +94,7 @@ jobs:
 
   ruff:
     name: Ruff
-    if: github.repository == 'terok-ai/terok-agent'
+    if: github.repository == 'terok-ai/terok-executor'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -117,7 +117,7 @@ jobs:
 
   bandit:
     name: Bandit
-    if: github.repository == 'terok-ai/terok-agent'
+    if: github.repository == 'terok-ai/terok-executor'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -134,7 +134,7 @@ jobs:
         run: mkdir -p reports
 
       - name: Write Bandit report
-        run: bandit -r src/terok_agent/ --exit-zero -f json -o reports/bandit-report.json
+        run: bandit -r src/terok_executor/ --exit-zero -f json -o reports/bandit-report.json
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v7
@@ -145,7 +145,7 @@ jobs:
 
   sonar:
     name: SonarQube Cloud
-    if: github.repository == 'terok-ai/terok-agent' && (github.event_name == 'push' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository))
+    if: github.repository == 'terok-ai/terok-executor' && (github.event_name == 'push' || (github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository))
     needs: [unit-tests, ruff, bandit]
     runs-on: ubuntu-latest
     steps:

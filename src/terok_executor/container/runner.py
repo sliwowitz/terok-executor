@@ -31,7 +31,7 @@ from .build import BuildError, build_base_images
 if TYPE_CHECKING:
     from terok_sandbox import LifecycleHooks, Sandbox
 
-    from terok_agent.roster.loader import AgentRoster
+    from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class AgentRunner:
     def roster(self) -> AgentRoster:
         """Lazy-init agent roster."""
         if self._roster is None:
-            from terok_agent.roster.loader import get_roster
+            from terok_executor.roster.loader import get_roster
 
             self._roster = get_roster()
         return self._roster
@@ -283,7 +283,7 @@ class AgentRunner:
         shared_mount: str = "/shared",
     ) -> str:
         """Unified launch flow for all modes (headless, interactive, web, tool)."""
-        from terok_agent.paths import mounts_dir
+        from terok_executor.paths import mounts_dir
 
         from .env import ContainerEnvSpec, assemble_container_env
 
@@ -296,13 +296,13 @@ class AgentRunner:
             sidecar_spec = self.roster.get_sidecar_spec(provider)
             image_tag = self._ensure_sidecar_image(sidecar_spec.tool_name)
         else:
-            from terok_agent.provider.headless import build_headless_command
+            from terok_executor.provider.headless import build_headless_command
 
             agent = self.roster.get_provider(provider)
             image_tag = self._ensure_images()
 
         # Task directory (ephemeral for standalone runs)
-        task_dir = Path(tempfile.mkdtemp(prefix=f"terok-agent-{task_id}-"))
+        task_dir = Path(tempfile.mkdtemp(prefix=f"terok-executor-{task_id}-"))
 
         mounts_base = mounts_dir()
 
@@ -535,7 +535,7 @@ class AgentRunner:
         if cred is None:
             print(
                 f"Warning [runner]: no credentials stored for {tool_name!r}. "
-                f"Run: terok-agent auth {tool_name} --api-key <key>",
+                f"Run: terok-executor auth {tool_name} --api-key <key>",
                 file=sys.stderr,
             )
             return {}
@@ -562,8 +562,8 @@ class AgentRunner:
         *project_root* is passed to :func:`resolve_instructions` so that
         ``<repo>/instructions.md`` is appended when present.
         """
-        from terok_agent.provider.agents import AgentConfigSpec, prepare_agent_config_dir
-        from terok_agent.provider.instructions import resolve_instructions
+        from terok_executor.provider.agents import AgentConfigSpec, prepare_agent_config_dir
+        from terok_executor.provider.instructions import resolve_instructions
 
         resolved_instructions = instructions or resolve_instructions(
             {}, provider, project_root=project_root
@@ -604,7 +604,7 @@ class AgentRunner:
         """
         from terok_sandbox import GpuConfigError, RunSpec
 
-        cname = name or f"terok-agent-{task_id}"
+        cname = name or f"terok-executor-{task_id}"
 
         spec = RunSpec(
             container_name=cname,

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Registers the subcommands that terok-agent exposes to users.
+"""Registers the subcommands that terok-executor exposes to users.
 
 Each subcommand is a :class:`CommandDef` built from :class:`ArgDef` pieces.
 ``COMMANDS`` at module bottom is the authoritative catalog — higher-level
@@ -36,7 +36,7 @@ class ArgDef:
 
 @dataclass(frozen=True)
 class CommandDef:
-    """Definition of a terok-agent subcommand."""
+    """Definition of a terok-executor subcommand."""
 
     name: str
     help: str = ""
@@ -255,10 +255,10 @@ def _handle_build(
 
 
 def _handle_ls() -> None:
-    """List running terok-agent containers."""
+    """List running terok-executor containers."""
     from terok_sandbox import get_container_states
 
-    states = get_container_states("terok-agent-")
+    states = get_container_states("terok-executor-")
     if not states:
         print("No running containers.")
         return
@@ -374,7 +374,7 @@ STOP_COMMAND = CommandDef(
     args=(ArgDef(name="name", help="Container name"),),
 )
 
-#: All terok-agent commands.
+#: All terok-executor commands.
 COMMANDS: tuple[CommandDef, ...] = (
     RUN_COMMAND,
     RUN_TOOL_COMMAND,

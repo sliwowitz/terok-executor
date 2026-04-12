@@ -27,7 +27,7 @@ from pathlib import Path
 
 from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
 
-from terok_agent._util import podman_userns_args
+from terok_executor._util import podman_userns_args
 
 # ── Vocabulary ──
 
@@ -385,7 +385,7 @@ def _capture_credentials(
     # Write .credentials.json — real token (tier 3) or phantom marker (default)
     if is_claude_oauth:
         if mounts_base is None:
-            from terok_agent.paths import mounts_dir
+            from terok_executor.paths import mounts_dir
 
             mounts_base = mounts_dir()
         try:
@@ -485,7 +485,7 @@ def _apply_post_capture_state(
     import json
 
     if mounts_base is None:
-        from terok_agent.paths import mounts_dir
+        from terok_executor.paths import mounts_dir
 
         mounts_base = mounts_dir()
 

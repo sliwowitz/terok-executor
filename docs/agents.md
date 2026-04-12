@@ -25,8 +25,8 @@ Tools run alongside an agent in a separate container:
 ## Listing agents
 
 ```bash
-terok-agent agents            # coding agents only
-terok-agent agents --all      # include tools (gh, glab, coderabbit, sonarcloud)
+terok-executor agents            # coding agents only
+terok-executor agents --all      # include tools (gh, glab, coderabbit, sonarcloud)
 ```
 
 ## Authentication
@@ -38,20 +38,20 @@ container with the vendor CLI. After login, the OAuth token is captured
 to the host-side credential database.
 
 ```bash
-terok-agent auth claude
+terok-executor auth claude
 ```
 
 **Interactive API key prompt** (Vibe, Blablador, KISSKI, glab) — prompts
 for a key on the terminal. No container needed.
 
 ```bash
-terok-agent auth vibe
+terok-executor auth vibe
 ```
 
 **Non-interactive** (all providers) — pass the key directly:
 
 ```bash
-terok-agent auth gh --api-key ghp_…
+terok-executor auth gh --api-key ghp_…
 ```
 
 After authentication, containers receive phantom tokens instead of real
@@ -63,8 +63,8 @@ Tools like CodeRabbit and SonarCloud run via `run-tool`. Arguments after
 `--` are passed to the tool binary:
 
 ```bash
-terok-agent run-tool coderabbit . -- --pr 42
-terok-agent run-tool sonarcloud . --timeout 300
+terok-executor run-tool coderabbit . -- --pr 42
+terok-executor run-tool sonarcloud . --timeout 300
 ```
 
 ## Custom agents
@@ -83,7 +83,7 @@ By default, agents commit under a built-in AI identity. To use the
 host machine's git config instead:
 
 ```bash
-terok-agent run claude . --git-identity-from-host -p "…"
+terok-executor run claude . --git-identity-from-host -p "…"
 ```
 
 This injects `user.name` and `user.email` from the host's git config

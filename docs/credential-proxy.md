@@ -94,7 +94,7 @@ process. SELinux allows `container_t -> container_t` socket connections.
 The TCP hop to the host proxy crosses the container boundary safely.
 
 The `http_unix_socket` path is written to `~/.config/gh/config.yml`
-by the `shared_config_patch` mechanism during `terok-agent auth gh`.
+by the `shared_config_patch` mechanism during `terok-executor auth gh`.
 
 ### YAML-driven shared_config_patch
 
@@ -161,7 +161,7 @@ After exit, the extractor captures the OAuth token to the DB.
 Prompts for an API key on the terminal. No container needed.
 
 **3. API key -- non-interactive** (all providers):
-`terok-agent auth <provider> --api-key <key>`
+`terok-executor auth <provider> --api-key <key>`
 
 ### Post-auth config patching
 
@@ -195,7 +195,7 @@ After storing credentials, `write_proxy_config()` applies any
 - **[terok-sandbox](https://terok-ai.github.io/terok-sandbox/)**: Credential
   DB, proxy server (HTTP forwarding, phantom token resolution, OAuth token
   refresh, SSH agent proxy), TCP+Unix listeners, lifecycle management
-- **terok-agent** (this package): YAML agent registry, credential extractors,
+- **terok-executor** (this package): YAML agent registry, credential extractors,
   auth CLI, container environment wiring (phantom env vars, base URL overrides,
   socat bridges, `shared_config_patch`)
 - **[terok](https://terok-ai.github.io/terok/)**: Environment builder, phantom

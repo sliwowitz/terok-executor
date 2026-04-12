@@ -11,14 +11,14 @@ from unittest.mock import patch
 import pytest
 from terok_sandbox import VolumeSpec
 
-from terok_agent.container.env import (
+from terok_executor.container.env import (
     ContainerEnvResult,
     ContainerEnvSpec,
     _resolve_git_identity,
     _shared_config_mounts,
     assemble_container_env,
 )
-from terok_agent.roster import get_roster
+from terok_executor.roster import get_roster
 
 
 def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpec | None:
@@ -455,7 +455,7 @@ class TestTaskDir:
     def test_auto_creates_temp_dir(self, base_spec, roster):
         result = assemble_container_env(base_spec, roster, proxy_bypass=True)
         assert result.task_dir.exists()
-        assert "terok-agent-test-123" in str(result.task_dir)
+        assert "terok-executor-test-123" in str(result.task_dir)
 
 
 # ---------------------------------------------------------------------------

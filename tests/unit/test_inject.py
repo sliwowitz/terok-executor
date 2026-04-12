@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from terok_agent.container.inject import inject_agent_config, inject_prompt
+from terok_executor.container.inject import inject_agent_config, inject_prompt
 
 
 class TestInjectAgentConfig:

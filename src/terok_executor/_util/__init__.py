@@ -3,7 +3,7 @@
 
 """Re-exports filesystem, podman, and YAML utilities for internal use.
 
-Standalone — no terok-agent domain imports, safe to use from any layer.
+Standalone — no terok-executor domain imports, safe to use from any layer.
 """
 
 from ._fs import ensure_dir, ensure_dir_writable

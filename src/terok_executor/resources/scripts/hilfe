@@ -28,7 +28,7 @@ _terok_permission_mode() {
     fi
 }
 
-_terok_agents() {
+_terok_executors() {
     printf '\n\033[1mAvailable AI agents:\033[0m\n'
     printf '  \033[36mcodex\033[0m      - OpenAI Codex CLI\n'
     printf '  \033[36mclaude\033[0m     - Claude Code CLI\n'
@@ -64,7 +64,7 @@ _terok_notes() {
 }
 
 _terok_permission_mode
-_terok_agents
+_terok_executors
 _terok_dev_tools
 
 if [[ "$_mode" == "--kurz" ]]; then

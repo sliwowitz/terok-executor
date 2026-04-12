@@ -34,7 +34,7 @@ class TestApplyTomlPatchWarning:
             "toml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_toml_patch
+        from terok_executor.credentials.proxy_config import _apply_toml_patch
 
         _apply_toml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -62,7 +62,7 @@ class TestApplyTomlPatchWarning:
             "toml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_toml_patch
+        from terok_executor.credentials.proxy_config import _apply_toml_patch
 
         _apply_toml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -81,7 +81,7 @@ class TestApplyTomlPatchWarning:
             "toml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_toml_patch
+        from terok_executor.credentials.proxy_config import _apply_toml_patch
 
         _apply_toml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -107,7 +107,7 @@ class TestApplyYamlPatchWarning:
             "yaml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_yaml_patch
+        from terok_executor.credentials.proxy_config import _apply_yaml_patch
 
         _apply_yaml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -132,7 +132,7 @@ class TestApplyYamlPatchWarning:
             "yaml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_yaml_patch
+        from terok_executor.credentials.proxy_config import _apply_yaml_patch
 
         _apply_yaml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -149,7 +149,7 @@ class TestApplyYamlPatchWarning:
             "yaml_set": {"api_base": "{proxy_url}/v1"},
         }
 
-        from terok_agent.credentials.proxy_config import _apply_yaml_patch
+        from terok_executor.credentials.proxy_config import _apply_yaml_patch
 
         _apply_yaml_patch(config_path, patch_spec, "http://localhost:9999")
 
@@ -179,7 +179,7 @@ class TestLoadBundledAgentsWarning:
         mock_pkg.iterdir.return_value = [good_item, bad_item]
 
         with patch("importlib.resources.files", return_value=mock_pkg):
-            from terok_agent.roster.loader import _load_bundled_agents
+            from terok_executor.roster.loader import _load_bundled_agents
 
             agents = _load_bundled_agents()
 
@@ -202,7 +202,7 @@ class TestLoadBundledAgentsWarning:
         mock_pkg.iterdir.return_value = [bad_yaml_item]
 
         with patch("importlib.resources.files", return_value=mock_pkg):
-            from terok_agent.roster.loader import _load_bundled_agents
+            from terok_executor.roster.loader import _load_bundled_agents
 
             agents = _load_bundled_agents()
 
@@ -230,8 +230,8 @@ class TestLoadUserAgentsWarning:
         (user_dir / "good.yaml").write_text("kind: agent\nlabel: Good\nbinary: good\n")
         (user_dir / "broken.yaml").write_text(":\n  - :\n  bad: [unterminated")
 
-        with patch("terok_agent.roster.loader._user_agents_dir", return_value=user_dir):
-            from terok_agent.roster.loader import _load_user_agents
+        with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
+            from terok_executor.roster.loader import _load_user_agents
 
             agents = _load_user_agents()
 
@@ -253,10 +253,10 @@ class TestLoadUserAgentsWarning:
         bad_file.write_text("kind: agent\n")
 
         with (
-            patch("terok_agent.roster.loader._user_agents_dir", return_value=user_dir),
+            patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir),
             patch.object(Path, "read_text", side_effect=PermissionError("denied")),
         ):
-            from terok_agent.roster.loader import _load_user_agents
+            from terok_executor.roster.loader import _load_user_agents
 
             agents = _load_user_agents()
 
@@ -271,9 +271,9 @@ class TestLoadUserAgentsWarning:
     ) -> None:
         """Missing user agents directory produces no warning (expected case)."""
         with patch(
-            "terok_agent.roster.loader._user_agents_dir", return_value=tmp_path / "nonexistent"
+            "terok_executor.roster.loader._user_agents_dir", return_value=tmp_path / "nonexistent"
         ):
-            from terok_agent.roster.loader import _load_user_agents
+            from terok_executor.roster.loader import _load_user_agents
 
             agents = _load_user_agents()
 

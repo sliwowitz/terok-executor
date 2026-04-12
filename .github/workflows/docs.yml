@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.repository == 'terok-ai/terok-agent'
+    if: github.repository == 'terok-ai/terok-executor'
     runs-on: ubuntu-latest
     permissions:
       contents: read

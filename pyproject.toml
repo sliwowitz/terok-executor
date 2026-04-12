@@ -3,7 +3,7 @@ requires = ["poetry-core>=1.9.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
-name = "terok-agent"
+name = "terok-executor"
 version = "0.0.70"
 description = "Single-agent task runner for hardened Podman containers"
 readme = "README.md"
@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 packages = [
-  { include = "terok_agent", from = "src" },
+  { include = "terok_executor", from = "src" },
 ]
 
 [tool.poetry.dependencies]
@@ -53,7 +53,7 @@ mkdocs-section-index = ">=0.3"
 mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/download/v0.4.1/mkdocs_terok-0.4.1-py3-none-any.whl"}
 
 [tool.poetry.scripts]
-terok-agent = "terok_agent.cli:main"
+terok-executor = "terok_executor.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -94,7 +94,7 @@ ignore = [
 "tests/**" = ["E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["terok_agent"]
+known-first-party = ["terok_executor"]
 combine-as-imports = true
 
 [tool.ruff.format]

@@ -1,8 +1,8 @@
-site_name: terok-agent
+site_name: terok-executor
 site_description: Single-agent task runner for hardened Podman containers
-site_url: https://terok-ai.github.io/terok-agent
-repo_url: https://github.com/terok-ai/terok-agent
-repo_name: terok-ai/terok-agent
+site_url: https://terok-ai.github.io/terok-executor
+repo_url: https://github.com/terok-ai/terok-executor
+repo_name: terok-ai/terok-executor
 
 theme:
   name: material
@@ -53,7 +53,7 @@ plugins:
       ci_map_path: ci_map.md
       quality_report: true
       quality_report_path: quality_report.md
-      quality_report_codecov_repo: terok-ai/terok-agent
+      quality_report_codecov_repo: terok-ai/terok-executor
       module_map: true
       module_map_path: module-map.md
       ref_pages: true
@@ -85,7 +85,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/terok-ai/terok-agent
+      link: https://github.com/terok-ai/terok-executor
 
 extra_css:
   - https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap

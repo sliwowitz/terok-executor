@@ -1,13 +1,13 @@
 # Getting started
 
-## Why terok-agent
+## Why terok-executor
 
 AI coding agents need network access and credentials to do useful work,
 but giving them uncontrolled access to both is a risk — a prompt-injected
 or supply-chain-compromised agent can exfiltrate API keys, push to
 arbitrary remotes, or reach services it shouldn't.
 
-terok-agent runs each agent in an isolated rootless Podman container with
+terok-executor runs each agent in an isolated rootless Podman container with
 an egress firewall and a credential proxy that keeps real secrets off the
 container filesystem. One command to build, authenticate, and launch.
 
@@ -19,13 +19,13 @@ container filesystem. One command to build, authenticate, and launch.
 ## Install
 
 ```bash
-pip install terok-agent
+pip install terok-executor
 ```
 
 ## Build container images
 
 ```bash
-terok-agent build
+terok-executor build
 ```
 
 Builds two image layers: a base image (OS, dev tools, init scripts) and
@@ -35,9 +35,9 @@ with `--rebuild` to bust caches or `--full-rebuild` for a clean pull.
 ## Authenticate
 
 ```bash
-terok-agent auth claude              # OAuth login
-terok-agent auth vibe                # interactive API key prompt
-terok-agent auth gh --api-key ghp_…  # non-interactive
+terok-executor auth claude              # OAuth login
+terok-executor auth vibe                # interactive API key prompt
+terok-executor auth gh --api-key ghp_…  # non-interactive
 ```
 
 Credentials are stored in a host-side database. Containers never see real
@@ -47,7 +47,7 @@ See [Security](security.md) for details.
 ## First run
 
 ```bash
-terok-agent run claude . -p "Add type hints to utils.py"
+terok-executor run claude . -p "Add type hints to utils.py"
 ```
 
 This clones the current directory into a hardened container, launches

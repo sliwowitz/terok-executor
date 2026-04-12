@@ -5,7 +5,7 @@
 
 In sealed isolation mode, the container has no bind mounts — files must be
 injected via ``podman cp``.  These helpers complement
-:func:`~terok_agent.provider.agents.prepare_agent_config_dir` which prepares
+:func:`~terok_executor.provider.agents.prepare_agent_config_dir` which prepares
 the files on the host side.
 """
 

@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""CLI entry point for terok-agent.
+"""CLI entry point for terok-executor.
 
-Built from the command registry in :mod:`terok_agent.commands`.
+Built from the command registry in :mod:`terok_executor.commands`.
 No command logic lives here — just argument wiring and dispatch.
 """
 
@@ -17,7 +17,7 @@ from .commands import COMMANDS, ArgDef, CommandDef
 from .credentials.proxy_commands import PROXY_COMMANDS
 
 try:
-    __version__ = _meta_version("terok-agent")
+    __version__ = _meta_version("terok-executor")
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
@@ -26,12 +26,12 @@ except PackageNotFoundError:
 
 
 def main() -> None:
-    """Run the terok-agent CLI."""
+    """Run the terok-executor CLI."""
     parser = argparse.ArgumentParser(
-        prog="terok-agent",
+        prog="terok-executor",
         description="Single-agent task runner for hardened Podman containers",
     )
-    parser.add_argument("--version", action="version", version=f"terok-agent {__version__}")
+    parser.add_argument("--version", action="version", version=f"terok-executor {__version__}")
     sub = parser.add_subparsers()
 
     for cmd in COMMANDS:

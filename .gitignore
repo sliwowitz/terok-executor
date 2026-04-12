@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 /build/
 /dist/
-/src/terok_agent.egg-info/
+/src/terok_executor.egg-info/
 .coverage
 reports/
 /.idea

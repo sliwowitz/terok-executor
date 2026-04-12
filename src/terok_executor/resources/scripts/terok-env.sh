@@ -85,6 +85,6 @@ fi
 # ── Per-project agent wrappers ────────────────────────────────────────────────
 
 # Source per-task agent wrappers via the L1 symlink to the bind-mounted
-# terok-agent.sh.  Defines wrapper functions: claude(), codex(), vibe(), etc.
+# terok-executor.sh.  Defines wrapper functions: claude(), codex(), vibe(), etc.
 [ -r /usr/local/share/terok/terok-env-wrappers.sh ] && \
     . /usr/local/share/terok/terok-env-wrappers.sh

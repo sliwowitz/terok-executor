@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from terok_agent.container.runner import AgentRunner, _generate_task_id, _resolve_repo
+from terok_executor.container.runner import AgentRunner, _generate_task_id, _resolve_repo
 
 
 class TestResolveRepo:
@@ -79,7 +79,7 @@ class TestAgentRunner:
                 follow=False,
             )
 
-        assert cname.startswith("terok-agent-")
+        assert cname.startswith("terok-executor-")
         sandbox.run.assert_called_once()
         spec = sandbox.run.call_args[0][0]
         assert spec.image == "terok-l1-cli:test"
@@ -192,7 +192,7 @@ class TestAgentRunner:
         """GpuConfigError from sandbox.run() is wrapped as BuildError."""
         from terok_sandbox import GpuConfigError
 
-        from terok_agent.container.build import BuildError
+        from terok_executor.container.build import BuildError
 
         sandbox = _mock_sandbox()
         sandbox.run.side_effect = GpuConfigError("CDI broken")
@@ -372,19 +372,19 @@ class TestCommandRegistry:
     """Verify the command registry is well-formed."""
 
     def test_all_commands_have_handlers(self) -> None:
-        from terok_agent.commands import COMMANDS
+        from terok_executor.commands import COMMANDS
 
         for cmd in COMMANDS:
             assert cmd.handler is not None, f"Command '{cmd.name}' has no handler"
 
     def test_run_command_has_agent_arg(self) -> None:
-        from terok_agent.commands import RUN_COMMAND
+        from terok_executor.commands import RUN_COMMAND
 
         arg_names = [a.name for a in RUN_COMMAND.args]
         assert "agent" in arg_names
 
     def test_commands_exported_from_package(self) -> None:
-        from terok_agent import AGENT_COMMANDS
+        from terok_executor import AGENT_COMMANDS
 
         assert len(AGENT_COMMANDS) >= 5  # run, auth, agents, build, ls, stop
 
