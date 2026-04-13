@@ -379,29 +379,44 @@ def _inject_proxy_tokens(
         db = CredentialDB(cfg.proxy_db_path)
     except Exception as exc:
         _logger.warning("Credential proxy DB unavailable: %s: %s", type(exc).__name__, exc)
+        if proxy_required:
+            raise SystemExit(
+                f"Credential proxy DB unavailable: {type(exc).__name__}: {exc}\n\n"
+                "Start it with:\n"
+                "  terok credential-proxy install   (systemd socket activation)\n"
+                "  terok credential-proxy start     (manual daemon)"
+            ) from exc
         return {}
 
     try:
         credential_set = "default"
         stored = set(db.list_credentials(credential_set))
         routed = stored & proxy_routes.keys()
-        if not routed:
+
+        # SSH agent token is independent of provider credentials — a project
+        # with SSH keys but no API creds should still get TEROK_SSH_AGENT_*.
+        ssh_token = _load_ssh_agent_token(db, cfg, scope, task_id)
+
+        if not routed and not ssh_token:
             return {}
 
         credential_types: dict[str, str] = {}
+        tokens: dict[str, str] = {}
         for name in routed:
             cred = db.load_credential(credential_set, name)
             credential_types[name] = (cred.get("type") if cred else None) or "api_key"
-
-        tokens = {
-            name: db.create_proxy_token(scope, task_id, credential_set, name) for name in routed
-        }
-
-        ssh_token = _load_ssh_agent_token(db, cfg, scope, task_id)
+            tokens[name] = db.create_proxy_token(scope, task_id, credential_set, name)
 
         port = get_proxy_port(cfg)
     except Exception as exc:
         _logger.warning("Credential proxy token injection failed: %s: %s", type(exc).__name__, exc)
+        if proxy_required:
+            raise SystemExit(
+                f"Credential proxy token injection failed: {type(exc).__name__}: {exc}\n\n"
+                "Start it with:\n"
+                "  terok credential-proxy install   (systemd socket activation)\n"
+                "  terok credential-proxy start     (manual daemon)"
+            ) from exc
         return {}
     finally:
         db.close()
@@ -466,8 +481,16 @@ def _load_ssh_agent_token(
     """Create an SSH agent phantom token if *scope* has valid keys registered."""
     ssh_keys = _load_ssh_keys_json(cfg.ssh_keys_json_path)
     ssh_entry = ssh_keys.get(scope)
-    if isinstance(ssh_entry, list) and any(
-        e.get("private_key") and e.get("public_key") for e in ssh_entry
-    ):
+    if not isinstance(ssh_entry, list):
+        return None
+    for entry in ssh_entry:
+        if not isinstance(entry, dict):
+            _logger.warning(
+                "Malformed entry in ssh-keys.json for scope %r: expected dict, got %s",
+                scope,
+                type(entry).__name__,
+            )
+            return None
+    if any(e.get("private_key") and e.get("public_key") for e in ssh_entry):
         return db.create_proxy_token(scope, task_id, scope, "ssh")
     return None

@@ -27,9 +27,9 @@ def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpe
 
 
 def _make_proxy_db(tmp_path: Path, cred_name: str = "claude", cred_data: dict | None = None):
-    """Create a SandboxConfig + CredentialDB with one stored credential.
+    """Return a ``SandboxConfig`` with one credential pre-stored in its ``CredentialDB``.
 
-    Returns ``(cfg, db)`` — caller should ``db.close()`` when done.
+    The DB is created, populated, and closed internally.
     """
     from terok_sandbox import CredentialDB, SandboxConfig
 
@@ -547,6 +547,81 @@ class TestCredentialProxy:
 
         assert "TEROK_SSH_AGENT_TOKEN" not in result.env
         assert "TEROK_SSH_AGENT_PORT" not in result.env
+
+    def test_proxy_ssh_only_no_provider_creds(self, workspace, envs_dir, roster, tmp_path):
+        """SSH agent token injected even when no provider credentials are stored."""
+        import json
+
+        from terok_sandbox import CredentialDB, SandboxConfig
+
+        cfg = SandboxConfig(state_dir=tmp_path, credentials_dir=tmp_path / "credentials")
+        cfg.proxy_db_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg.credentials_dir.mkdir(parents=True, exist_ok=True)
+        # DB exists but has NO provider credentials — only SSH keys
+        CredentialDB(cfg.proxy_db_path).close()
+        cfg.ssh_keys_json_path.write_text(
+            json.dumps(
+                {
+                    "sshonly": [
+                        {"private_key": "/tmp/terok-testing/k", "public_key": "ssh-ed25519 A"}
+                    ]
+                }
+            )
+        )
+
+        spec = _spec(workspace, envs_dir, credential_scope="sshonly")
+        with (
+            patch("terok_sandbox.is_proxy_socket_active", return_value=True),
+            patch("terok_sandbox.SandboxConfig", return_value=cfg),
+        ):
+            result = assemble_container_env(spec, roster, caller_manages_proxy=False)
+
+        assert "TEROK_SSH_AGENT_TOKEN" in result.env
+        assert result.env["TEROK_SSH_AGENT_TOKEN"].startswith("terok-p-")
+        # No provider tokens
+        assert "ANTHROPIC_API_KEY" not in result.env
+
+    def test_proxy_required_hard_fails_on_db_error(self, workspace, envs_dir, roster):
+        """proxy_required=True raises SystemExit on CredentialDB construction failure."""
+        spec = _spec(workspace, envs_dir, proxy_required=True)
+        with (
+            patch("terok_sandbox.is_proxy_socket_active", return_value=True),
+            patch("terok_sandbox.CredentialDB", side_effect=OSError("corrupt")),
+            pytest.raises(SystemExit, match="DB unavailable.*corrupt"),
+        ):
+            assemble_container_env(spec, roster, caller_manages_proxy=False)
+
+    def test_proxy_required_hard_fails_on_token_error(self, workspace, envs_dir, roster, tmp_path):
+        """proxy_required=True raises SystemExit on token creation failure."""
+        cfg = _make_proxy_db(tmp_path)
+        spec = _spec(workspace, envs_dir, proxy_required=True)
+        with (
+            patch("terok_sandbox.is_proxy_socket_active", return_value=True),
+            patch("terok_sandbox.SandboxConfig", return_value=cfg),
+            patch(
+                "terok_sandbox.CredentialDB.create_proxy_token", side_effect=RuntimeError("boom")
+            ),
+            pytest.raises(SystemExit, match="injection failed.*boom"),
+        ):
+            assemble_container_env(spec, roster, caller_manages_proxy=False)
+
+    def test_proxy_malformed_ssh_entry_warns(self, workspace, envs_dir, roster, tmp_path, caplog):
+        """Non-dict entries in ssh-keys.json trigger a warning, not a crash."""
+        import json
+
+        cfg = _make_proxy_db(tmp_path)
+        cfg.credentials_dir.mkdir(parents=True, exist_ok=True)
+        cfg.ssh_keys_json_path.write_text(json.dumps({"badproj": ["not-a-dict"]}))
+
+        spec = _spec(workspace, envs_dir, credential_scope="badproj")
+        with (
+            patch("terok_sandbox.is_proxy_socket_active", return_value=True),
+            patch("terok_sandbox.SandboxConfig", return_value=cfg),
+        ):
+            result = assemble_container_env(spec, roster, caller_manages_proxy=False)
+
+        assert "TEROK_SSH_AGENT_TOKEN" not in result.env
+        assert any("Malformed entry" in r.message for r in caplog.records)
 
     def test_scan_leaked_creds_emits_warning(self, workspace, envs_dir, roster, caplog):
         """scan_leaked_creds=True logs warnings for leaked files."""
