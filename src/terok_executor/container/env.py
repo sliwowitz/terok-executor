@@ -26,11 +26,13 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from terok_sandbox import Sharing, VolumeSpec
 
 if TYPE_CHECKING:
+    from terok_sandbox import CredentialDB, SandboxConfig
+
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ class ContainerEnvSpec:
     credential_scope: str = "standalone"
     """Scope for proxy token creation.  terok passes ``project.id``."""
 
-    proxy_transport: str = "direct"
+    proxy_transport: Literal["direct", "socket"] = "direct"
     """Proxy transport mode: ``"direct"`` (HTTP base URL) or ``"socket"``
     (Unix socket path via :attr:`~CredentialProxyRoute.socket_env`)."""
 
@@ -258,16 +260,8 @@ def assemble_container_env(
         from terok_executor.credentials.proxy_commands import scan_leaked_credentials
 
         leaked = scan_leaked_credentials(mounts_base)
-        if leaked:
-            import sys
-
-            print("WARNING: Real credentials in shared mounts:", file=sys.stderr)
-            for provider, path in leaked:
-                print(f"  {provider}: {path}", file=sys.stderr)
-            print(
-                "Remove these files — containers should only see proxy tokens.",
-                file=sys.stderr,
-            )
+        for provider, path in leaked:
+            _logger.warning("Real credential in shared mount: %s: %s", provider, path)
 
     # 10. Agent config mount
     if spec.agent_config_dir:
@@ -342,7 +336,7 @@ def _inject_proxy_tokens(
     scope: str,
     task_id: str,
     *,
-    proxy_transport: str = "direct",
+    proxy_transport: Literal["direct", "socket"] = "direct",
     proxy_required: bool = False,
 ) -> dict[str, str]:
     """Inject credential proxy phantom tokens if the proxy is running.
@@ -394,9 +388,6 @@ def _inject_proxy_tokens(
         if not routed:
             return {}
 
-        # Load credential types so we can select the right phantom env vars.
-        # OAuth credentials get oauth_phantom_env (e.g. CLAUDE_CODE_OAUTH_TOKEN),
-        # while API keys get phantom_env (e.g. ANTHROPIC_API_KEY).
         credential_types: dict[str, str] = {}
         for name in routed:
             cred = db.load_credential(credential_set, name)
@@ -406,7 +397,6 @@ def _inject_proxy_tokens(
             name: db.create_proxy_token(scope, task_id, credential_set, name) for name in routed
         }
 
-        # SSH agent: create phantom token if scope has valid keys registered
         ssh_token = _load_ssh_agent_token(db, cfg, scope, task_id)
 
         port = get_proxy_port(cfg)
@@ -424,7 +414,6 @@ def _inject_proxy_tokens(
         if name not in routed:
             continue
 
-        # Auth dimension: select phantom env vars by credential type
         is_oauth = credential_types.get(name) == "oauth"
         token_vars = (
             route.oauth_phantom_env if (is_oauth and route.oauth_phantom_env) else route.phantom_env
@@ -432,7 +421,6 @@ def _inject_proxy_tokens(
         for env_var in token_vars:
             env[env_var] = tokens[name]
 
-        # Transport dimension: socket path + HTTP base URL
         if use_socket and route.socket_path and route.socket_env:
             env[route.socket_env] = route.socket_path
         if route.base_url_env:
@@ -450,7 +438,6 @@ def _inject_proxy_tokens(
     if routed:
         env["TEROK_PROXY_PORT"] = str(port)
 
-    # SSH agent token (scope-scoped, separate from per-provider tokens)
     if ssh_token:
         env["TEROK_SSH_AGENT_TOKEN"] = ssh_token
         env["TEROK_SSH_AGENT_PORT"] = str(get_ssh_agent_port(cfg))
@@ -473,7 +460,9 @@ def _load_ssh_keys_json(path: Path) -> dict:
         return {}
 
 
-def _load_ssh_agent_token(db, cfg, scope: str, task_id: str) -> str | None:
+def _load_ssh_agent_token(
+    db: CredentialDB, cfg: SandboxConfig, scope: str, task_id: str
+) -> str | None:
     """Create an SSH agent phantom token if *scope* has valid keys registered."""
     ssh_keys = _load_ssh_keys_json(cfg.ssh_keys_json_path)
     ssh_entry = ssh_keys.get(scope)
