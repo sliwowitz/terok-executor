@@ -26,11 +26,13 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from terok_sandbox import Sharing, VolumeSpec
 
 if TYPE_CHECKING:
+    from terok_sandbox import CredentialDB, SandboxConfig
+
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -95,6 +97,18 @@ class ContainerEnvSpec:
 
     credential_scope: str = "standalone"
     """Scope for proxy token creation.  terok passes ``project.id``."""
+
+    proxy_transport: Literal["direct", "socket"] = "direct"
+    """Proxy transport mode: ``"direct"`` (HTTP base URL) or ``"socket"``
+    (Unix socket path via :attr:`~CredentialProxyRoute.socket_env`)."""
+
+    proxy_required: bool = False
+    """When ``True``, raise ``SystemExit`` if the credential proxy is
+    unreachable.  When ``False`` (default), soft-fail to empty env."""
+
+    scan_leaked_creds: bool = False
+    """When ``True``, scan shared mounts for real credential files and emit
+    warnings.  Standalone mode defaults to off; terok enables this."""
 
     # -- Permissions -------------------------------------------------------
 
@@ -230,7 +244,24 @@ def assemble_container_env(
 
     # 9. Credential proxy
     if not caller_manages_proxy:
-        env.update(_inject_proxy_tokens(roster, spec.credential_scope, spec.task_id))
+        env.update(
+            _inject_proxy_tokens(
+                roster,
+                spec.credential_scope,
+                spec.task_id,
+                proxy_transport=spec.proxy_transport,
+                proxy_required=spec.proxy_required,
+            )
+        )
+
+    # 9b. Leaked credential scan (runs regardless of caller_manages_proxy —
+    #     the shared mounts exist either way)
+    if spec.scan_leaked_creds:
+        from terok_executor.credentials.proxy_commands import scan_leaked_credentials
+
+        leaked = scan_leaked_credentials(mounts_base)
+        for provider, path in leaked:
+            _logger.warning("Real credential in shared mount: %s: %s", provider, path)
 
     # 10. Agent config mount
     if spec.agent_config_dir:
@@ -300,58 +331,116 @@ def _shared_config_mounts(roster: AgentRoster, mounts_base: Path) -> list[Volume
     return specs
 
 
-def _inject_proxy_tokens(roster: AgentRoster, scope: str, task_id: str) -> dict[str, str]:
+def _inject_proxy_tokens(
+    roster: AgentRoster,
+    scope: str,
+    task_id: str,
+    *,
+    proxy_transport: Literal["direct", "socket"] = "direct",
+    proxy_required: bool = False,
+) -> dict[str, str]:
     """Inject credential proxy phantom tokens if the proxy is running.
 
-    Always soft-fails: returns an empty dict when the proxy is not available.
-    Callers that require the proxy (e.g. terok project mode) should call
-    ``ensure_proxy_reachable()`` **before** invoking the assembly function.
+    Handles three orthogonal concerns:
+
+    - **Auth**: selects ``phantom_env`` vs ``oauth_phantom_env`` based on the
+      stored credential type (Phase 1).
+    - **Transport**: injects ``socket_env``/``socket_path`` when
+      *proxy_transport* is ``"socket"`` (Phase 2).
+    - **SSH agent**: creates a phantom token for the SSH agent proxy when the
+      scope has registered SSH keys (Phase 3).
+
+    When *proxy_required* is ``False`` (standalone default), soft-fails to
+    empty dict.  When ``True`` (terok project mode), raises ``SystemExit``
+    if the proxy is unreachable.
     """
     from terok_sandbox import (
         CredentialDB,
         SandboxConfig,
         get_proxy_port,
+        get_ssh_agent_port,
         is_proxy_running,
         is_proxy_socket_active,
     )
 
     cfg = SandboxConfig()
     if not (is_proxy_socket_active() or is_proxy_running(cfg)):
+        if proxy_required:
+            raise SystemExit(
+                "Credential proxy is not running.\n\n"
+                "Start it with:\n"
+                "  terok credential-proxy install   (systemd socket activation)\n"
+                "  terok credential-proxy start     (manual daemon)"
+            )
         return {}
 
     proxy_routes = roster.proxy_routes
     try:
         db = CredentialDB(cfg.proxy_db_path)
-    except Exception as exc:
-        _logger.warning("Credential proxy DB unavailable: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        _logger.exception("Credential proxy DB unavailable")
+        if proxy_required:
+            raise SystemExit(
+                "Credential proxy DB unavailable. Check logs for details.\n\n"
+                "Start it with:\n"
+                "  terok credential-proxy install   (systemd socket activation)\n"
+                "  terok credential-proxy start     (manual daemon)"
+            ) from None
         return {}
 
     try:
         credential_set = "default"
         stored = set(db.list_credentials(credential_set))
         routed = stored & proxy_routes.keys()
-        if not routed:
+
+        # SSH agent token is independent of provider credentials — a project
+        # with SSH keys but no API creds should still get TEROK_SSH_AGENT_*.
+        ssh_token = _load_ssh_agent_token(db, cfg, scope, task_id)
+
+        if not routed and not ssh_token:
             return {}
-        tokens = {
-            name: db.create_proxy_token(scope, task_id, credential_set, name) for name in routed
-        }
+
+        credential_types: dict[str, str] = {}
+        tokens: dict[str, str] = {}
+        for name in routed:
+            cred = db.load_credential(credential_set, name)
+            credential_types[name] = (cred.get("type") if cred else None) or "api_key"
+            tokens[name] = db.create_proxy_token(scope, task_id, credential_set, name)
+
         port = get_proxy_port(cfg)
-    except Exception as exc:
-        _logger.warning("Credential proxy token injection failed: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        _logger.exception("Credential proxy token injection failed")
+        if proxy_required:
+            raise SystemExit(
+                "Credential proxy token injection failed. Check logs for details.\n\n"
+                "Start it with:\n"
+                "  terok credential-proxy install   (systemd socket activation)\n"
+                "  terok credential-proxy start     (manual daemon)"
+            ) from None
         return {}
     finally:
         db.close()
 
+    use_socket = proxy_transport == "socket"
     proxy_base = f"http://host.containers.internal:{port}"
     env: dict[str, str] = {}
 
     for name, route in proxy_routes.items():
         if name not in routed:
             continue
-        for env_var in route.phantom_env:
+
+        is_oauth = credential_types.get(name) == "oauth"
+        token_vars = (
+            route.oauth_phantom_env if (is_oauth and route.oauth_phantom_env) else route.phantom_env
+        )
+        for env_var in token_vars:
             env[env_var] = tokens[name]
+
+        if use_socket and route.socket_path and route.socket_env:
+            env[route.socket_env] = route.socket_path
         if route.base_url_env:
             env[route.base_url_env] = proxy_base
+
         # OpenCode base URL override for proxied providers
         provider = roster.providers.get(name)
         if provider and provider.opencode_config:
@@ -364,5 +453,44 @@ def _inject_proxy_tokens(roster: AgentRoster, scope: str, task_id: str) -> dict[
     if routed:
         env["TEROK_PROXY_PORT"] = str(port)
 
+    if ssh_token:
+        env["TEROK_SSH_AGENT_TOKEN"] = ssh_token
+        env["TEROK_SSH_AGENT_PORT"] = str(get_ssh_agent_port(cfg))
+
     _logger.debug("Credential proxy: injected %d env vars for %s", len(env), routed)
     return env
+
+
+def _load_ssh_keys_json(path: Path) -> dict:
+    """Load the SSH key mapping JSON.  Returns empty dict on failure."""
+    import json
+
+    if not path.is_file():
+        return {}
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        return result if isinstance(result, dict) else {}
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        _logger.warning("Cannot read SSH keys file %s: %s", path, exc)
+        return {}
+
+
+def _load_ssh_agent_token(
+    db: CredentialDB, cfg: SandboxConfig, scope: str, task_id: str
+) -> str | None:
+    """Create an SSH agent phantom token if *scope* has valid keys registered."""
+    ssh_keys = _load_ssh_keys_json(cfg.ssh_keys_json_path)
+    ssh_entry = ssh_keys.get(scope)
+    if not isinstance(ssh_entry, list):
+        return None
+    for entry in ssh_entry:
+        if not isinstance(entry, dict):
+            _logger.warning(
+                "Malformed entry in ssh-keys.json for scope %r: expected dict, got %s",
+                scope,
+                type(entry).__name__,
+            )
+            return None
+    if any(e.get("private_key") and e.get("public_key") for e in ssh_entry):
+        return db.create_proxy_token(scope, task_id, scope, "ssh")
+    return None

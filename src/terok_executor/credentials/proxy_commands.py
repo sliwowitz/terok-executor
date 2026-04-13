@@ -86,10 +86,16 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
 
     Files injected by :func:`~terok_executor.auth._write_claude_credentials_file`
     are recognised by their dummy ``accessToken`` marker and skipped.
+
+    Symlinks are rejected to prevent a container from tricking the scan into
+    reading arbitrary host files via a crafted symlink in the shared mount.
     """
+    import stat
+
     from terok_executor.roster.loader import get_roster
 
     roster = get_roster()
+    base_resolved = mounts_base.resolve(strict=False)
     leaked: list[tuple[str, Path]] = []
     for name, route in roster.proxy_routes.items():
         if not route.credential_file:
@@ -99,11 +105,14 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
             continue
         try:
             path = mounts_base / auth.host_dir_name / route.credential_file
-            if (
-                path.is_file()
-                and path.stat().st_size > 0
-                and not _is_injected_credentials_file(path)
-            ):
+            # lstat: do not follow symlinks — reject them outright
+            st = path.lstat()
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+                continue
+            # Ensure resolved path stays within the mounts base
+            if base_resolved not in path.resolve(strict=True).parents:
+                continue
+            if st.st_size > 0 and not _is_injected_credentials_file(path):
                 leaked.append((name, path))
         except (OSError, TypeError):
             continue

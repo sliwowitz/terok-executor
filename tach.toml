@@ -114,6 +114,7 @@ depends_on = []
 [[modules]]
 path = "terok_executor.container.env"
 depends_on = [
+    "terok_executor.credentials.proxy_commands",
     "terok_executor.credentials.proxy_config",
     "terok_executor.paths",
 ]
