@@ -1,39 +1,48 @@
 #!/usr/bin/env bash
 
-# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-FileCopyrightText: 2025-2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 # terok:container — this file is deployed into task containers, not used on the host.
 
 # Relay between an SSH agent client (via socat SYSTEM: stdin/stdout) and
-# the host-side SSH agent proxy over TCP, injecting the phantom token
-# handshake as the first bytes on the TCP connection.
+# the host-side SSH agent proxy, injecting the phantom token handshake
+# as the first bytes on the connection.
 #
 # Called by socat:
 #   socat UNIX-LISTEN:...,fork "SYSTEM:ssh-agent-bridge.sh"
 #
 # stdin/stdout = the SSH client's Unix socket side (provided by socat)
 #
-# Expects env:
-#   TEROK_SSH_AGENT_TOKEN  - phantom token (terok-p-<32hex> or raw 32-char hex)
-#   TEROK_SSH_AGENT_PORT   - TCP port on host.containers.internal
+# Transport is selected by env vars (mutually exclusive):
+#   TEROK_SSH_AGENT_SOCKET - Unix socket path (socket mode, mounted from host)
+#   TEROK_SSH_AGENT_PORT   - TCP port on host.containers.internal (TCP mode)
+#
+# Always required:
+#   TEROK_SSH_AGENT_TOKEN  - phantom token for the handshake
 
 set -euo pipefail
 
 : "${TEROK_SSH_AGENT_TOKEN:?missing}"
-: "${TEROK_SSH_AGENT_PORT:?missing}"
 
-[[ "${TEROK_SSH_AGENT_PORT}" =~ ^[0-9]+$ ]] || {
-  echo "TEROK_SSH_AGENT_PORT must be numeric" >&2
+# Resolve upstream target: socket takes precedence over TCP.
+if [[ -n "${TEROK_SSH_AGENT_SOCKET:-}" ]]; then
+  TARGET="UNIX-CONNECT:${TEROK_SSH_AGENT_SOCKET}"
+elif [[ -n "${TEROK_SSH_AGENT_PORT:-}" ]]; then
+  [[ "${TEROK_SSH_AGENT_PORT}" =~ ^[0-9]+$ ]] || {
+    echo "TEROK_SSH_AGENT_PORT must be numeric" >&2
+    exit 2
+  }
+  TARGET="TCP:host.containers.internal:${TEROK_SSH_AGENT_PORT}"
+else
+  echo "One of TEROK_SSH_AGENT_SOCKET or TEROK_SSH_AGENT_PORT is required" >&2
   exit 2
-}
+fi
 
 # Compute 4-byte big-endian length header dynamically — the server-side
 # _read_handshake() accepts any token length 1–1024 and does a DB lookup.
 TOKEN_LEN=${#TEROK_SSH_AGENT_TOKEN}
 
-# The nested socat connects to the TCP server, but we need to send the
-# token handshake before relaying SSH agent traffic.
-# Length header: 4 bytes big-endian, then the token as ASCII.
+# Send the token handshake, then relay SSH agent traffic bidirectionally.
 {
   printf "\\x$(printf '%02x' $((TOKEN_LEN >> 24 & 0xFF)))"
   printf "\\x$(printf '%02x' $((TOKEN_LEN >> 16 & 0xFF)))"
@@ -41,4 +50,4 @@ TOKEN_LEN=${#TEROK_SSH_AGENT_TOKEN}
   printf "\\x$(printf '%02x' $((TOKEN_LEN       & 0xFF)))"
   printf '%s' "${TEROK_SSH_AGENT_TOKEN}"
   cat
-} | socat - "TCP:host.containers.internal:${TEROK_SSH_AGENT_PORT}"
+} | socat - "${TARGET}"

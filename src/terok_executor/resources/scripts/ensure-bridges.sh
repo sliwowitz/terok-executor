@@ -3,12 +3,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # terok:container — this file is deployed into task containers, not used on the host.
 
-# Idempotent socat bridge launcher for container ↔ host-side credential proxy.
+# Idempotent socat bridge launcher for container ↔ host-side services.
 #
-# Manages three bridges:
-#   1. SSH agent   — UNIX socket → ssh-agent-bridge.sh → TCP (phantom-token)
+# Manages four bridges:
+#   1. SSH agent   — UNIX socket → ssh-agent-bridge.sh → TCP or host socket
 #   2. gh proxy    — UNIX socket → TCP (plain relay to credential proxy)
 #   3. Claude proxy — UNIX socket → TCP (enables OAuth subscription mode)
+#   4. Gate server — TCP listener → host UNIX socket (git HTTP-over-socket)
+#
+# Transport selection is env-var driven — set at container creation, not
+# auto-detected.  Socket mode mounts the host runtime dir at /run/terok/.
 #
 # Uses PID files (not socket existence) to detect dead bridges — stale
 # socket files persist after process death and are unreliable sentinels.
@@ -27,7 +31,10 @@ _terok_bridge_alive() {
 }
 
 # ── SSH agent bridge ─────────────────────────────────────────────────────
-if [[ -n "${TEROK_SSH_AGENT_PORT:-}" ]] && [[ -n "${TEROK_SSH_AGENT_TOKEN:-}" ]] \
+# Requires a phantom token.  Transport: TEROK_SSH_AGENT_SOCKET (mounted
+# host socket) or TEROK_SSH_AGENT_PORT (TCP to host loopback).
+if [[ -n "${TEROK_SSH_AGENT_TOKEN:-}" ]] \
+   && { [[ -n "${TEROK_SSH_AGENT_SOCKET:-}" ]] || [[ -n "${TEROK_SSH_AGENT_PORT:-}" ]]; } \
    && command -v socat >/dev/null 2>&1 \
    && ! _terok_bridge_alive "$_TEROK_PIDDIR/ssh-agent.pid"; then
   rm -f /tmp/ssh-agent.sock
@@ -56,4 +63,16 @@ if [[ -n "${TEROK_PROXY_PORT:-}" ]] && [[ -n "${ANTHROPIC_UNIX_SOCKET:-}" ]] \
   socat UNIX-LISTEN:"${ANTHROPIC_UNIX_SOCKET}",fork \
     TCP:host.containers.internal:"${TEROK_PROXY_PORT}" &
   echo $! > "$_TEROK_PIDDIR/claude-proxy.pid"
+fi
+
+# ── Gate server bridge (socket mode) ─────────────────────────────────────
+# In socket mode the gate HTTP server listens on a host Unix socket mounted
+# into the container.  Git needs HTTP URLs, so we bridge localhost:9418 to
+# the mounted socket.  CODE_REPO / CLONE_FROM point to http://localhost:9418/.
+if [[ -n "${TEROK_GATE_SOCKET:-}" ]] \
+   && command -v socat >/dev/null 2>&1 \
+   && ! _terok_bridge_alive "$_TEROK_PIDDIR/gate.pid"; then
+  socat TCP-LISTEN:9418,fork,reuseaddr \
+    UNIX-CONNECT:"${TEROK_GATE_SOCKET}" &
+  echo $! > "$_TEROK_PIDDIR/gate.pid"
 fi

@@ -455,7 +455,10 @@ def _inject_proxy_tokens(
 
     if ssh_token:
         env["TEROK_SSH_AGENT_TOKEN"] = ssh_token
-        env["TEROK_SSH_AGENT_PORT"] = str(get_ssh_agent_port(cfg))
+        if use_socket:
+            env["TEROK_SSH_AGENT_SOCKET"] = str(cfg.ssh_agent_socket_path)
+        else:
+            env["TEROK_SSH_AGENT_PORT"] = str(get_ssh_agent_port(cfg))
 
     _logger.debug("Credential proxy: injected %d env vars for %s", len(env), routed)
     return env
