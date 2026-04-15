@@ -108,7 +108,10 @@ class TestSharedDirArgs:
         """_handle_run passes shared_dir to runner, omits shared_mount when no dir."""
         from terok_executor.commands import _handle_run
 
-        with patch("terok_executor.container.runner.AgentRunner") as mock_cls:
+        with (
+            patch("terok_executor.preflight.run_preflight", return_value=True),
+            patch("terok_executor.container.runner.AgentRunner") as mock_cls,
+        ):
             mock_runner = mock_cls.return_value
             mock_runner.run_headless.return_value = "terok-executor-test"
             _handle_run(
@@ -126,7 +129,10 @@ class TestSharedDirArgs:
         """_handle_run omits shared_mount from common dict when shared_dir is None."""
         from terok_executor.commands import _handle_run
 
-        with patch("terok_executor.container.runner.AgentRunner") as mock_cls:
+        with (
+            patch("terok_executor.preflight.run_preflight", return_value=True),
+            patch("terok_executor.container.runner.AgentRunner") as mock_cls,
+        ):
             mock_runner = mock_cls.return_value
             mock_runner.run_headless.return_value = "terok-executor-test"
             _handle_run(agent="claude", repo=".", prompt="test")

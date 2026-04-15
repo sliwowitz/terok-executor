@@ -165,6 +165,19 @@ depends_on = [
     "terok_executor.roster.loader",
 ]
 
+# ── Preflight — prerequisite checks ────────────────────────────────
+
+# Pre-launch checks + interactive fixers for `terok-executor run`
+[[modules]]
+path = "terok_executor.preflight"
+depends_on = [
+    "terok_executor.container.build",
+    "terok_executor.credentials.auth",
+    "terok_executor.credentials.proxy_config",
+    "terok_executor.paths",
+    "terok_executor.roster.loader",
+]
+
 # ── CLI surface ────────────────────────────────────────────────────
 
 # Command registry — defines all CLI commands
@@ -176,6 +189,7 @@ depends_on = [
     "terok_executor.credentials.auth",
     "terok_executor.credentials.proxy_config",
     "terok_executor.paths",
+    "terok_executor.preflight",
     "terok_executor.roster.loader",
 ]
 

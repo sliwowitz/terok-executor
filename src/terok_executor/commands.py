@@ -94,6 +94,13 @@ def _handle_run(
     shared_mount: str = "/shared",
 ) -> None:
     """Run an agent in a hardened container."""
+    import sys
+
+    from .preflight import run_preflight
+
+    if not run_preflight(agent, interactive=sys.stdin.isatty()):
+        raise SystemExit(1)
+
     from .container.runner import AgentRunner
 
     # Resolve human identity from host git config if requested
@@ -282,6 +289,54 @@ def _handle_stop(*, name: str) -> None:
     print(f"Stopped: {name}")
 
 
+def _handle_setup(*, check: bool = False) -> None:
+    """Check prerequisites and optionally fix them interactively."""
+
+    from .preflight import (
+        check_credentials,
+        check_images,
+        check_podman,
+        check_proxy,
+        check_shield,
+    )
+
+    checks = [
+        ("podman", check_podman()),
+        ("proxy", check_proxy()),
+        ("shield", check_shield()),
+        ("images", check_images("ubuntu:24.04")),
+    ]
+
+    print("\nterok-executor status:\n")
+    all_ok = True
+    for label, result in checks:
+        marker = "ok" if result.ok else ("info" if label == "shield" else "FAIL")
+        print(f"  {result.name:<22} {marker} ({result.message})")
+        if not result.ok and label != "shield":
+            all_ok = False
+
+    # Credential summary for known agent providers
+    from .roster.loader import get_roster
+
+    roster = get_roster()
+    print()
+    for name in sorted(roster.agent_names):
+        cr = check_credentials(name)
+        marker = "ok" if cr.ok else "--"
+        print(f"  {name:<22} {marker}")
+
+    if all_ok:
+        print("\nAll prerequisites met. Run: terok-executor run <agent> <repo>")
+    else:
+        if not check:
+            print("\nFix issues above, or just run: terok-executor run <agent> <repo>")
+            print("The run command will offer to fix missing prerequisites interactively.")
+        else:
+            print("\nSome prerequisites are missing (see above).")
+            raise SystemExit(1)
+    print()
+
+
 # ── Command definitions ──
 
 RUN_COMMAND = CommandDef(
@@ -380,6 +435,19 @@ STOP_COMMAND = CommandDef(
     args=(ArgDef(name="name", help="Container name"),),
 )
 
+SETUP_COMMAND = CommandDef(
+    name="setup",
+    help="Check prerequisites (proxy, images, credentials)",
+    handler=_handle_setup,
+    args=(
+        ArgDef(
+            name="--check",
+            action="store_true",
+            help="Report status and exit non-zero if prerequisites are missing",
+        ),
+    ),
+)
+
 #: All terok-executor commands.
 COMMANDS: tuple[CommandDef, ...] = (
     RUN_COMMAND,
@@ -387,6 +455,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     AUTH_COMMAND,
     AGENTS_COMMAND,
     BUILD_COMMAND,
+    SETUP_COMMAND,
     LS_COMMAND,
     STOP_COMMAND,
 )
