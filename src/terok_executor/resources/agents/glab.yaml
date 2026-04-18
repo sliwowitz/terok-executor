@@ -27,12 +27,14 @@ install:
   # extension (/tmp/glab.deb or /tmp/glab.rpm) because dnf5 only
   # recognises local RPM files by their .rpm suffix — any other name
   # is treated as a repo-package query and fails to resolve.
-  # pipefail makes the checksum verification (grep | sed |
-  # sha256sum -c -) hard-fail rather than silently accept an empty grep.
+  # `set -eux` only (no `-o pipefail`): Dockerfile RUN goes through
+  # /bin/sh, which is dash on Ubuntu.  The preceding `grep -q … || exit
+  # 1` already rejects a missing checksum line, so the checksum
+  # pipeline below can never see an empty grep result.
   run_as_root: |
     {% set pkg_ext = "deb" if family == "deb" else "rpm" %}
     {% set pkg_install = "dpkg -i" if family == "deb" else "dnf install -y" %}
-    RUN set -eux -o pipefail; \
+    RUN set -eux; \
         GLAB_VERSION=$(curl --fail -sSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest" \
           | jq -r '.tag_name | ltrimstr("v")'); \
         case "$(uname -m)" in \
