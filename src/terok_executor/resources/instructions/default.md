@@ -11,14 +11,14 @@ You are running inside an isolated Podman container managed by terok.
 ## Privileges
 
 - You can use `sudo` without a password to install packages, modify system config, etc.
-- Use `sudo apt install <package>` for any tools you need.
+- Install tools with `sudo apt install <package>` (Debian/Ubuntu base) or `sudo dnf install <package>` (Fedora/RPM base). Run `command -v apt-get || command -v dnf` if you're unsure which applies.
 - The environment is disposable — feel free to install, configure, and experiment.
 
 ## Pre-installed tools
 
 git, gh (GitHub CLI), glab (GitLab CLI), rg (ripgrep), fd-find, jq, yq, ast-grep (structural code search/rewrite using AST patterns; `ast-grep run -p 'PATTERN' -l LANG` to search), toad (multi-agent TUI via ACP; `toad` to launch, `toad -a claude` to skip agent selection).
 
-Python 3 and Node.js are available. Use `sudo apt install` or `pip`/`npm` for anything else.
+Python 3 and Node.js are available. Use your base image's package manager (`apt` or `dnf`) or `pip`/`npm` for anything else.
 
 ## Git workflow
 
