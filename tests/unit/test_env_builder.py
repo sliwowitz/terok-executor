@@ -503,6 +503,34 @@ class TestVaultTokenInjection:
 
         assert "ANTHROPIC_UNIX_SOCKET" not in result.env
 
+    def test_vault_socket_transport_omits_tcp_broker_env_when_port_none(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """Socket-only deployments have no TCP broker port; the env must reflect that.
+
+        Under socket transport the broker listens only on the mounted Unix socket,
+        and ``get_token_broker_port`` returns ``None``.  The assembled env must
+        omit every TCP-flavoured variable rather than interpolate the literal
+        string ``"None"`` — that string would otherwise leak through as
+        ``TEROK_TOKEN_BROKER_PORT="None"``, trip bridge scripts inside the
+        container, and silently break credential routing.
+        """
+        cfg = _make_vault_db(tmp_path)
+        spec = _spec(workspace, envs_dir, credential_scope="proj", vault_transport="socket")
+        with (
+            patch("terok_sandbox.is_vault_socket_active", return_value=True),
+            patch("terok_sandbox.SandboxConfig", return_value=cfg),
+            patch("terok_sandbox.get_token_broker_port", return_value=None),
+        ):
+            result = assemble_container_env(spec, roster, caller_manages_vault=False)
+
+        assert "TEROK_TOKEN_BROKER_PORT" not in result.env
+        assert "GITLAB_API_HOST" not in result.env
+        # No env value should contain the stringified ``None`` port.
+        assert not any("None" in v for v in result.env.values())
+        # Socket transport is still honoured.
+        assert result.env.get("ANTHROPIC_UNIX_SOCKET") == "/tmp/terok-claude-proxy.sock"
+
     def test_vault_required_raises_when_unreachable(self, workspace, envs_dir, roster):
         """vault_required=True raises SystemExit when vault is not running."""
         spec = _spec(workspace, envs_dir, vault_required=True)

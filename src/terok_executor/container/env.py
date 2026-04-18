@@ -425,7 +425,12 @@ def _inject_vault_tokens(
         db.close()
 
     use_socket = vault_transport == "socket"
-    proxy_base = f"http://host.containers.internal:{port}"
+    # The broker's TCP address — absent under socket transport, where the
+    # broker listens only on the mounted Unix socket and ``port`` is ``None``.
+    # Container-side consumers that need an HTTP endpoint get nothing rather
+    # than the string ``"None"``.
+    tcp_broker = f"host.containers.internal:{port}" if port else None
+    proxy_base = f"http://{tcp_broker}" if tcp_broker else None
     env: dict[str, str] = {}
 
     for name, route in vault_routes.items():
@@ -441,19 +446,19 @@ def _inject_vault_tokens(
 
         if use_socket and route.socket_path and route.socket_env:
             env[route.socket_env] = route.socket_path
-        if route.base_url_env:
+        if route.base_url_env and proxy_base:
             env[route.base_url_env] = proxy_base
 
         # OpenCode base URL override for proxied providers
         provider = roster.providers.get(name)
-        if provider and provider.opencode_config:
+        if provider and provider.opencode_config and proxy_base:
             env[f"TEROK_OC_{name.upper()}_BASE_URL"] = f"{proxy_base}/v1"
         # glab: redirect API to proxy
-        if name == "glab":
-            env["GITLAB_API_HOST"] = f"host.containers.internal:{port}"
+        if name == "glab" and tcp_broker:
+            env["GITLAB_API_HOST"] = tcp_broker
             env["API_PROTOCOL"] = "http"
 
-    if routed:
+    if routed and port:
         env["TEROK_TOKEN_BROKER_PORT"] = str(port)
 
     if ssh_token:
