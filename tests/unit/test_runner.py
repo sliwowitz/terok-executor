@@ -64,6 +64,33 @@ class TestAgentRunner:
         reg = runner.roster
         assert "claude" in reg.agent_names
 
+    def test_mismatched_sandbox_and_runtime_rejected(self) -> None:
+        """Passing a sandbox and a runtime from different backend types raises."""
+        from terok_sandbox import NullRuntime, PodmanRuntime, Sandbox
+
+        rt_a = PodmanRuntime()
+        rt_b = NullRuntime()
+        with pytest.raises(ValueError, match="same backend instance"):
+            AgentRunner(sandbox=Sandbox(runtime=rt_a), runtime=rt_b)
+
+    def test_mismatched_same_type_different_instance_rejected(self) -> None:
+        """The check is identity-based — two NullRuntimes are still different backends."""
+        from terok_sandbox import NullRuntime, Sandbox
+
+        rt_a = NullRuntime()
+        rt_b = NullRuntime()
+        with pytest.raises(ValueError, match="same backend instance"):
+            AgentRunner(sandbox=Sandbox(runtime=rt_a), runtime=rt_b)
+
+    def test_matching_sandbox_and_runtime_accepted(self) -> None:
+        """Passing a sandbox and a runtime pointing at the same backend is fine."""
+        from terok_sandbox import NullRuntime, Sandbox
+
+        rt = NullRuntime()
+        runner = AgentRunner(sandbox=Sandbox(runtime=rt), runtime=rt)
+        assert runner.runtime is rt
+        assert runner.sandbox.runtime is rt
+
     # test_shared_mounts_from_roster, test_base_env_has_essentials,
     # test_base_env_opencode_vars moved to test_env_builder.py
 
@@ -187,16 +214,26 @@ class TestAgentRunner:
         assert "9999:8080" in spec.extra_args[idx + 1]
 
     def test_run_web_auto_allocates_port(self, tmp_path: Path) -> None:
-        """Web mode auto-allocates a port when none given."""
+        """Web mode reserves a port via ``runtime.reserve_port`` when none is given."""
+        from unittest.mock import MagicMock as _Mock
+
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
+        reservation = _Mock()
+        reservation.port = 12345
+        reservation.__enter__.return_value = reservation
+        reservation.__exit__.return_value = None
+        runtime_mock = _Mock()
+        runtime_mock.reserve_port.return_value = reservation
+
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
-            patch("terok_sandbox.find_free_port", return_value=12345),
+            patch.object(AgentRunner, "runtime", runtime_mock),
         ):
             runner.run_web(str(tmp_path))  # no port= arg
 
+        runtime_mock.reserve_port.assert_called_once()
         spec = sandbox.run.call_args[0][0]
         assert "-p" in spec.extra_args
         idx = list(spec.extra_args).index("-p")

@@ -282,9 +282,9 @@ def _handle_build(
 
 def _handle_list() -> None:
     """List running terok-executor containers."""
-    from terok_sandbox import get_container_states
+    from terok_sandbox import PodmanRuntime
 
-    states = get_container_states("terok-executor")
+    states = PodmanRuntime().container_states("terok-executor")
     if not states:
         print("No running containers.")
         return
@@ -294,13 +294,14 @@ def _handle_list() -> None:
 
 def _handle_stop(*, name: str) -> None:
     """Stop a running container (best-effort)."""
-    from terok_sandbox import get_container_state, stop_task_containers
+    from terok_sandbox import PodmanRuntime
 
-    state = get_container_state(name)
-    if state is None:
+    runtime = PodmanRuntime()
+    container = runtime.container(name)
+    if container.state is None:
         print(f"Container not found: {name}")
         return
-    stop_task_containers([name])
+    runtime.force_remove([container])
     print(f"Stopped: {name}")
 
 
