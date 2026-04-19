@@ -2689,38 +2689,40 @@ description = "Hardened Podman container runner with gate server and shield inte
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = [
-    {file = "terok_sandbox-0.0.77-py3-none-any.whl", hash = "sha256:c47dbaf736e028aff6c3032f537b557896c5ef219ec5aaf1437bd35d7128e938"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 aiohttp = ">=3.9"
 cryptography = ">=46.0.7"
 platformdirs = ">=4.9.6"
-terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.20/terok_shield-0.6.20-py3-none-any.whl"}
+terok-shield = {git = "https://github.com/sliwowitz/terok-shield.git", branch = "feat/dbus-clearance-bridge"}
 
 [package.source]
-type = "url"
-url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.77/terok_sandbox-0.0.77-py3-none-any.whl"
+type = "git"
+url = "https://github.com/sliwowitz/terok-sandbox.git"
+reference = "feat/dbus-clearance-bridge"
+resolved_reference = "5a5b4702f58eb1df8471015e8ea3772ac8cfd0b5"
 
 [[package]]
 name = "terok-shield"
-version = "0.6.20"
+version = "0.7.0"
 description = "nftables-based egress firewalling for Podman containers"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = [
-    {file = "terok_shield-0.6.20-py3-none-any.whl", hash = "sha256:4bc9dbcea90f41adf9d332be00812760cfdef5166a9b61eda8d9f5534b208e89"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 pydantic = ">=2.0"
 PyYAML = ">=6.0"
 
 [package.source]
-type = "url"
-url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.20/terok_shield-0.6.20-py3-none-any.whl"
+type = "git"
+url = "https://github.com/sliwowitz/terok-shield.git"
+reference = "feat/dbus-clearance-bridge"
+resolved_reference = "b8a05f3dec3df3532205a00162bfbd55c6a62715"
 
 [[package]]
 name = "tomli"
@@ -3119,4 +3121,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "9cff528505864ec92bc46403dbc3fbaab7091599b5cf9014ae8a01f2b8e345f1"
+content-hash = "1ff1ff1037496d2675316617617d69f5eb4cce3125d229a609b97c912e47103a"
