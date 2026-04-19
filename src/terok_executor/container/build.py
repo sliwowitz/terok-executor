@@ -187,6 +187,63 @@ def detect_family(base_image: str, override: str | None = None) -> str:
     )
 
 
+def build_project_image(
+    *,
+    dockerfile: Path,
+    context_dir: Path,
+    target_tag: str,
+    extra_tags: tuple[str, ...] = (),
+    build_args: dict[str, str] | None = None,
+    labels: dict[str, str] | None = None,
+    no_cache: bool = False,
+    pull_always: bool = False,
+) -> None:
+    """Build an OCI image from a pre-rendered Dockerfile.
+
+    The thin ``podman build`` invoker that the three opinionated factories
+    in this module (:func:`build_base_images`, :func:`build_sidecar_image`,
+    and terok's project/L2 build) share.  Callers own Dockerfile
+    rendering, tag naming, label computation, and build-context staging —
+    this function only assembles flags and shells out.
+
+    Args:
+        dockerfile: Path to the pre-rendered Dockerfile (``-f``).
+        context_dir: Build context directory (final positional argument).
+        target_tag: Primary image tag (``-t``).
+        extra_tags: Additional tags applied to the same build (each becomes
+            another ``-t`` on the command line — podman builds once and
+            tags the result multiple times).
+        build_args: ``--build-arg KEY=VALUE`` pairs.
+        labels: ``--label KEY=VALUE`` pairs recorded in the OCI config.
+        no_cache: Force full rebuild.
+        pull_always: Pull the base image even if a local copy exists.
+
+    Raises:
+        BuildError: When podman is not on PATH or the build exits non-zero.
+    """
+    cmd = ["podman", "build", "-f", str(dockerfile)]
+    for key, value in (build_args or {}).items():
+        cmd += ["--build-arg", f"{key}={value}"]
+    for key, value in (labels or {}).items():
+        cmd += ["--label", f"{key}={value}"]
+    cmd += ["-t", target_tag]
+    for tag in extra_tags:
+        cmd += ["-t", tag]
+    if no_cache:
+        cmd.append("--no-cache")
+    if pull_always:
+        cmd.append("--pull=always")
+    cmd.append(str(context_dir))
+
+    print("$", shlex.join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        raise BuildError("podman not found; please install podman") from exc
+    except subprocess.CalledProcessError as exc:
+        raise BuildError(f"Image build failed: {exc}") from exc
+
+
 def build_base_images(
     base_image: str = DEFAULT_BASE_IMAGE,
     *,
@@ -252,47 +309,46 @@ def build_base_images(
     context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-build-"))
 
     try:
-        prepare_build_context(context)
-        stage_help_fragments(context / "help.d", selected)
+        try:
+            prepare_build_context(context)
+            stage_help_fragments(context / "help.d", selected)
 
-        # Single timestamp for both render and build-arg consistency
-        cache_bust = str(int(time.time()))
+            # Single timestamp for both render and build-arg consistency
+            cache_bust = str(int(time.time()))
 
-        # Render and write Dockerfiles into the build context
-        (context / "L0.Dockerfile").write_text(render_l0(base_image, family=fam))
-        (context / "L1.cli.Dockerfile").write_text(
-            render_l1(l0_tag, family=fam, agents=selected, cache_bust=cache_bust)
-        )
-
-        ctx = str(context)
+            # Render and write Dockerfiles into the build context
+            (context / "L0.Dockerfile").write_text(render_l0(base_image, family=fam))
+            (context / "L1.cli.Dockerfile").write_text(
+                render_l1(l0_tag, family=fam, agents=selected, cache_bust=cache_bust)
+            )
+        except OSError as exc:
+            raise BuildError(
+                f"Image build failed preparing base build context for "
+                f"{l1_tag!r} at {context}: {exc}"
+            ) from exc
 
         # Build L0 — base dev image (Ubuntu + git + SSH + init script)
-        cmd_l0 = ["podman", "build", "-f", str(context / "L0.Dockerfile")]
-        cmd_l0 += ["--build-arg", f"BASE_IMAGE={base_image}"]
-        cmd_l0 += ["-t", l0_tag]
-        if full_rebuild:
-            cmd_l0 += ["--no-cache", "--pull=always"]
-        cmd_l0.append(ctx)
-
-        print("$", shlex.join(cmd_l0))
-        subprocess.run(cmd_l0, check=True)
+        build_project_image(
+            dockerfile=context / "L0.Dockerfile",
+            context_dir=context,
+            target_tag=l0_tag,
+            build_args={"BASE_IMAGE": base_image},
+            no_cache=full_rebuild,
+            pull_always=full_rebuild,
+        )
 
         # The unsuffixed alias lets `terok run` find the latest L1 without
-        # knowing the agent-set suffix; the suffixed tag keeps prior selections
-        # individually addressable.
-        cmd_l1 = ["podman", "build", "-f", str(context / "L1.cli.Dockerfile")]
-        cmd_l1 += ["--build-arg", f"BASE_IMAGE={l0_tag}"]
-        cmd_l1 += ["--build-arg", f"AGENT_CACHE_BUST={cache_bust}"]
-        cmd_l1 += ["-t", l1_tag, "-t", l1_alias]
-        if full_rebuild:
-            cmd_l1.append("--no-cache")
-        cmd_l1.append(ctx)
+        # knowing the agent-set suffix; the suffixed tag keeps prior
+        # selections individually addressable.
+        build_project_image(
+            dockerfile=context / "L1.cli.Dockerfile",
+            context_dir=context,
+            target_tag=l1_tag,
+            extra_tags=(l1_alias,),
+            build_args={"BASE_IMAGE": l0_tag, "AGENT_CACHE_BUST": cache_bust},
+            no_cache=full_rebuild,
+        )
 
-        print("$", shlex.join(cmd_l1))
-        subprocess.run(cmd_l1, check=True)
-
-    except (OSError, subprocess.CalledProcessError) as e:
-        raise BuildError(f"Image build failed: {e}") from e
     finally:
         if own_tmp:
             shutil.rmtree(context, ignore_errors=True)
@@ -357,25 +413,26 @@ def build_sidecar_image(
     context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-sidecar-"))
 
     try:
-        prepare_build_context(context)
-        cache_bust = str(int(time.time()))
+        try:
+            prepare_build_context(context)
+            cache_bust = str(int(time.time()))
 
-        (context / "L1.sidecar.Dockerfile").write_text(
-            render_l1_sidecar(l0_tag, family=fam, tool_name=tool_name, cache_bust=cache_bust)
+            (context / "L1.sidecar.Dockerfile").write_text(
+                render_l1_sidecar(l0_tag, family=fam, tool_name=tool_name, cache_bust=cache_bust)
+            )
+        except OSError as exc:
+            raise BuildError(
+                f"Image build failed preparing sidecar build context for "
+                f"{sidecar_tag!r} at {context}: {exc}"
+            ) from exc
+
+        build_project_image(
+            dockerfile=context / "L1.sidecar.Dockerfile",
+            context_dir=context,
+            target_tag=sidecar_tag,
+            build_args={"BASE_IMAGE": l0_tag, "TOOL_CACHE_BUST": cache_bust},
+            no_cache=full_rebuild,
         )
-
-        cmd = ["podman", "build", "-f", str(context / "L1.sidecar.Dockerfile")]
-        cmd += ["--build-arg", f"BASE_IMAGE={l0_tag}"]
-        cmd += ["--build-arg", f"TOOL_CACHE_BUST={cache_bust}"]
-        cmd += ["-t", sidecar_tag]
-        if full_rebuild:
-            cmd.append("--no-cache")
-        cmd.append(str(context))
-
-        print("$", shlex.join(cmd))
-        subprocess.run(cmd, check=True)
-    except (OSError, subprocess.CalledProcessError) as e:
-        raise BuildError(f"Sidecar image build failed: {e}") from e
     finally:
         if own_tmp:
             shutil.rmtree(context, ignore_errors=True)

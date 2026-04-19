@@ -492,6 +492,129 @@ class TestWaitForExit:
                 runner.wait_for_exit("terok-x")
 
 
+class TestLogs:
+    """Task-level log retrieval for the 'just show me what ran' case."""
+
+    def test_one_shot_returns_combined_output(self) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="hello\n", stderr="")
+        with patch("subprocess.run", return_value=completed) as run_mock:
+            out = runner.logs("terok-x", tail=50, timestamps=True, since="1h")
+        assert "hello" in out
+        args, _ = run_mock.call_args
+        assert args[0] == [
+            "podman",
+            "logs",
+            "--timestamps",
+            "--tail",
+            "50",
+            "--since",
+            "1h",
+            "terok-x",
+        ]
+
+    def test_podman_failure_raises(self) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=125, stdout="", stderr="Error: no such container\n"
+        )
+        with patch("subprocess.run", return_value=completed):
+            with pytest.raises(RuntimeError, match=r"returncode=125.*no such container"):
+                runner.logs("terok-x")
+
+
+class TestCaptureLogs:
+    """Archival path: stream stdout to a file, succeed-or-clean-up."""
+
+    def test_writes_to_file_on_success(self, tmp_path: Path) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        dest = tmp_path / "container.log"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stderr=b"")
+        with patch("subprocess.run", return_value=completed):
+            assert runner.capture_logs("terok-x", dest) is True
+
+    def test_failure_removes_dest(self, tmp_path: Path) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        dest = tmp_path / "container.log"
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=125, stderr=b"Error: no such container\n"
+        )
+        with patch("subprocess.run", return_value=completed):
+            assert runner.capture_logs("terok-x", dest) is False
+        assert not dest.exists()
+
+    def test_timeout_returns_false(self, tmp_path: Path) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        dest = tmp_path / "container.log"
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["podman"], timeout=60.0),
+        ):
+            assert runner.capture_logs("terok-x", dest) is False
+        assert not dest.exists()
+
+    def test_missing_podman_returns_false(self, tmp_path: Path) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        dest = tmp_path / "container.log"
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            assert runner.capture_logs("terok-x", dest) is False
+        assert not dest.exists()
+
+
+class TestStreamLogsProcess:
+    """Streaming path: hand the caller a ``Popen`` they can select() on."""
+
+    def test_returns_popen_with_stdout_pipe(self) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        fake_proc = Mock(spec=subprocess.Popen)
+        with patch("subprocess.Popen", return_value=fake_proc) as popen_mock:
+            proc = runner.stream_logs_process("terok-x", follow=True, tail=100)
+        assert proc is fake_proc
+        args, kwargs = popen_mock.call_args
+        assert args[0] == ["podman", "logs", "-f", "--tail", "100", "terok-x"]
+        assert kwargs["stdout"] is subprocess.PIPE
+        assert kwargs["stderr"] is subprocess.PIPE
+
+    def test_merge_stderr_folds_streams(self) -> None:
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        with patch("subprocess.Popen") as popen_mock:
+            runner.stream_logs_process("terok-x", merge_stderr=True)
+        assert popen_mock.call_args.kwargs["stderr"] is subprocess.STDOUT
+
+    def test_propagates_file_not_found(self) -> None:
+        """Missing podman surfaces as FileNotFoundError so callers can
+        render a clear 'podman not installed' message in the TUI."""
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        with patch("subprocess.Popen", side_effect=FileNotFoundError):
+            with pytest.raises(FileNotFoundError):
+                runner.stream_logs_process("terok-x", follow=True)
+
+
+class TestBuildLogsCmd:
+    """Flag assembly helper — shared between all three log entry points."""
+
+    def test_all_flags(self) -> None:
+        from terok_executor.container.runner import _build_logs_cmd
+
+        cmd = _build_logs_cmd("terok-x", follow=True, tail=10, timestamps=True, since="30m")
+        assert cmd == [
+            "podman",
+            "logs",
+            "-f",
+            "--timestamps",
+            "--tail",
+            "10",
+            "--since",
+            "30m",
+            "terok-x",
+        ]
+
+    def test_defaults_produce_minimal_cmd(self) -> None:
+        from terok_executor.container.runner import _build_logs_cmd
+
+        assert _build_logs_cmd("terok-x") == ["podman", "logs", "terok-x"]
+
+
 class TestGateIntegration:
     """Verify gate wiring in AgentRunner."""
 

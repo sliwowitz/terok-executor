@@ -29,6 +29,8 @@ from terok_sandbox import Sharing, VolumeSpec
 from .build import BuildError, build_base_images
 
 if TYPE_CHECKING:
+    import subprocess
+
     from terok_sandbox import LifecycleHooks, Sandbox
 
     from terok_executor.roster.loader import AgentRoster
@@ -397,6 +399,121 @@ class AgentRunner:
                 f"podman wait {container_name!r} returned unexpected output: "
                 f"stdout={proc.stdout!r}, stderr={proc.stderr!r}"
             ) from exc
+
+    def logs(
+        self,
+        container_name: str,
+        *,
+        tail: int | None = None,
+        timestamps: bool = False,
+        since: str | None = None,
+    ) -> str:
+        """Return the container's logged output as a single string.
+
+        One-shot retrieval for the "just show me what ran" case.  For live
+        streaming (human watching), use :meth:`stream_logs_process`; for
+        archival, use :meth:`capture_logs`.
+
+        Raises :class:`RuntimeError` when ``podman logs`` returns a non-zero
+        status (e.g. unknown container) — the diagnostic is surfaced rather
+        than impersonated as empty output.  :class:`FileNotFoundError`
+        propagates when ``podman`` is not on PATH.
+        """
+        import subprocess
+
+        cmd = _build_logs_cmd(container_name, tail=tail, timestamps=timestamps, since=since)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip() or "<no output>"
+            raise RuntimeError(
+                f"podman logs {container_name!r} failed (returncode={proc.returncode}): {detail}"
+            )
+        return (proc.stdout or "") + (proc.stderr or "")
+
+    def capture_logs(
+        self,
+        container_name: str,
+        dest: Path,
+        *,
+        timestamps: bool = True,
+        timeout: float = 60.0,
+    ) -> bool:
+        """Capture a container's logs to *dest*; return ``True`` on success.
+
+        Streams stdout directly to *dest* (bytes) so large logs do not need
+        to fit in memory.  Used at task-archive time to freeze the
+        container's output onto the host filesystem before removal.
+
+        On any failure — missing podman, podman error, timeout — *dest* is
+        removed and ``False`` is returned so the caller sees one signal,
+        not a partially-written file.
+        """
+        import subprocess
+
+        cmd = _build_logs_cmd(container_name, timestamps=timestamps)
+        try:
+            with dest.open("wb") as f:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.PIPE,
+                    timeout=timeout,
+                    check=False,
+                )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            dest.unlink(missing_ok=True)
+            return False
+
+        if proc.returncode != 0:
+            dest.unlink(missing_ok=True)
+            return False
+        return True
+
+    def stream_logs_process(
+        self,
+        container_name: str,
+        *,
+        follow: bool = False,
+        tail: int | None = None,
+        timestamps: bool = False,
+        merge_stderr: bool = False,
+    ) -> subprocess.Popen[bytes]:
+        """Spawn a long-running ``podman logs`` process; return the ``Popen``.
+
+        The raw subprocess handle is exposed deliberately: live-log
+        consumers (TUI log viewer, interactive ``task logs -f``) need
+        fd-level control — ``select()`` between reads, SIGINT handling,
+        stop-event polling — that a higher-level iterator abstraction
+        would hide badly.  Every current caller's event loop already looks
+        like ``select([proc.stdout], …) → read1()`` so returning the
+        ``Popen`` matches existing patterns instead of fighting them.
+
+        Caller owns the subprocess.  Typical pattern::
+
+            proc = runner.stream_logs_process(cname, follow=True)
+            try:
+                for chunk in iter(proc.stdout.read1, b""):
+                    ...
+            finally:
+                proc.terminate()
+                proc.wait()
+
+        When *merge_stderr* is True, stderr is folded into stdout
+        (matches ``subprocess.STDOUT``); otherwise stderr is a separate
+        pipe the caller can drain.
+
+        :class:`FileNotFoundError` propagates when ``podman`` is not on
+        PATH — callers handle it (usually as a user-facing "podman not
+        installed" error).
+        """
+        import subprocess
+
+        cmd = _build_logs_cmd(container_name, follow=follow, tail=tail, timestamps=timestamps)
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+        )
 
     # ------------------------------------------------------------------
     # Internal orchestrator (all public entry points delegate here)
@@ -772,6 +889,33 @@ class AgentRunner:
 
 
 # ── Module-level helpers ────────────────────────────────────────────────
+
+
+def _build_logs_cmd(
+    container_name: str,
+    *,
+    follow: bool = False,
+    tail: int | None = None,
+    timestamps: bool = False,
+    since: str | None = None,
+) -> list[str]:
+    """Assemble a ``podman logs`` command with the given flags.
+
+    Shared builder so the three log entry points (:meth:`AgentRunner.logs`,
+    :meth:`AgentRunner.capture_logs`, :meth:`AgentRunner.stream_logs_process`)
+    agree on flag order and naming.
+    """
+    cmd = ["podman", "logs"]
+    if follow:
+        cmd.append("-f")
+    if timestamps:
+        cmd.append("--timestamps")
+    if tail is not None:
+        cmd.extend(["--tail", str(tail)])
+    if since:
+        cmd.extend(["--since", since])
+    cmd.append(container_name)
+    return cmd
 
 
 def _generate_task_id() -> str:

@@ -188,6 +188,125 @@ class TestBuildDirGuard:
 # ---------------------------------------------------------------------------
 
 
+class TestBuildProjectImage:
+    """Verify the generic podman-build primitive used by all three factories.
+
+    ``build_project_image`` is the single ``podman build`` invocation site
+    that the agent-aware factories (L0+L1, sidecar) and terok's project/L2
+    builds share.  Exercises flag assembly and BuildError translation.
+    """
+
+    def test_minimal_invocation(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with patch("subprocess.run") as run_mock:
+            build_project_image(
+                dockerfile=dockerfile,
+                context_dir=tmp_path,
+                target_tag="proj:tag",
+            )
+        cmd = run_mock.call_args[0][0]
+        assert cmd[:3] == ["podman", "build", "-f"]
+        assert cmd[-1] == str(tmp_path)
+        assert "-t" in cmd and "proj:tag" in cmd
+
+    def test_build_args_and_labels(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with patch("subprocess.run") as run_mock:
+            build_project_image(
+                dockerfile=dockerfile,
+                context_dir=tmp_path,
+                target_tag="proj:tag",
+                build_args={"BASE_IMAGE": "ubuntu:24.04", "CACHE": "123"},
+                labels={"terok.build_context_hash": "abc"},
+            )
+        cmd = run_mock.call_args[0][0]
+        assert "--build-arg" in cmd
+        assert "BASE_IMAGE=ubuntu:24.04" in cmd
+        assert "CACHE=123" in cmd
+        assert "--label" in cmd
+        assert "terok.build_context_hash=abc" in cmd
+
+    def test_extra_tags_applied_once(self, tmp_path: Path) -> None:
+        """Multiple tags on the same build become multiple ``-t`` flags."""
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with patch("subprocess.run") as run_mock:
+            build_project_image(
+                dockerfile=dockerfile,
+                context_dir=tmp_path,
+                target_tag="main:1",
+                extra_tags=("alias:1", "other:1"),
+            )
+        cmd = run_mock.call_args[0][0]
+        t_indices = [i for i, a in enumerate(cmd) if a == "-t"]
+        assert len(t_indices) == 3
+        assert cmd[t_indices[0] + 1] == "main:1"
+        assert cmd[t_indices[1] + 1] == "alias:1"
+        assert cmd[t_indices[2] + 1] == "other:1"
+
+    def test_no_cache_and_pull_always(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with patch("subprocess.run") as run_mock:
+            build_project_image(
+                dockerfile=dockerfile,
+                context_dir=tmp_path,
+                target_tag="proj:tag",
+                no_cache=True,
+                pull_always=True,
+            )
+        cmd = run_mock.call_args[0][0]
+        assert "--no-cache" in cmd
+        assert "--pull=always" in cmd
+
+    def test_missing_podman_becomes_build_error(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError),
+            pytest.raises(BuildError, match="podman not found"),
+        ):
+            build_project_image(dockerfile=dockerfile, context_dir=tmp_path, target_tag="x:1")
+
+    def test_failed_build_becomes_build_error(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with (
+            patch(
+                "subprocess.run",
+                side_effect=subprocess.CalledProcessError(1, "podman"),
+            ),
+            pytest.raises(BuildError, match="Image build failed"),
+        ):
+            build_project_image(dockerfile=dockerfile, context_dir=tmp_path, target_tag="x:1")
+
+
 class TestBuildBaseImages:
     """Verify build_base_images orchestration with mocked podman."""
 
@@ -673,7 +792,30 @@ class TestBuildSidecarImage:
                 "subprocess.run",
                 side_effect=subprocess.CalledProcessError(1, "podman"),
             ),
-            pytest.raises(BuildError, match="Sidecar image build failed"),
+            pytest.raises(BuildError, match="Image build failed"),
+        ):
+            build_sidecar_image(build_dir=build_dir)
+
+    def test_os_error_preparing_context_raises_build_error(self, tmp_path: Path) -> None:
+        """Filesystem failures during sidecar context prep (disk full, permission
+        denied, etc.) normalize to BuildError with the sidecar tag and context
+        path in the message — same contract as build_base_images."""
+        from unittest.mock import patch
+
+        def image_exists_side_effect(image: str) -> bool:
+            return "l0" in image
+
+        build_dir = tmp_path / "ctx"
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch(
+                "terok_executor.container.build._image_exists", side_effect=image_exists_side_effect
+            ),
+            patch(
+                "terok_executor.container.build.prepare_build_context",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(BuildError, match=r"sidecar.*disk full"),
         ):
             build_sidecar_image(build_dir=build_dir)
 
