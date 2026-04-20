@@ -46,6 +46,10 @@ opencode:
   env_var_prefix: BLABLADOR
   config_dir: .blablador
   auth_key_url: https://codebase.helmholtz.cloud/-/user_settings/personal_access_tokens
+  api_key_hint: |-
+    Create a personal access token at:
+      https://codebase.helmholtz.cloud/-/user_settings/personal_access_tokens
+    The token must include the ``read_user`` scope.
 
 # OpenCode runtime mounts are defined in opencode.yaml and deduplicated
 # by the registry — no need to repeat them here.

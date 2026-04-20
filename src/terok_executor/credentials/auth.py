@@ -208,12 +208,12 @@ def store_api_key(
 
 
 def _prompt_api_key(info: AuthProvider) -> str:
-    """Interactively prompt for an API key (input is hidden)."""
-    import getpass
+    """Interactively prompt for an API key (echoes ``*`` per character)."""
+    import pwinput
 
     if info.api_key_hint:
         print(info.api_key_hint)
-    key = getpass.getpass(f"{info.label} API key: ").strip()
+    key = pwinput.pwinput(prompt=f"{info.label} API key: ", mask="*").strip()
     if not key:
         raise SystemExit("No API key entered.")
     return key

@@ -809,6 +809,7 @@ def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
     if not oc:
         return None
 
+    hint = oc.get("api_key_hint") or f"Get your API key at: {oc['auth_key_url']}"
     return AuthProvider(
         name=name,
         label=data.get("label", name),
@@ -817,7 +818,7 @@ def _derive_opencode_auth(name: str, data: dict) -> AuthProvider | None:
         command=[],  # API-key-only — no container command needed
         banner_hint="",
         modes=("api_key",),
-        api_key_hint=f"Get your API key at: {oc['auth_key_url']}",
+        api_key_hint=hint,
     )
 
 
