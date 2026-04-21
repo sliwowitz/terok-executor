@@ -2695,7 +2695,7 @@ tomli-w = ">=1.0,<2.0"
 
 [[package]]
 name = "terok-sandbox"
-version = "0.0.79"
+version = "0.0.80"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = ">=3.12,<4.0"
@@ -2713,7 +2713,7 @@ terok-shield = {git = "https://github.com/sliwowitz/terok-shield.git", branch = 
 type = "git"
 url = "https://github.com/sliwowitz/terok-sandbox.git"
 reference = "feat/dbus-clearance-bridge"
-resolved_reference = "cb01f6b8e6717201aefaacf288a18da5d47d3789"
+resolved_reference = "5e41a1da0cb7e97baa3328bcc050af489b4b25be"
 
 [[package]]
 name = "terok-shield"
