@@ -407,9 +407,9 @@ def _handle_uninstall(
     if not keep_images:
         _remove_images(base)
     if not no_sandbox:
-        from .sandbox import uninstall_sandbox_services
+        from terok_sandbox.commands import _handle_sandbox_uninstall
 
-        uninstall_sandbox_services(root=root)
+        _handle_sandbox_uninstall(root=root)
 
     print()
     print("Uninstall complete.")

@@ -102,7 +102,7 @@ from .roster import (
 )
 
 # -- Sandbox bootstrap composition ---------------------------------------------
-from .sandbox import ensure_sandbox_ready, uninstall_sandbox_services
+from .sandbox import ensure_sandbox_ready
 
 # -- Storage queries (filesystem footprint measurement) -------------------------
 from .storage import (
@@ -221,5 +221,4 @@ __all__ = [
     "inject_prompt",
     # Sandbox bootstrap composition
     "ensure_sandbox_ready",
-    "uninstall_sandbox_services",
 ]

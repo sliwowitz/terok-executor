@@ -24,24 +24,24 @@ from terok_executor.commands import (
     _handle_uninstall,
     _preflight_or_exit,
 )
+from terok_executor.sandbox import ensure_sandbox_ready
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
 @pytest.fixture
 def setup_spies():
-    """Replace every phase (sandbox-composition, images) with a MagicMock.
+    """Replace sandbox + image phases with MagicMocks so order is observable.
 
-    ``terok-executor setup`` now reaches sandbox through
-    :func:`terok_executor.sandbox.ensure_sandbox_ready` — a composition
-    helper that generates ``routes.json`` *before* calling the sandbox
-    aggregator.  Tests patch the composition entry point directly;
-    the ``ensure_vault_routes`` + ``_handle_sandbox_setup`` interaction
-    has its own dedicated tests in ``TestEnsureSandboxReady`` below.
+    Setup goes through ``ensure_sandbox_ready`` (the composition helper);
+    uninstall goes direct to ``_handle_sandbox_uninstall`` (nothing extra
+    to compose on teardown — routes.json survives uninstall by design).
+    The ``ensure_vault_routes`` + aggregator interaction has its own
+    ``TestEnsureSandboxReady`` coverage below.
     """
     with (
         patch("terok_executor.sandbox.ensure_sandbox_ready") as sandbox_setup,
-        patch("terok_executor.sandbox.uninstall_sandbox_services") as sandbox_uninstall,
+        patch("terok_sandbox.commands._handle_sandbox_uninstall") as sandbox_uninstall,
         patch("terok_executor.commands._build_images_with_banner") as build_images,
         patch("terok_executor.commands._remove_images") as remove_images,
     ):
@@ -122,90 +122,53 @@ class TestHandleUninstall:
 # ── Sandbox-composition helper ────────────────────────────────────────
 
 
+@pytest.fixture
+def compose_spies():
+    """Patch the two targets ``ensure_sandbox_ready`` composes: routes + aggregator."""
+    with (
+        patch("terok_executor.roster.loader.ensure_vault_routes") as routes,
+        patch("terok_sandbox.commands._handle_sandbox_setup") as aggregator,
+    ):
+        yield routes, aggregator
+
+
 class TestEnsureSandboxReady:
     """``ensure_sandbox_ready`` generates routes before calling the aggregator.
 
-    The invariant is order: routes-first is the reason this helper
-    exists.  A bare ``_handle_sandbox_setup`` call leaves the vault
-    running without ``routes.json``, so the next ``terok-executor run``
-    can't route credential requests to the right provider.
+    Order-first is the whole point of the helper: the vault reads
+    ``routes.json`` on the ``systemctl restart`` the aggregator's
+    vault phase performs, so routes must be on disk beforehand.
     """
 
-    def test_generates_routes_before_sandbox_setup(self) -> None:
-        from terok_executor.sandbox import ensure_sandbox_ready
-
+    def test_generates_routes_before_sandbox_setup(self, compose_spies) -> None:
+        routes, aggregator = compose_spies
         order: list[str] = []
-        with (
-            patch(
-                "terok_executor.roster.loader.ensure_vault_routes",
-                side_effect=lambda cfg: order.append("routes"),
-            ),
-            patch(
-                "terok_sandbox.commands._handle_sandbox_setup",
-                side_effect=lambda **_: order.append("sandbox"),
-            ),
-        ):
-            ensure_sandbox_ready()
+        routes.side_effect = lambda cfg: order.append("routes")
+        aggregator.side_effect = lambda **_: order.append("sandbox")
+        ensure_sandbox_ready()
         assert order == ["routes", "sandbox"]
 
-    def test_threads_root_flag_to_aggregator(self) -> None:
-        from terok_executor.sandbox import ensure_sandbox_ready
-
-        with (
-            patch("terok_executor.roster.loader.ensure_vault_routes"),
-            patch("terok_sandbox.commands._handle_sandbox_setup") as aggregator,
-        ):
-            ensure_sandbox_ready(root=True)
+    def test_threads_root_flag_to_aggregator(self, compose_spies) -> None:
+        _routes, aggregator = compose_spies
+        ensure_sandbox_ready(root=True)
         assert aggregator.call_args.kwargs["root"] is True
 
-    def test_no_vault_skips_route_generation(self) -> None:
+    def test_no_vault_skips_route_generation(self, compose_spies) -> None:
         """``--no-vault`` means the vault unit isn't being touched — skip routes too."""
-        from terok_executor.sandbox import ensure_sandbox_ready
-
-        with (
-            patch("terok_executor.roster.loader.ensure_vault_routes") as routes,
-            patch("terok_sandbox.commands._handle_sandbox_setup") as aggregator,
-        ):
-            ensure_sandbox_ready(no_vault=True)
+        routes, aggregator = compose_spies
+        ensure_sandbox_ready(no_vault=True)
         routes.assert_not_called()
         aggregator.assert_called_once()
         assert aggregator.call_args.kwargs["no_vault"] is True
 
-    def test_opt_out_flags_forwarded_to_aggregator(self) -> None:
+    def test_opt_out_flags_forwarded_to_aggregator(self, compose_spies) -> None:
         """Every ``no_*`` flag passes through so callers can skip specific phases."""
-        from terok_executor.sandbox import ensure_sandbox_ready
-
-        with (
-            patch("terok_executor.roster.loader.ensure_vault_routes"),
-            patch("terok_sandbox.commands._handle_sandbox_setup") as aggregator,
-        ):
-            ensure_sandbox_ready(no_shield=True, no_gate=True, no_clearance=True)
+        _routes, aggregator = compose_spies
+        ensure_sandbox_ready(no_shield=True, no_gate=True, no_clearance=True)
         kwargs = aggregator.call_args.kwargs
         assert kwargs["no_shield"] is True
         assert kwargs["no_gate"] is True
         assert kwargs["no_clearance"] is True
-
-
-class TestUninstallSandboxServices:
-    """Symmetric teardown — no routes cleanup (kept on disk for re-install)."""
-
-    def test_delegates_to_sandbox_uninstall(self) -> None:
-        from terok_executor.sandbox import uninstall_sandbox_services
-
-        with patch("terok_sandbox.commands._handle_sandbox_uninstall") as aggregator:
-            uninstall_sandbox_services(root=True)
-        assert aggregator.call_args.kwargs["root"] is True
-
-    def test_does_not_touch_routes_file(self) -> None:
-        """Routes survive uninstall — re-install picks them up without roster re-read."""
-        from terok_executor.sandbox import uninstall_sandbox_services
-
-        with (
-            patch("terok_executor.roster.loader.ensure_vault_routes") as routes,
-            patch("terok_sandbox.commands._handle_sandbox_uninstall"),
-        ):
-            uninstall_sandbox_services()
-        routes.assert_not_called()
 
 
 # ── Preflight gate ────────────────────────────────────────────────────
