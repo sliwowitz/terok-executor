@@ -335,7 +335,7 @@ def _fix_credentials(provider: str) -> bool:
 
     image = l1_image_tag("ubuntu:24.04")
     try:
-        authenticate("standalone", provider, mounts_dir=mounts_dir(), image=image)
+        authenticate(None, provider, mounts_dir=mounts_dir(), image=image)
     except SystemExit:
         return False
 

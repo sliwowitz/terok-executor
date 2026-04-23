@@ -121,20 +121,14 @@ AUTH_PROVIDERS: dict[str, AuthProvider] = {}
 
 
 def authenticate(
-    project_id: str,
+    project_id: str | None,
     provider: str,
     *,
     mounts_dir: Path,
     image: str,
     expose_token: bool = False,
 ) -> None:
-    """Run the auth flow for *provider* against *project_id*.
-
-    Args:
-        expose_token: When True, copy the real credential files into
-            the shared mount instead of writing a phantom marker.  Used
-            by tier 3 (``expose_oauth_token``) where containers need
-            the actual token.
+    """Run the auth flow for *provider*, optionally scoped to a project.
 
     Dispatches based on the provider's ``modes`` field:
 
@@ -143,10 +137,17 @@ def authenticate(
     - **both**: ask user to choose, then dispatch accordingly
 
     Args:
-        project_id: Project identifier (for container naming).
+        project_id: Project identifier used for container naming and the
+            banner line.  Pass ``None`` for host-wide auth — the banner
+            drops the project reference and the container gets a neutral
+            ``host-auth-<provider>`` name.
         provider: Auth provider name (e.g. ``"claude"``).
         mounts_dir: Base directory for shared config bind-mounts.
         image: Container image to use for the auth container.
+        expose_token: When True, copy the real credential files into
+            the shared mount instead of writing a phantom marker.  Used
+            by tier 3 (``expose_oauth_token``) where containers need
+            the actual token.
 
     Raises ``SystemExit`` if the provider name is unknown.
     """
@@ -234,7 +235,7 @@ def _prompt_api_key(info: AuthProvider) -> str:
 
 
 def _run_auth_container(
-    project_id: str,
+    project_id: str | None,
     provider: AuthProvider,
     *,
     mounts_dir: Path,
@@ -262,7 +263,11 @@ def _run_auth_container(
     with tempfile.TemporaryDirectory(prefix=f"terok-auth-{provider.name}-") as tmpdir:
         host_dir = Path(tmpdir)
 
-        container_name = f"{project_id}-auth-{provider.name}"
+        # ``project_id`` must lead the container name; Podman rejects names
+        # starting with ``_`` or other non-alphanumeric chars, so the
+        # host-wide caller passes ``None`` and we fall back to ``host``.
+        name_prefix = project_id or "host"
+        container_name = f"{name_prefix}-auth-{provider.name}"
         _cleanup_existing_container(container_name)
 
         cmd = ["podman", "run", "--rm"]
@@ -276,7 +281,10 @@ def _run_auth_container(
         cmd.extend(provider.command)
 
         # Banner
-        print(f"Authenticating {provider.label} for project: {project_id}")
+        if project_id:
+            print(f"Authenticating {provider.label} for project: {project_id}")
+        else:
+            print(f"Authenticating {provider.label} (host-wide)")
         print()
         for line in provider.banner_hint.splitlines():
             print(line)

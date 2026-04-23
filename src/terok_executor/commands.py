@@ -255,7 +255,7 @@ def _handle_auth(*, agent: str, api_key: str | None = None) -> None:
         image = l1_image_tag("ubuntu:24.04")
         from .paths import mounts_dir
 
-        authenticate("standalone", agent, mounts_dir=mounts_dir(), image=image)
+        authenticate(None, agent, mounts_dir=mounts_dir(), image=image)
 
     # Write vault URLs to shared config files (e.g. Vibe config.toml, gh config.yml)
     from .credentials.vault_config import write_vault_config
