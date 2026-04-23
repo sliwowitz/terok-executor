@@ -57,7 +57,7 @@ def _make_vault_db_with_ssh_keys(tmp_path: Path, scope: str = "myproj"):
         kp = generate_keypair("ed25519", comment=f"tk-main:{scope}")
         key_id = db.store_ssh_key(
             key_type=kp.key_type,
-            private_pem=kp.private_pem,
+            private_der=kp.private_der,
             public_blob=kp.public_blob,
             comment=kp.comment,
             fingerprint=kp.fingerprint,
@@ -669,7 +669,7 @@ class TestVaultTokenInjection:
             kp = generate_keypair("ed25519", comment="tk-main:sshonly")
             key_id = db.store_ssh_key(
                 key_type=kp.key_type,
-                private_pem=kp.private_pem,
+                private_der=kp.private_der,
                 public_blob=kp.public_blob,
                 comment=kp.comment,
                 fingerprint=kp.fingerprint,
