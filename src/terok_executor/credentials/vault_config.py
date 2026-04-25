@@ -87,18 +87,31 @@ def write_vault_config(provider_name: str) -> None:
 
     if "yaml_set" in patch:
         _apply_yaml_patch(config_path, patch, location)
-    elif "toml_table" in patch:
+    elif "toml_set" in patch:
         _apply_toml_patch(config_path, patch, location)
 
     print(f"Vault config written to {config_path}")
 
 
-def apply_shared_config_patches(roster: AgentRoster, mounts_base: Path) -> None:
-    """Re-apply every ``shared_config_patch`` for the whole roster.
+def apply_shared_config_patches(
+    roster: AgentRoster,
+    mounts_base: Path,
+    *,
+    providers: frozenset[str] | None = None,
+) -> None:
+    """Re-apply ``shared_config_patch`` for the selected providers.
 
     Called during task start so shared mount directories (which may have
     been recreated empty) always contain the correct vault addresses.
     Idempotent: safe to call on every launch.
+
+    Args:
+        roster: Loaded agent roster.
+        mounts_base: Shared config mount root.
+        providers:
+            ``None`` means "all providers with a patch".  An empty set
+            disables patching entirely.  A non-empty set restricts
+            patching to that provider subset.
 
     Raises :class:`ConfigPatchError` on failure — callers must not start
     the container if vault routing cannot be established.
@@ -106,6 +119,8 @@ def apply_shared_config_patches(roster: AgentRoster, mounts_base: Path) -> None:
     location = resolve_vault_location()
 
     for name, route in roster.vault_routes.items():
+        if providers is not None and name not in providers:
+            continue
         if not route.shared_config_patch:
             continue
         auth_info = roster.auth_providers.get(name)
@@ -120,7 +135,7 @@ def apply_shared_config_patches(roster: AgentRoster, mounts_base: Path) -> None:
 
             if "yaml_set" in patch:
                 _apply_yaml_patch(config_path, patch, location)
-            elif "toml_table" in patch:
+            elif "toml_set" in patch:
                 _apply_toml_patch(config_path, patch, location)
             _logger.debug("Applied config patch for %s → %s", name, config_path)
         except ConfigPatchError:
@@ -244,7 +259,7 @@ def _substitute(value: object, location: VaultLocation) -> object:
 
 
 def _apply_toml_patch(config_path: Path, patch: dict, location: VaultLocation) -> None:
-    """Patch a TOML array-of-tables entry."""
+    """Patch top-level TOML keys or an array-of-tables entry."""
     import tomllib
 
     raw = _read_nofollow(config_path)
@@ -261,20 +276,23 @@ def _apply_toml_patch(config_path: Path, patch: dict, location: VaultLocation) -
     else:
         existing = {}
 
-    table_key = patch["toml_table"]
-    match_criteria = patch["toml_match"]
     values = {k: _substitute(v, location) for k, v in patch["toml_set"].items()}
-
-    entries = existing.get(table_key, [])
-    target = next(
-        (e for e in entries if all(e.get(k) == v for k, v in match_criteria.items())),
-        None,
-    )
-    if target:
-        target.update(values)
+    if "toml_table" not in patch:
+        existing.update(values)
     else:
-        entries.append({**match_criteria, **values})
-        existing[table_key] = entries
+        table_key = patch["toml_table"]
+        match_criteria = patch["toml_match"]
+
+        entries = existing.get(table_key, [])
+        target = next(
+            (e for e in entries if all(e.get(k) == v for k, v in match_criteria.items())),
+            None,
+        )
+        if target:
+            target.update(values)
+        else:
+            entries.append({**match_criteria, **values})
+            existing[table_key] = entries
 
     import tomli_w
 

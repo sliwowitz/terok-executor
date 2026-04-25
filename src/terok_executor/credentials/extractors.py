@@ -77,10 +77,10 @@ def extract_claude_oauth(base_dir: Path) -> dict:
 def extract_codex_oauth(base_dir: Path) -> dict:
     """Extract Codex (OpenAI) OAuth tokens from ``auth.json``.
 
-    Also preserves the ``id_token`` JWT and ``account_id`` when present —
-    the phantom auth.json the proxied tier writes into task containers
-    needs to carry the real id_token so Codex's plan-tier and workspace
-    UI keeps working without leaking the access/refresh tokens.
+    Also preserves the source ``id_token`` JWT and ``account_id`` when
+    present — the shared synthetic auth.json writer derives a safe
+    claim-only JWT from it so Codex's plan-tier and workspace UI keeps
+    working without leaking the real OAuth tokens.
     """
     cred_file = base_dir / "auth.json"
     data = _try_read_json(cred_file)

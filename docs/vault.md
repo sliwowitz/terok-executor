@@ -68,7 +68,7 @@ their SDK supports:
 | Agent | How it reaches the token broker | Notes |
 |-------|-------------------------|-------|
 | **Claude** | `ANTHROPIC_BASE_URL=http://host.containers.internal:<port>` | Anthropic SDK respects this env var (default port: 18731) |
-| **Codex** | `OPENAI_BASE_URL=http://host.containers.internal:<port>` | OpenAI SDK respects this env var (default port: 18731) |
+| **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars |
 | **Vibe** | `config.toml` with `api_base` in shared `~/.vibe` mount | Mistral SDK ignores URL path in api_base, only uses host:port. Written by `shared_config_patch` in YAML |
 | **KISSKI** | `TEROK_OC_KISSKI_BASE_URL` env var override | OpenCode reads this; overridden from the real upstream to token broker |
 | **Blablador** | `TEROK_OC_BLABLADOR_BASE_URL` env var override | Same pattern as KISSKI |
@@ -185,8 +185,9 @@ After storing credentials, `write_proxy_config()` applies any
 
 ## Known Limitations
 
-- **Codex**: The token broker only handles HTTP. Codex needs WebSocket
-  support for its realtime protocol, which the token broker does not yet provide.
+- **Codex**: ChatGPT/backend-api and realtime websocket traffic are routed
+  through the token broker, but any newly added Codex-specific upstream
+  surfaces still need explicit vault route coverage.
 
 - **Copilot**: Not proxied yet. No `vault` section in YAML.
 

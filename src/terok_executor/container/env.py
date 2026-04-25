@@ -125,6 +125,14 @@ class ContainerEnvSpec:
     """When ``True``, scan shared mounts for real credential files and emit
     warnings.  Standalone mode defaults to off; terok enables this."""
 
+    enabled_vault_patch_providers: frozenset[str] | None = None
+    """Provider subset whose shared config patches should be applied.
+
+    ``None`` means "all providers with patches".  An empty set disables
+    vault config patching entirely.  terok uses this to gate experimental
+    OAuth routing without affecting standalone executor defaults.
+    """
+
     # -- Permissions -------------------------------------------------------
 
     unrestricted: bool = True
@@ -272,7 +280,11 @@ def assemble_container_env(
     #     tier 3) are safe because they have no shared_config_patch.
     from terok_executor.credentials.vault_config import apply_shared_config_patches
 
-    apply_shared_config_patches(roster, mounts_base)
+    apply_shared_config_patches(
+        roster,
+        mounts_base,
+        providers=spec.enabled_vault_patch_providers,
+    )
 
     # 9. Vault
     if not caller_manages_vault:

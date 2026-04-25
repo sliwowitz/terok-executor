@@ -795,6 +795,8 @@ class TestSharedConfigPatches:
         # Create the host mount dir that _shared_config_mounts would create.
         vibe_dir = tmp_path / "_vibe-config"
         vibe_dir.mkdir()
+        codex_dir = tmp_path / "_codex-config"
+        codex_dir.mkdir()
 
         with (
             patch("terok_sandbox.SandboxConfig"),
@@ -813,6 +815,10 @@ class TestSharedConfigPatches:
         assert mistral is not None, "config.toml must contain a mistral provider entry"
         assert "host.containers.internal:18731" in mistral["api_base"]
 
+        codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
+        assert codex_cfg["openai_base_url"] == "http://host.containers.internal:18731/v1"
+        assert codex_cfg["chatgpt_base_url"] == "http://host.containers.internal:18731/backend-api/"
+
     def test_assemble_env_calls_patches_with_and_without_bypass(self, workspace, envs_dir, roster):
         """assemble_container_env invokes patches regardless of caller_manages_vault."""
         for bypass in (True, False):
@@ -823,7 +829,11 @@ class TestSharedConfigPatches:
                     spec=_spec(workspace, envs_dir), roster=roster, caller_manages_vault=bypass
                 )
 
-            m_patches.assert_called_once_with(roster, envs_dir)
+            m_patches.assert_called_once_with(
+                roster,
+                envs_dir,
+                providers=None,
+            )
 
     def test_patches_idempotent(self, roster, tmp_path):
         """Calling apply_shared_config_patches twice must not duplicate entries."""
@@ -848,6 +858,22 @@ class TestSharedConfigPatches:
         providers = data.get("providers", [])
         mistral_entries = [p for p in providers if p.get("name") == "mistral"]
         assert len(mistral_entries) == 1, "idempotent: must have exactly one mistral entry"
+
+    def test_patches_can_be_limited_to_selected_providers(self, roster, tmp_path):
+        """Provider filtering can skip Codex while still patching others."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        (tmp_path / "_vibe-config").mkdir()
+        (tmp_path / "_codex-config").mkdir()
+
+        with (
+            patch("terok_sandbox.SandboxConfig"),
+            patch("terok_sandbox.get_token_broker_port", return_value=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"vibe"}))
+
+        assert (tmp_path / "_vibe-config" / "config.toml").exists()
+        assert not (tmp_path / "_codex-config" / "config.toml").exists()
 
 
 class TestConfigPatchSecurity:

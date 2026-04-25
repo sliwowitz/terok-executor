@@ -31,11 +31,13 @@ class TestVaultRoutesParsed:
         assert route.socket_env == "ANTHROPIC_UNIX_SOCKET"
 
     def test_codex_route_exists(self) -> None:
-        """Codex has a vault route with OpenAI upstream."""
+        """Codex has a vault route with OpenAI + ChatGPT upstreams."""
         route = get_roster().vault_routes.get("codex")
         assert route is not None
         assert route.upstream == "https://api.openai.com"
-        assert "OPENAI_API_KEY" in route.phantom_env
+        assert route.path_upstreams == {"/backend-api/": "https://chatgpt.com"}
+        assert route.shared_config_patch is not None
+        assert route.shared_config_patch["file"] == "config.toml"
 
     def test_gh_route_exists(self) -> None:
         """GitHub CLI has a vault route with token-style auth."""
@@ -108,6 +110,7 @@ class TestGenerateRoutesJson:
         assert "claude" in routes
         assert routes["claude"]["upstream"] == "https://api.anthropic.com"
         assert routes["claude"]["auth_header"] == "dynamic"
+        assert routes["codex"]["path_upstreams"] == {"/backend-api/": "https://chatgpt.com"}
 
     def test_all_routes_have_upstream(self) -> None:
         """Every route in the JSON has an upstream field."""
@@ -229,7 +232,7 @@ class TestVaultCommandHandlers:
     """Verify vault CLI command handlers."""
 
     @patch("terok_sandbox.start_vault")
-    @patch("terok_executor.roster.loader.ensure_vault_routes")
+    @patch("terok_executor.credentials.vault_commands._ensure_routes")
     @patch("terok_sandbox.is_vault_running", return_value=False)
     def test_start_generates_routes_and_starts(self, _running, _routes, _start, capsys) -> None:
         """start generates routes then starts the daemon."""
@@ -287,8 +290,8 @@ class TestVaultCommandHandlers:
         assert "running" in out
         assert "claude" in out
 
-    @patch("terok_sandbox.VaultManager.install_systemd_units")
-    @patch("terok_executor.roster.loader.ensure_vault_routes")
+    @patch("terok_sandbox.install_vault_systemd")
+    @patch("terok_executor.credentials.vault_commands._ensure_routes")
     @patch("terok_sandbox.is_vault_systemd_available", return_value=True)
     def test_install_generates_routes_and_installs(self, _sd, _routes, _install, capsys) -> None:
         """install generates routes then installs systemd units."""
@@ -307,7 +310,7 @@ class TestVaultCommandHandlers:
         with pytest.raises(SystemExit):
             _handle_install()
 
-    @patch("terok_sandbox.VaultManager.uninstall_systemd_units")
+    @patch("terok_sandbox.uninstall_vault_systemd")
     @patch("terok_sandbox.is_vault_systemd_available", return_value=True)
     def test_uninstall_removes_units(self, _sd, _uninstall, capsys) -> None:
         """uninstall removes systemd units."""
@@ -326,7 +329,7 @@ class TestVaultCommandHandlers:
             _handle_uninstall()
 
     @patch(
-        "terok_executor.roster.loader.ensure_vault_routes",
+        "terok_executor.credentials.vault_commands._ensure_routes",
         return_value=Path("/tmp/routes.json"),
     )
     def test_routes_prints_path(self, _routes, capsys) -> None:
@@ -472,6 +475,30 @@ class TestScanSkipsInjectedFile:
         leaked = scan_leaked_credentials(tmp_path)
         assert len(leaked) == 1
         assert leaked[0][0] == "claude"
+
+    def test_skips_injected_codex_auth_json(self, tmp_path: Path) -> None:
+        """Injected shared Codex auth.json is NOT flagged as leaked."""
+        from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
+
+        from terok_executor import get_roster
+        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+        roster = get_roster()
+        auth = roster.auth_providers["codex"]
+        route = roster.vault_routes["codex"]
+
+        cred_dir = tmp_path / auth.host_dir_name
+        cred_dir.mkdir()
+        cred = {
+            "tokens": {
+                "access_token": CODEX_SHARED_OAUTH_MARKER,
+                "refresh_token": CODEX_SHARED_OAUTH_MARKER,
+                "id_token": "dummy.dummy.dummy",
+            }
+        }
+        (cred_dir / route.credential_file).write_text(json.dumps(cred))
+
+        assert scan_leaked_credentials(tmp_path) == []
 
 
 class TestCleanSkipsInjectedFile:

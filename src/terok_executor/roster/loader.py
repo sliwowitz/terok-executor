@@ -84,6 +84,9 @@ class VaultRoute:
     upstream: str
     """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
 
+    path_upstreams: dict[str, str] = field(default_factory=dict)
+    """Optional request-path prefix → upstream-base overrides."""
+
     auth_header: str = "Authorization"
     """HTTP header name for the real credential."""
 
@@ -368,6 +371,8 @@ class AgentRoster:
                 "auth_header": route.auth_header,
                 "auth_prefix": route.auth_prefix,
             }
+            if route.path_upstreams:
+                entry["path_upstreams"] = route.path_upstreams
             if route.oauth_refresh:
                 entry["oauth_refresh"] = route.oauth_refresh
             routes[route.provider] = entry
@@ -848,10 +853,16 @@ def _to_vault_route(name: str, data: dict) -> VaultRoute | None:
             f"Agent {name!r}: 'socket_path' is no longer configurable — "
             "remove it; the env builder resolves the vault socket path centrally"
         )
+    path_upstreams = cp.get("path_upstreams") or {}
+    if not isinstance(path_upstreams, dict):
+        raise ValueError(
+            f"Agent {name!r}: path_upstreams must be a mapping, got {type(path_upstreams).__name__}"
+        )
     return VaultRoute(
         provider=name,
         route_prefix=cp["route_prefix"],
         upstream=cp["upstream"],
+        path_upstreams=dict(path_upstreams),
         auth_header=cp.get("auth_header", "Authorization"),
         auth_prefix=cp.get("auth_prefix", "Bearer "),
         credential_type=cp.get("credential_type", "api_key"),

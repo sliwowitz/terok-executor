@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
+from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER
 
 from terok_executor._util import podman_userns_args
 
@@ -486,14 +486,12 @@ def _codex_oauth_mount_writer(
     - **Exposed** (``expose_token=True``): copy the real ``auth.json``
       verbatim so the in-container Codex reads the live OAuth token
       (tier 3, unsafe — every task container can read it).
-    - **Default**: drop a phantom ``auth.json`` — the real ``id_token``
-      JWT (for plan-tier + workspace UI, public claims only) and
-      ``account_id`` survive, but ``access_token`` and ``refresh_token``
-      are replaced with :data:`PHANTOM_CREDENTIALS_MARKER`.  The vault
-      translates the marker back to the real token on inference
-      requests; the CLI itself never sees the live bearer.  This is the
-      fallback for tier 2 (proxied) and also a no-harm default for
-      tier 1 (vault stores creds but nothing wires the proxy yet).
+    - **Default**: drop a shared synthetic ``auth.json`` — the ``id_token``
+      becomes a claim-only JWT (for plan tier + workspace UI) and
+      ``account_id`` survives, but ``access_token`` and ``refresh_token``
+      are replaced with :data:`CODEX_SHARED_OAUTH_MARKER`.  The vault
+      translates that marker back to the real token on proxied requests;
+      the CLI itself never sees the live bearer.
     """
     dest_dir = mounts_base / "_codex-config"
     dest_file = dest_dir / "auth.json"
@@ -515,8 +513,10 @@ def _codex_oauth_mount_writer(
         print(
             "\nNote: Codex OAuth credential is shared across all task containers."
             "\n      API calls are routed through the vault — the real"
-            "\n      access/refresh tokens stay on the host.  Enable"
-            "\n      agent.codex.allow_oauth to wire the proxy routing."
+            "\n      OAuth tokens stay on the host.  Standalone executor"
+            "\n      uses the shared Codex config rewrite directly;"
+            "\n      terok project mode gates that rewrite via"
+            "\n      agent.codex.allow_oauth."
         )
 
 
@@ -534,22 +534,25 @@ _CODEX_PHANTOM_LAST_REFRESH = "9999-01-01T00:00:00Z"
 
 
 def _write_codex_phantom_auth_json(cred_data: dict, dest: Path) -> None:
-    """Write a phantom ``auth.json`` preserving public id_token claims only.
+    """Write a shared synthetic ``auth.json`` without real bearer tokens.
 
     Codex's ``TokenData`` serde contract (codex-rs/login/src/token_data.rs)
-    requires ``id_token`` to be a parseable JWT string — the CLI base64-
-    decodes it to read workspace/plan claims but never verifies the
-    signature, so the real id_token rides into the container unchanged.
-    The access/refresh tokens are the bearer secrets; both are replaced
-    with the vault's phantom marker — inference rides through the vault,
-    which substitutes the live access token.
+    requires ``id_token`` to be a parseable JWT string.  Codex reads a
+    small subset of claims from it (plan tier, workspace id, email) but
+    does not verify the signature.  We therefore synthesize a minimal JWT
+    that preserves those non-secret claims while dropping the original
+    opaque token body entirely.
+
+    The access/refresh tokens are the actual bearer secrets; both are
+    replaced with the Codex-specific shared vault marker.  Inference
+    rides through the vault, which substitutes the live access token.
     """
     import json
 
     tokens: dict = {
-        "id_token": cred_data.get("id_token", ""),
-        "access_token": PHANTOM_CREDENTIALS_MARKER,
-        "refresh_token": PHANTOM_CREDENTIALS_MARKER,
+        "id_token": _build_codex_shared_id_token(cred_data.get("id_token", "")),
+        "access_token": CODEX_SHARED_OAUTH_MARKER,
+        "refresh_token": CODEX_SHARED_OAUTH_MARKER,
     }
     account_id = cred_data.get("account_id")
     if account_id:
@@ -561,6 +564,56 @@ def _write_codex_phantom_auth_json(cred_data: dict, dest: Path) -> None:
         "last_refresh": _CODEX_PHANTOM_LAST_REFRESH,
     }
     dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _build_codex_shared_id_token(raw_jwt: str) -> str:
+    """Return a synthetic JWT with only the Codex-local claims we need."""
+    import base64
+    import json
+
+    def _b64url(data: dict) -> str:
+        encoded = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+    def _jwt_payload(token: str) -> dict:
+        try:
+            _header, payload, _sig = token.split(".", 2)
+            padded = payload + "=" * (-len(payload) % 4)
+            decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+            parsed = json.loads(decoded)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError, base64.binascii.Error):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    payload = _jwt_payload(raw_jwt)
+    profile = payload.get("https://api.openai.com/profile")
+    auth = payload.get("https://api.openai.com/auth")
+
+    email = payload.get("email")
+    if not email and isinstance(profile, dict):
+        email = profile.get("email")
+
+    safe_payload: dict[str, object] = {"exp": 253402300799}
+    if email:
+        safe_payload["email"] = email
+        safe_payload["https://api.openai.com/profile"] = {"email": email}
+
+    if isinstance(auth, dict):
+        safe_auth = {
+            key: auth[key]
+            for key in (
+                "chatgpt_plan_type",
+                "chatgpt_user_id",
+                "user_id",
+                "chatgpt_account_id",
+                "chatgpt_account_is_fedramp",
+            )
+            if key in auth
+        }
+        if safe_auth:
+            safe_payload["https://api.openai.com/auth"] = safe_auth
+
+    return ".".join((_b64url({"alg": "none", "typ": "JWT"}), _b64url(safe_payload), "terok"))
 
 
 #: Maps provider name → post-capture mount reconciler.  OAuth-capable

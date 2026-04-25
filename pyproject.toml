@@ -25,13 +25,10 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
 # DEV-TIME BRANCH PIN — tracks sandbox's master tip, which carries
-# gate_use_personal_ssh_default() (merged in #205) and the setup
-# aggregator (#207).  Executor itself doesn't use those, but terok's
-# PR 4 needs sandbox + executor to agree on the same sandbox version
-# — a stale URL pin here would otherwise conflict with terok's git pin
-# on the upstream sandbox tip.  Release script flips it to a URL pin
-# when the next sandbox wheel ships.
-terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.103/terok_sandbox-0.0.103-py3-none-any.whl"}  # TODO: repin to wheel at release
+# DEV-TIME BRANCH PIN — tracks the sandbox branch for the shared Codex
+# vaulted-OAuth fix until that PR lands and a wheel ships.  The release
+# chain flips this back to a wheel URL.
+terok-sandbox = {git = "https://github.com/sliwowitz/terok-sandbox.git", branch = "feat/codex-shared-oauth-vault"}
 "ruamel.yaml" = ">=0.18"
 Jinja2 = ">=3.1"
 tomli-w = ">=1.0"
