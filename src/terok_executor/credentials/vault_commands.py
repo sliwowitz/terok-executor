@@ -94,6 +94,7 @@ def _is_injected_codex_auth_file(path: Path) -> bool:
         return (
             tokens.get("access_token") == CODEX_SHARED_OAUTH_MARKER
             and tokens.get("refresh_token") == CODEX_SHARED_OAUTH_MARKER
+            and not data.get("OPENAI_API_KEY")
         )
     except (json.JSONDecodeError, OSError, ValueError):
         return False

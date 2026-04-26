@@ -504,6 +504,31 @@ class TestScanSkipsInjectedFile:
 
         assert scan_leaked_credentials(tmp_path) == []
 
+    def test_codex_auth_json_with_live_api_key_is_still_leaked(self, tmp_path: Path) -> None:
+        """Marker tokens do not hide a live top-level OPENAI_API_KEY."""
+        from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
+
+        from terok_executor import get_roster
+        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+        roster = get_roster()
+        auth = roster.auth_providers["codex"]
+        route = roster.vault_routes["codex"]
+
+        cred_dir = tmp_path / auth.host_dir_name
+        cred_dir.mkdir()
+        cred = {
+            "OPENAI_API_KEY": "sk-real-leak",
+            "tokens": {
+                "access_token": CODEX_SHARED_OAUTH_MARKER,
+                "refresh_token": CODEX_SHARED_OAUTH_MARKER,
+                "id_token": "dummy.dummy.dummy",
+            },
+        }
+        (cred_dir / route.credential_file).write_text(json.dumps(cred))
+
+        assert scan_leaked_credentials(tmp_path) == [("codex", cred_dir / route.credential_file)]
+
     def test_malformed_codex_auth_json_is_suspicious_not_crashing(self, tmp_path: Path) -> None:
         """Non-object auth.json roots are treated as leaks, not parser crashes."""
         from terok_executor import get_roster
