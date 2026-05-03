@@ -84,6 +84,12 @@ class VaultRoute:
     upstream: str
     """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
 
+    path_upstreams: dict[str, str] = field(default_factory=dict)
+    """Optional request-path prefix → upstream-base overrides."""
+
+    oauth_extra_headers: dict[str, str] = field(default_factory=dict)
+    """Provider-specific headers added only when forwarding OAuth credentials."""
+
     auth_header: str = "Authorization"
     """HTTP header name for the real credential."""
 
@@ -368,6 +374,10 @@ class AgentRoster:
                 "auth_header": route.auth_header,
                 "auth_prefix": route.auth_prefix,
             }
+            if route.path_upstreams:
+                entry["path_upstreams"] = route.path_upstreams
+            if route.oauth_extra_headers:
+                entry["oauth_extra_headers"] = route.oauth_extra_headers
             if route.oauth_refresh:
                 entry["oauth_refresh"] = route.oauth_refresh
             routes[route.provider] = entry
@@ -848,10 +858,33 @@ def _to_vault_route(name: str, data: dict) -> VaultRoute | None:
             f"Agent {name!r}: 'socket_path' is no longer configurable — "
             "remove it; the env builder resolves the vault socket path centrally"
         )
+    raw_path_upstreams = cp.get("path_upstreams")
+    if raw_path_upstreams is None:
+        path_upstreams = {}
+    elif not isinstance(raw_path_upstreams, dict):
+        raise ValueError(
+            f"Agent {name!r}: path_upstreams must be a mapping, "
+            f"got {type(raw_path_upstreams).__name__}"
+        )
+    else:
+        path_upstreams = raw_path_upstreams
+
+    raw_oauth_extra_headers = cp.get("oauth_extra_headers")
+    if raw_oauth_extra_headers is None:
+        oauth_extra_headers = {}
+    elif not isinstance(raw_oauth_extra_headers, dict):
+        raise ValueError(
+            f"Agent {name!r}: oauth_extra_headers must be a mapping, "
+            f"got {type(raw_oauth_extra_headers).__name__}"
+        )
+    else:
+        oauth_extra_headers = raw_oauth_extra_headers
     return VaultRoute(
         provider=name,
         route_prefix=cp["route_prefix"],
         upstream=cp["upstream"],
+        path_upstreams=dict(path_upstreams),
+        oauth_extra_headers={str(k): str(v) for k, v in oauth_extra_headers.items()},
         auth_header=cp.get("auth_header", "Authorization"),
         auth_prefix=cp.get("auth_prefix", "Bearer "),
         credential_type=cp.get("credential_type", "api_key"),

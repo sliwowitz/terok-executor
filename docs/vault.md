@@ -68,7 +68,7 @@ their SDK supports:
 | Agent | How it reaches the token broker | Notes |
 |-------|-------------------------|-------|
 | **Claude** | `ANTHROPIC_BASE_URL=http://host.containers.internal:<port>` | Anthropic SDK respects this env var (default port: 18731) |
-| **Codex** | `OPENAI_BASE_URL=http://host.containers.internal:<port>` | OpenAI SDK respects this env var (default port: 18731) |
+| **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars |
 | **Vibe** | `config.toml` with `api_base` in shared `~/.vibe` mount | Mistral SDK ignores URL path in api_base, only uses host:port. Written by `shared_config_patch` in YAML |
 | **KISSKI** | `TEROK_OC_KISSKI_BASE_URL` env var override | OpenCode reads this; overridden from the real upstream to token broker |
 | **Blablador** | `TEROK_OC_BLABLADOR_BASE_URL` env var override | Same pattern as KISSKI |
@@ -107,16 +107,19 @@ shared_config_patch:
   file: config.toml
   toml_table: providers
   toml_match: {name: mistral}
-  toml_set: {api_base: "{proxy_url}/v1"}
+  toml_set: {api_base: "{vault_url}/v1"}
 
 # gh: YAML patch
 shared_config_patch:
   file: config.yml
-  yaml_set: {http_unix_socket: "/tmp/terok-gh-proxy.sock"}
+  yaml_set: {http_unix_socket: "{vault_socket}"}
 ```
 
-The patch is applied after auth (`write_proxy_config() in proxy_config.py`).
-Only non-secret values (URLs, socket paths) are written to shared mounts.
+The patch is applied after auth and reconciled on every task launch.  Only
+non-secret values (URLs, socket paths) are written to shared mounts.  The
+patcher also writes a `.terok-managed-config.json` sidecar beside the config
+file so callers can later disable a provider and remove only values still
+owned by terok; user-edited values are preserved.
 
 ## Agent YAML Registry
 
@@ -165,9 +168,12 @@ Prompts for an API key on the terminal. No container needed.
 
 ### Post-auth config patching
 
-After storing credentials, `write_proxy_config()` applies any
+After storing credentials, `write_vault_config()` applies any
 `shared_config_patch` from the YAML registry. This writes token broker URLs
-(not secrets) to the provider's shared config mount.
+(not secrets) to the provider's shared config mount.  Task launch re-applies
+enabled patches and removes disabled provider patches using the managed
+sidecar, which keeps global shared config directories from retaining stale
+vault routing after a feature mode changes.
 
 ## Per-Provider Credential Extractors
 
@@ -185,8 +191,9 @@ After storing credentials, `write_proxy_config()` applies any
 
 ## Known Limitations
 
-- **Codex**: The token broker only handles HTTP. Codex needs WebSocket
-  support for its realtime protocol, which the token broker does not yet provide.
+- **Codex**: ChatGPT/backend-api and realtime websocket traffic are routed
+  through the token broker, but any newly added Codex-specific upstream
+  surfaces still need explicit vault route coverage.
 
 - **Copilot**: Not proxied yet. No `vault` section in YAML.
 

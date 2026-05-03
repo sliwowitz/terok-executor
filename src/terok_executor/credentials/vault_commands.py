@@ -20,16 +20,21 @@ if TYPE_CHECKING:
     from terok_sandbox import SandboxConfig
 
 
+def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
+    """Generate routes.json from the YAML agent roster."""
+    from terok_executor.roster.loader import ensure_vault_routes
+
+    return ensure_vault_routes(cfg=cfg)
+
+
 def _handle_start(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and start the vault daemon."""
     from terok_sandbox import is_vault_running, start_vault
 
-    from terok_executor.roster.loader import ensure_vault_routes
-
     if is_vault_running(cfg=cfg):
         print("Vault is already running.")
         sys.exit(1)
-    ensure_vault_routes(cfg=cfg)
+    _ensure_routes(cfg=cfg)
     start_vault(cfg=cfg)
     print("Vault started.")
 
@@ -61,11 +66,35 @@ def _is_injected_credentials_file(path: Path) -> bool:
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return False
         oauth = data.get("claudeAiOauth", {})
         if not isinstance(oauth, dict):
             return False
         return oauth.get("accessToken") == PHANTOM_CREDENTIALS_MARKER and not oauth.get(
             "refreshToken"
+        )
+    except (json.JSONDecodeError, OSError, ValueError):
+        return False
+
+
+def _is_injected_codex_auth_file(path: Path) -> bool:
+    """Check whether *path* is a terok-injected shared Codex ``auth.json``."""
+    import json
+
+    from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return False
+        tokens = data.get("tokens", {})
+        if not isinstance(tokens, dict):
+            return False
+        return (
+            tokens.get("access_token") == CODEX_SHARED_OAUTH_MARKER
+            and tokens.get("refresh_token") == CODEX_SHARED_OAUTH_MARKER
+            and not data.get("OPENAI_API_KEY")
         )
     except (json.JSONDecodeError, OSError, ValueError):
         return False
@@ -107,7 +136,9 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
             # Ensure resolved path stays within the mounts base
             if base_resolved not in path.resolve(strict=True).parents:
                 continue
-            if st.st_size > 0 and not _is_injected_credentials_file(path):
+            if st.st_size > 0 and not (
+                _is_injected_credentials_file(path) or _is_injected_codex_auth_file(path)
+            ):
                 leaked.append((name, path))
         except (OSError, TypeError):
             continue
@@ -171,9 +202,7 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and install systemd socket activation."""
-    from terok_sandbox import VaultManager, is_vault_systemd_available
-
-    from terok_executor.roster.loader import ensure_vault_routes
+    from terok_sandbox import install_vault_systemd, is_vault_systemd_available
 
     if not is_vault_systemd_available():
         print(
@@ -181,27 +210,25 @@ def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
             "Use 'start' to run the vault without systemd."
         )
         sys.exit(1)
-    ensure_vault_routes(cfg=cfg)
-    VaultManager(cfg).install_systemd_units()
+    _ensure_routes(cfg=cfg)
+    install_vault_systemd(cfg=cfg)
     print("Vault installed via systemd socket activation.")
 
 
 def _handle_uninstall(*, cfg: SandboxConfig | None = None) -> None:
     """Remove vault systemd units."""
-    from terok_sandbox import VaultManager, is_vault_systemd_available
+    from terok_sandbox import is_vault_systemd_available, uninstall_vault_systemd
 
     if not is_vault_systemd_available():
         print("Error: systemd user services are not available. Nothing to uninstall.")
         sys.exit(1)
-    VaultManager(cfg).uninstall_systemd_units()
+    uninstall_vault_systemd(cfg=cfg)
     print("Vault systemd units removed.")
 
 
 def _handle_routes(*, cfg: SandboxConfig | None = None) -> None:
     """Regenerate routes.json from the YAML agent roster."""
-    from terok_executor.roster.loader import ensure_vault_routes
-
-    path = ensure_vault_routes(cfg=cfg)
+    path = _ensure_routes(cfg=cfg)
     if path:
         print(f"Routes written to {path}")
 

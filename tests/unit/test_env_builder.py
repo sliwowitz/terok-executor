@@ -795,6 +795,8 @@ class TestSharedConfigPatches:
         # Create the host mount dir that _shared_config_mounts would create.
         vibe_dir = tmp_path / "_vibe-config"
         vibe_dir.mkdir()
+        codex_dir = tmp_path / "_codex-config"
+        codex_dir.mkdir()
 
         with (
             patch("terok_sandbox.SandboxConfig"),
@@ -813,6 +815,10 @@ class TestSharedConfigPatches:
         assert mistral is not None, "config.toml must contain a mistral provider entry"
         assert "host.containers.internal:18731" in mistral["api_base"]
 
+        codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
+        assert codex_cfg["openai_base_url"] == "http://host.containers.internal:18731/v1"
+        assert codex_cfg["chatgpt_base_url"] == "http://host.containers.internal:18731/backend-api/"
+
     def test_assemble_env_calls_patches_with_and_without_bypass(self, workspace, envs_dir, roster):
         """assemble_container_env invokes patches regardless of caller_manages_vault."""
         for bypass in (True, False):
@@ -823,7 +829,12 @@ class TestSharedConfigPatches:
                     spec=_spec(workspace, envs_dir), roster=roster, caller_manages_vault=bypass
                 )
 
-            m_patches.assert_called_once_with(roster, envs_dir)
+            m_patches.assert_called_once_with(
+                roster,
+                envs_dir,
+                providers=None,
+                disabled_providers=None,
+            )
 
     def test_patches_idempotent(self, roster, tmp_path):
         """Calling apply_shared_config_patches twice must not duplicate entries."""
@@ -848,6 +859,125 @@ class TestSharedConfigPatches:
         providers = data.get("providers", [])
         mistral_entries = [p for p in providers if p.get("name") == "mistral"]
         assert len(mistral_entries) == 1, "idempotent: must have exactly one mistral entry"
+
+    def test_patches_can_be_limited_to_selected_providers(self, roster, tmp_path):
+        """Provider filtering can skip Codex while still patching others."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        (tmp_path / "_vibe-config").mkdir()
+        (tmp_path / "_codex-config").mkdir()
+
+        with (
+            patch("terok_sandbox.SandboxConfig"),
+            patch("terok_sandbox.get_token_broker_port", return_value=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"vibe"}))
+
+        assert (tmp_path / "_vibe-config" / "config.toml").exists()
+        assert not (tmp_path / "_codex-config" / "config.toml").exists()
+
+    def test_patches_write_managed_sidecar(self, roster, tmp_path):
+        """Applied patches record the exact values terok owns."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        (tmp_path / "_codex-config").mkdir()
+
+        with (
+            patch("terok_sandbox.SandboxConfig"),
+            patch("terok_sandbox.get_token_broker_port", return_value=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
+
+        import json
+
+        sidecar = json.loads(
+            (tmp_path / "_codex-config" / ".terok-managed-config.json").read_text()
+        )
+        codex_records = sidecar["files"]["config.toml"]["providers"]["codex"]
+        assert codex_records == [
+            {
+                "kind": "toml_top",
+                "values": {
+                    "openai_base_url": "http://host.containers.internal:18731/v1",
+                    "chatgpt_base_url": "http://host.containers.internal:18731/backend-api/",
+                },
+            }
+        ]
+
+    def test_disabled_provider_removes_owned_top_level_toml(self, roster, tmp_path):
+        """Disabled providers remove stale top-level TOML keys that terok owns."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        (tmp_path / "_codex-config").mkdir()
+
+        with (
+            patch("terok_sandbox.SandboxConfig"),
+            patch("terok_sandbox.get_token_broker_port", return_value=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
+
+        apply_shared_config_patches(
+            roster,
+            tmp_path,
+            providers=frozenset(),
+            disabled_providers=frozenset({"codex"}),
+        )
+
+        import tomllib
+
+        config = tomllib.loads((tmp_path / "_codex-config" / "config.toml").read_text())
+        assert "openai_base_url" not in config
+        assert "chatgpt_base_url" not in config
+        assert not (tmp_path / "_codex-config" / ".terok-managed-config.json").exists()
+
+    def test_disabled_provider_preserves_user_modified_value(self, roster, tmp_path):
+        """A value changed after terok wrote it becomes user-owned and survives removal."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        codex_dir = tmp_path / "_codex-config"
+        codex_dir.mkdir()
+
+        with (
+            patch("terok_sandbox.SandboxConfig"),
+            patch("terok_sandbox.get_token_broker_port", return_value=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
+
+        config_path = codex_dir / "config.toml"
+        config_path.write_text(
+            'openai_base_url = "https://user.example/v1"\n'
+            'chatgpt_base_url = "http://host.containers.internal:18731/backend-api/"\n'
+        )
+
+        apply_shared_config_patches(
+            roster,
+            tmp_path,
+            providers=frozenset(),
+            disabled_providers=frozenset({"codex"}),
+        )
+
+        import tomllib
+
+        config = tomllib.loads(config_path.read_text())
+        assert config == {"openai_base_url": "https://user.example/v1"}
+        assert not (codex_dir / ".terok-managed-config.json").exists()
+
+    def test_disabled_provider_does_not_resolve_vault_location(self, roster, tmp_path):
+        """Pure removal does not require the vault to have an address."""
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        (tmp_path / "_codex-config").mkdir()
+
+        with patch(
+            "terok_sandbox.get_token_broker_port",
+            side_effect=AssertionError("vault location should not be resolved"),
+        ):
+            apply_shared_config_patches(
+                roster,
+                tmp_path,
+                providers=frozenset(),
+                disabled_providers=frozenset({"codex"}),
+            )
 
 
 class TestConfigPatchSecurity:

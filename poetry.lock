@@ -2745,13 +2745,13 @@ tomli-w = ">=1.0,<2.0"
 
 [[package]]
 name = "terok-clearance"
-version = "0.6.7"
+version = "0.6.8"
 description = "Shield clearance and desktop notifications for terok"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_clearance-0.6.7-py3-none-any.whl", hash = "sha256:463dfaebfbb8408f4f9b1cb327edba0f5c75f16a0dfce8750ffe2c174724ee7f"},
+    {file = "terok_clearance-0.6.8-py3-none-any.whl", hash = "sha256:e07f9683e7c6089591f254e9b01b121f71814681c383dfbd45f7d887540eff55"},
 ]
 
 [package.dependencies]
@@ -2761,17 +2761,17 @@ pyyaml = ">=6.0,<7.0"
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.6.7/terok_clearance-0.6.7-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.6.8/terok_clearance-0.6.8-py3-none-any.whl"
 
 [[package]]
 name = "terok-sandbox"
-version = "0.0.105"
+version = "0.0.106"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_sandbox-0.0.105-py3-none-any.whl", hash = "sha256:ae5e855d7f6a55d2d51090ef86d64858f79c26a4132b0768402166ed96c5b447"},
+    {file = "terok_sandbox-0.0.106-py3-none-any.whl", hash = "sha256:8d4ad1ce0986b8175df04fd8b30b00e4c582f3b76956d39f8dc16944fa126edd"},
 ]
 
 [package.dependencies]
@@ -2780,22 +2780,22 @@ cryptography = ">=46.0.7"
 packaging = ">=24"
 platformdirs = ">=4.9.6"
 pydantic = ">=2.9"
-terok_clearance = {url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.6.7/terok_clearance-0.6.7-py3-none-any.whl"}
-terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.35/terok_shield-0.6.35-py3-none-any.whl"}
+terok_clearance = {url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.6.8/terok_clearance-0.6.8-py3-none-any.whl"}
+terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.36/terok_shield-0.6.36-py3-none-any.whl"}
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.105/terok_sandbox-0.0.105-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.106/terok_sandbox-0.0.106-py3-none-any.whl"
 
 [[package]]
 name = "terok-shield"
-version = "0.6.35"
+version = "0.6.36"
 description = "nftables-based egress firewalling for Podman containers"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_shield-0.6.35-py3-none-any.whl", hash = "sha256:611c7756a54658131c172d115de9bc7f315320c7ee0dd223af1219acc27c4933"},
+    {file = "terok_shield-0.6.36-py3-none-any.whl", hash = "sha256:21f86400ae9f2e333fb88a6da3d8c26d5a6efd3beb2596fcfb1cf28f8e1d86e3"},
 ]
 
 [package.dependencies]
@@ -2804,7 +2804,7 @@ PyYAML = ">=6.0"
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.35/terok_shield-0.6.35-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.36/terok_shield-0.6.36-py3-none-any.whl"
 
 [[package]]
 name = "tomli"
@@ -3047,14 +3047,14 @@ watchmedo = ["PyYAML (>=3.10)"]
 
 [[package]]
 name = "wcwidth"
-version = "0.6.0"
+version = "0.7.0"
 description = "Measures the displayed width of unicode strings in a terminal"
 optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
 files = [
-    {file = "wcwidth-0.6.0-py3-none-any.whl", hash = "sha256:1a3a1e510b553315f8e146c54764f4fb6264ffad731b3d78088cdb1478ffbdad"},
-    {file = "wcwidth-0.6.0.tar.gz", hash = "sha256:cdc4e4262d6ef9a1a57e018384cbeb1208d8abbc64176027e2c2455c81313159"},
+    {file = "wcwidth-0.7.0-py3-none-any.whl", hash = "sha256:5d69154c429a82910e241c738cd0e2976fac8a2dd47a1a805f4afed1c0f136f2"},
+    {file = "wcwidth-0.7.0.tar.gz", hash = "sha256:90e3a7ea092341c44b99562e75d09e4d5160fe7a3974c6fb842a101a95e7eed0"},
 ]
 
 [[package]]
@@ -3203,4 +3203,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "6df78b4d5d4d234a6bf778a8b80514b31d76f2ce711d179b7972d3b8e3bea6dd"
+content-hash = "17a8577630473c3dff411ab51316eaa4989a2bd52ffd95b091d234661873267d"

@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from unittest.mock import patch
 
+from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER
+
 from terok_executor.credentials.auth import (
-    PHANTOM_CREDENTIALS_MARKER,
     _apply_post_capture_state,
     _capture_credentials,
     _claude_oauth_mount_writer,
@@ -18,6 +20,25 @@ from terok_executor.credentials.auth import (
     _write_claude_credentials_file,
     store_api_key,
 )
+
+
+def _fake_jwt(payload: dict | None = None) -> str:
+    """Return a syntactically valid unsigned JWT for tests."""
+    header = {"alg": "none", "typ": "JWT"}
+    data = payload or {"email": "codex@example.com"}
+
+    def _b64url(obj: dict) -> str:
+        encoded = json.dumps(obj, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+    return ".".join((_b64url(header), _b64url(data), "test"))
+
+
+def _jwt_payload(token: str) -> dict:
+    """Decode the unsigned JWT payload used in tests."""
+    _header, payload, _sig = token.split(".", 2)
+    padded = payload + "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
 
 
 class TestCaptureCredentials:
@@ -157,6 +178,23 @@ class TestWriteClaudeCredentialsFile:
         target = tmp_path / "nested" / "mounts"
         _write_claude_credentials_file({"type": "oauth"}, target)
         assert (target / "_claude-config" / ".credentials.json").is_file()
+
+    def test_replaces_symlink_without_touching_target(self, tmp_path: Path) -> None:
+        """No-follow writes replace a hostile mount symlink instead of following it."""
+        victim = tmp_path / "victim.json"
+        victim.write_text("do not overwrite")
+        cred_dir = tmp_path / "_claude-config"
+        cred_dir.mkdir()
+        dest = cred_dir / ".credentials.json"
+        dest.symlink_to(victim)
+
+        _write_claude_credentials_file({"type": "oauth"}, tmp_path)
+
+        assert victim.read_text() == "do not overwrite"
+        assert not dest.is_symlink()
+        assert json.loads(dest.read_text())["claudeAiOauth"]["accessToken"] == (
+            PHANTOM_CREDENTIALS_MARKER
+        )
 
 
 class TestApplyPostCaptureState:
@@ -408,13 +446,22 @@ class TestCaptureWritesCredentialsFile:
 
     def test_capture_codex_default_writes_phantom(self, tmp_path: Path) -> None:
         """Codex OAuth capture without expose writes a phantom auth.json."""
+        real_id_token = _fake_jwt(
+            {
+                "email": "coder@example.com",
+                "https://api.openai.com/auth": {
+                    "chatgpt_plan_type": "pro",
+                    "chatgpt_account_id": "org-42",
+                },
+            }
+        )
         (tmp_path / "auth.json").write_text(
             json.dumps(
                 {
                     "tokens": {
                         "access_token": "sk-oai",
                         "refresh_token": "rt",
-                        "id_token": "id.token.jwt",
+                        "id_token": real_id_token,
                     }
                 }
             )
@@ -429,10 +476,10 @@ class TestCaptureWritesCredentialsFile:
         phantom = mounts / "_codex-config" / "auth.json"
         assert phantom.is_file()
         data = json.loads(phantom.read_text())
-        assert data["tokens"]["access_token"] == PHANTOM_CREDENTIALS_MARKER
-        assert data["tokens"]["refresh_token"] == PHANTOM_CREDENTIALS_MARKER
-        # The real id_token rides in — the CLI parses claims from it.
-        assert data["tokens"]["id_token"] == "id.token.jwt"
+        assert data["tokens"]["access_token"] == CODEX_SHARED_OAUTH_MARKER
+        assert data["tokens"]["refresh_token"] == CODEX_SHARED_OAUTH_MARKER
+        # The file carries a synthetic JWT, not the original opaque id_token.
+        assert data["tokens"]["id_token"] != real_id_token
 
 
 class TestClaudeOAuthMountWriter:
@@ -478,18 +525,32 @@ class TestCodexOAuthMountWriter:
         assert json.loads(dest.read_text()) == payload
 
     def test_default_writes_phantom_preserving_id_token(self, tmp_path: Path) -> None:
-        """expose_token=False writes a phantom auth.json with real id_token claims."""
+        """expose_token=False writes a phantom auth.json with synthetic id_token claims."""
         mounts = tmp_path / "mounts"
-        cred = {"id_token": "real.jwt.string", "account_id": "org-42"}
+        real_id_token = _fake_jwt(
+            {
+                "email": "coder@example.com",
+                "https://api.openai.com/auth": {
+                    "chatgpt_plan_type": "pro",
+                    "chatgpt_account_id": "org-42",
+                },
+            }
+        )
+        cred = {"id_token": real_id_token, "account_id": "org-42"}
 
         _codex_oauth_mount_writer(tmp_path, mounts, cred, expose_token=False)
 
         data = json.loads((mounts / "_codex-config" / "auth.json").read_text())
         tokens = data["tokens"]
-        assert tokens["id_token"] == "real.jwt.string"
+        assert tokens["id_token"] != real_id_token
+        assert len(tokens["id_token"].split(".")) == 3
+        synthetic_claims = _jwt_payload(tokens["id_token"])
+        assert "email" not in synthetic_claims
+        assert "https://api.openai.com/profile" not in synthetic_claims
+        assert synthetic_claims["https://api.openai.com/auth"]["chatgpt_account_id"] == "org-42"
         assert tokens["account_id"] == "org-42"
-        assert tokens["access_token"] == PHANTOM_CREDENTIALS_MARKER
-        assert tokens["refresh_token"] == PHANTOM_CREDENTIALS_MARKER
+        assert tokens["access_token"] == CODEX_SHARED_OAUTH_MARKER
+        assert tokens["refresh_token"] == CODEX_SHARED_OAUTH_MARKER
         assert data["OPENAI_API_KEY"] is None
         # last_refresh is pinned far in the future so the CLI's 8-day
         # staleness check never fires an in-container refresh attempt.
@@ -507,7 +568,28 @@ class TestCodexOAuthMountWriter:
         _codex_oauth_mount_writer(tmp_path, mounts, {}, expose_token=False)
 
         data = json.loads((codex_dir / "auth.json").read_text())
-        assert data["tokens"]["access_token"] == PHANTOM_CREDENTIALS_MARKER
+        assert data["tokens"]["access_token"] == CODEX_SHARED_OAUTH_MARKER
+
+    def test_expose_replaces_symlink_without_touching_target(self, tmp_path: Path) -> None:
+        """Exposed copy mode writes through the same no-follow destination helper."""
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+        payload = {"tokens": {"access_token": "sk-oai", "refresh_token": "rt"}}
+        (auth_dir / "auth.json").write_text(json.dumps(payload))
+
+        mounts = tmp_path / "mounts"
+        codex_dir = mounts / "_codex-config"
+        codex_dir.mkdir(parents=True)
+        victim = tmp_path / "victim.json"
+        victim.write_text("do not overwrite")
+        dest = codex_dir / "auth.json"
+        dest.symlink_to(victim)
+
+        _codex_oauth_mount_writer(auth_dir, mounts, payload, expose_token=True)
+
+        assert victim.read_text() == "do not overwrite"
+        assert not dest.is_symlink()
+        assert json.loads(dest.read_text()) == payload
 
     def test_expose_raises_when_file_missing(self, tmp_path: Path) -> None:
         """Raises FileNotFoundError when exposed and no auth.json."""

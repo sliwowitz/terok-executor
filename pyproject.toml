@@ -4,7 +4,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
 name = "terok-executor"
-version = "0.0.126"
+version = "0.0.127"
 description = "Single-agent task runner for hardened Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,15 +24,10 @@ packages = [
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
-# DEV-TIME BRANCH PIN — tracks terok-sandbox's feat/drop-bridge-phase,
-# which deletes the bridge install phase + PodmanInspector now that
-# the shield reader resolves the orchestrator dossier at emit time.
-# Executor and terok must agree on the same sandbox tip during the
-# in-flight dossier-in-events chain (a wheel URL pin here would
-# otherwise conflict with terok's git pin on the branch).  Release
-# script flips back to the wheel URL when the next sandbox release
-# ships.
-terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.105/terok_sandbox-0.0.105-py3-none-any.whl"}
+# DEV-TIME BRANCH PIN — tracks the sandbox branch for the shared Codex
+# vaulted-OAuth fix until that PR lands and a wheel ships.  The release
+# chain flips this back to a wheel URL.
+terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.106/terok_sandbox-0.0.106-py3-none-any.whl"}
 "ruamel.yaml" = ">=0.18"
 Jinja2 = ">=3.1"
 tomli-w = ">=1.0"

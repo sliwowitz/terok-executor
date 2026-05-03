@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
+from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER
 
 from terok_executor._util import podman_userns_args
 
@@ -459,7 +459,7 @@ def _claude_oauth_mount_writer(
             raise FileNotFoundError(f"No .credentials.json in {auth_dir}")
         dest_dir = mounts_base / "_claude-config"
         dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest_dir / ".credentials.json")
+        _write_bytes_nofollow(dest_dir / ".credentials.json", src.read_bytes())
         print("Real .credentials.json copied to shared Claude config mount.")
         print(
             "\nNote: Claude OAuth token is EXPOSED in the shared mount."
@@ -486,14 +486,14 @@ def _codex_oauth_mount_writer(
     - **Exposed** (``expose_token=True``): copy the real ``auth.json``
       verbatim so the in-container Codex reads the live OAuth token
       (tier 3, unsafe — every task container can read it).
-    - **Default**: drop a phantom ``auth.json`` — the real ``id_token``
-      JWT (for plan-tier + workspace UI, public claims only) and
-      ``account_id`` survive, but ``access_token`` and ``refresh_token``
-      are replaced with `PHANTOM_CREDENTIALS_MARKER`.  The vault
-      translates the marker back to the real token on inference
-      requests; the CLI itself never sees the live bearer.  This is the
-      fallback for tier 2 (proxied) and also a no-harm default for
-      tier 1 (vault stores creds but nothing wires the proxy yet).
+    - **Default**: drop a shared synthetic ``auth.json`` — the real
+      ``id_token`` JWT (for plan-tier + workspace UI, public claims only)
+      and ``account_id`` survive, but ``access_token`` and ``refresh_token``
+      are replaced with `CODEX_SHARED_OAUTH_MARKER`.  The vault translates
+      the marker back to the real token on inference requests; the CLI
+      itself never sees the live bearer.  This is the fallback for tier 2
+      (proxied) and also a no-harm default for tier 1 (vault stores creds
+      but nothing wires the proxy yet).
     """
     dest_dir = mounts_base / "_codex-config"
     dest_file = dest_dir / "auth.json"
@@ -502,7 +502,7 @@ def _codex_oauth_mount_writer(
         src = auth_dir / "auth.json"
         if not src.is_file():
             raise FileNotFoundError(f"No auth.json in {auth_dir}")
-        shutil.copy2(src, dest_file)
+        _write_bytes_nofollow(dest_file, src.read_bytes())
         print("Real auth.json copied to shared Codex config mount.")
         print(
             "\nNote: Codex OAuth token is EXPOSED in the shared mount."
@@ -515,8 +515,10 @@ def _codex_oauth_mount_writer(
         print(
             "\nNote: Codex OAuth credential is shared across all task containers."
             "\n      API calls are routed through the vault — the real"
-            "\n      access/refresh tokens stay on the host.  Enable"
-            "\n      agent.codex.allow_oauth to wire the proxy routing."
+            "\n      OAuth tokens stay on the host.  Standalone executor"
+            "\n      uses the shared Codex config rewrite directly;"
+            "\n      terok project mode gates that rewrite via"
+            "\n      agent.codex.allow_oauth."
         )
 
 
@@ -534,22 +536,23 @@ _CODEX_PHANTOM_LAST_REFRESH = "9999-01-01T00:00:00Z"
 
 
 def _write_codex_phantom_auth_json(cred_data: dict, dest: Path) -> None:
-    """Write a phantom ``auth.json`` preserving public id_token claims only.
+    """Write a shared synthetic ``auth.json`` without real bearer tokens.
 
     Codex's ``TokenData`` serde contract (codex-rs/login/src/token_data.rs)
-    requires ``id_token`` to be a parseable JWT string — the CLI base64-
-    decodes it to read workspace/plan claims but never verifies the
-    signature, so the real id_token rides into the container unchanged.
-    The access/refresh tokens are the bearer secrets; both are replaced
-    with the vault's phantom marker — inference rides through the vault,
-    which substitutes the live access token.
+    requires ``id_token`` to be a parseable JWT string.  We synthesize a
+    minimal JWT that preserves non-PII account metadata while dropping the
+    original opaque token body entirely.
+
+    The access/refresh tokens are the actual bearer secrets; both are
+    replaced with the Codex-specific shared vault marker.  Inference
+    rides through the vault, which substitutes the live access token.
     """
     import json
 
     tokens: dict = {
-        "id_token": cred_data.get("id_token", ""),
-        "access_token": PHANTOM_CREDENTIALS_MARKER,
-        "refresh_token": PHANTOM_CREDENTIALS_MARKER,
+        "id_token": _build_codex_shared_id_token(cred_data.get("id_token", "")),
+        "access_token": CODEX_SHARED_OAUTH_MARKER,
+        "refresh_token": CODEX_SHARED_OAUTH_MARKER,
     }
     account_id = cred_data.get("account_id")
     if account_id:
@@ -560,7 +563,71 @@ def _write_codex_phantom_auth_json(cred_data: dict, dest: Path) -> None:
         "tokens": tokens,
         "last_refresh": _CODEX_PHANTOM_LAST_REFRESH,
     }
-    dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _write_bytes_nofollow(dest, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
+
+
+def _build_codex_shared_id_token(raw_jwt: str) -> str:
+    """Return a synthetic JWT with only the Codex-local claims we need."""
+    import base64
+    import json
+
+    def _b64url(data: dict) -> str:
+        encoded = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        return base64.urlsafe_b64encode(encoded).decode("ascii").rstrip("=")
+
+    def _jwt_payload(token: str) -> dict:
+        try:
+            _header, payload, _sig = token.split(".", 2)
+            padded = payload + "=" * (-len(payload) % 4)
+            decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+            parsed = json.loads(decoded)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError, base64.binascii.Error):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    payload = _jwt_payload(raw_jwt)
+    auth = payload.get("https://api.openai.com/auth")
+
+    safe_payload: dict[str, object] = {"exp": 253402300799}
+    if isinstance(auth, dict):
+        safe_auth = {
+            key: auth[key]
+            for key in (
+                "chatgpt_plan_type",
+                "chatgpt_user_id",
+                "user_id",
+                "chatgpt_account_id",
+                "chatgpt_account_is_fedramp",
+            )
+            if key in auth
+        }
+        if safe_auth:
+            safe_payload["https://api.openai.com/auth"] = safe_auth
+
+    return ".".join((_b64url({"alg": "none", "typ": "JWT"}), _b64url(safe_payload), "terok"))
+
+
+def _write_bytes_nofollow(path: Path, data: bytes) -> None:
+    """Atomically write *data* without following a pre-existing target symlink."""
+    import os
+    import uuid
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(tmp, flags, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 #: Maps provider name → post-capture mount reconciler.  OAuth-capable
@@ -599,8 +666,9 @@ def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
             "rateLimitTier": cred_data.get("rate_limit_tier"),
         }
     }
-    (claude_dir / ".credentials.json").write_text(
-        json.dumps(creds, indent=2) + "\n", encoding="utf-8"
+    _write_bytes_nofollow(
+        claude_dir / ".credentials.json",
+        (json.dumps(creds, indent=2) + "\n").encode("utf-8"),
     )
 
 
@@ -646,7 +714,7 @@ def _apply_post_capture_state(
             continue  # already up to date
 
         state.update(patch)
-        path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        _write_bytes_nofollow(path, (json.dumps(state, indent=2) + "\n").encode("utf-8"))
 
 
 def _api_key_command(cfg: AuthKeyConfig) -> list[str]:

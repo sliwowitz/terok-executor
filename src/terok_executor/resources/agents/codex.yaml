@@ -28,13 +28,17 @@ capabilities:
 vault:
   route_prefix: codex
   upstream: https://api.openai.com
+  path_upstreams:
+    /backend-api/: https://chatgpt.com
   auth_header: Authorization
   auth_prefix: "Bearer "
   credential_type: oauth
   credential_file: auth.json
-  phantom_env:
-    OPENAI_API_KEY: true
-  base_url_env: OPENAI_BASE_URL
+  shared_config_patch:
+    file: config.toml
+    toml_set:
+      openai_base_url: "{vault_url}/v1"
+      chatgpt_base_url: "{vault_url}/backend-api/"
   # OAuth refresh -- endpoint, client_id, and grant shape extracted from the
   # Codex CLI source (codex-rs/login/src/auth/manager.rs v0.123.0).  The CLI
   # itself can be redirected at its own refresh attempts via the
