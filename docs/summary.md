@@ -5,7 +5,7 @@
     - [Security](security.md)
 - Developer Guide
     - [Vault](vault.md)
-    - [Code Metrics](quality_report.md)
+    - [Code Metrics](quality-report.md)
     - [Module Map](module-map.md)
-    - [CI Workflow Map](ci_map.md)
+    - [CI Workflow Map](ci-map.md)
 - [API Reference](reference/)
