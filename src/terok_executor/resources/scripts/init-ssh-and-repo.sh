@@ -270,7 +270,10 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
   # gatekeeping mode the gate is already origin, so terok only sets
   # GATE_REMOTE_URL in online mode — its absence here is the natural guard.
   if [[ -n "${GATE_REMOTE_URL:-}" ]]; then
-    echo ">> adding 'gate' remote: ${GATE_REMOTE_URL}"
+    # Strip the per-task token from the printed URL — it's per-task Basic
+    # Auth credentials embedded in `http://<token>@host:port/repo`.  The
+    # actual git command below uses the unredacted URL.
+    echo ">> adding 'gate' remote: ${GATE_REMOTE_URL/:\/\/*@/://<token>@}"
     git -C "${REPO_ROOT}" remote remove gate 2>/dev/null || true
     git -C "${REPO_ROOT}" remote add gate "${GATE_REMOTE_URL}"
   fi
