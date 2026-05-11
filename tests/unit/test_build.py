@@ -670,6 +670,30 @@ class TestStageScripts:
         assert not (dest / "stale-file.txt").exists()
         assert (dest / "init-ssh-and-repo.sh").is_file()
 
+    def test_overlays_sandbox_bridges(self, tmp_path: Path) -> None:
+        """ensure-bridges.sh + ssh-agent-bridge.sh come from terok_sandbox."""
+        dest = tmp_path / "scripts"
+        stage_scripts(dest)
+        assert (dest / "ensure-bridges.sh").is_file()
+        assert (dest / "ssh-agent-bridge.sh").is_file()
+
+    def test_missing_sandbox_raises_builderror(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A broken sandbox install surfaces as BuildError, not ModuleNotFoundError."""
+        from terok_executor.container import build as build_module
+
+        original = build_module._copy_package_tree
+
+        def fake_copy(package: str, rel_path: str, dst: Path) -> None:
+            if package == "terok_sandbox":
+                raise ModuleNotFoundError("No module named 'terok_sandbox'")
+            original(package, rel_path, dst)
+
+        monkeypatch.setattr(build_module, "_copy_package_tree", fake_copy)
+        with pytest.raises(build_module.BuildError, match="terok_sandbox is not importable"):
+            stage_scripts(tmp_path / "scripts")
+
 
 class TestStageToadAgents:
     """Verify toad agent TOML staging."""

@@ -578,13 +578,30 @@ def render_l1_sidecar(
 def stage_scripts(dest: Path) -> None:
     """Stage container helper scripts into *dest*.
 
-    Copies all files from ``terok_executor/resources/scripts/`` into the given
-    directory, replacing any existing contents.  Python bytecode caches and
-    ``__init__.py`` markers are excluded.
+    Copies executor's own ``resources/scripts/`` then overlays the
+    socat-based bridge scripts that ship with ``terok_sandbox``
+    (``ensure-bridges.sh`` + ``ssh-agent-bridge.sh``).  The bridges
+    live in sandbox because they encode sandbox-level concerns with
+    no executor-specific logic; executor still bundles them into the
+    container image so the Dockerfile's ``COPY scripts/…`` lines keep
+    finding them at their established names.
+
+    Raises [`BuildError`][terok_executor.container.build.BuildError]
+    when ``terok_sandbox`` is not importable — sandbox is a hard
+    dependency in ``pyproject.toml``, but a broken install would
+    otherwise surface as a raw ``ModuleNotFoundError`` traceback.
     """
     if dest.exists():
         shutil.rmtree(dest)
     _copy_package_tree("terok_executor", "resources/scripts", dest)
+    try:
+        _copy_package_tree("terok_sandbox", "resources/bridges", dest)
+    except ModuleNotFoundError as exc:
+        raise BuildError(
+            "terok_sandbox is not importable — its bridge resources "
+            "(resources/bridges/) could not be staged into the build "
+            "context.  Reinstall terok-executor's dependencies to fix."
+        ) from exc
     _clean_packaging_artifacts(dest)
 
 

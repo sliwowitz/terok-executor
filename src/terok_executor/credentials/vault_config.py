@@ -207,10 +207,7 @@ def resolve_vault_location() -> VaultLocation:
     if port is None:
         # Socket mode: container mounts the host vault socket directly; the
         # loopback bridge serves clients that can only speak HTTP-over-TCP.
-        # (sandbox types ``get_token_broker_port`` as ``-> int`` even though
-        # the socket-mode return is ``None`` — fix upstream then drop the
-        # ``unreachable`` suppression here.)
-        return VaultLocation(  # type: ignore[unreachable]
+        return VaultLocation(
             url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
             socket=CONTAINER_VAULT_SOCKET,
         )
