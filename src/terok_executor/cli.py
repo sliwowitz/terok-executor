@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from importlib.metadata import PackageNotFoundError, version as _meta_version
+from typing import Any
 
 from .commands import COMMANDS, ArgDef, CommandDef
 from .credentials.vault_commands import VAULT_COMMANDS
@@ -40,8 +41,8 @@ def main() -> None:
     # -- vault --
     vault_p = sub.add_parser("vault", help="Vault management")
     vault_sub = vault_p.add_subparsers()
-    for cmd in VAULT_COMMANDS:
-        _wire_command(vault_sub, cmd)
+    for vault_cmd in VAULT_COMMANDS:
+        _wire_command(vault_sub, vault_cmd)
     vault_p.set_defaults(_group_help=vault_p)
 
     args = parser.parse_args()
@@ -57,8 +58,16 @@ def main() -> None:
 # ── Private helpers ─────────────────────────────────────────────────────
 
 
-def _wire_command(sub: argparse._SubParsersAction, cmd: CommandDef) -> None:
-    """Add a [`CommandDef`][terok_executor.cli.CommandDef] to an argparse subparser group."""
+def _wire_command(sub: argparse._SubParsersAction, cmd: Any) -> None:
+    """Add a [`CommandDef`][terok_executor.cli.CommandDef] to an argparse subparser group.
+
+    ``cmd`` is intentionally ``Any``: this wires both
+    :data:`terok_executor.COMMANDS` (`terok_executor.commands.CommandDef`)
+    and :data:`VAULT_COMMANDS` (`terok_sandbox.commands.CommandDef`); the
+    two have identical structural shapes but mypy treats them as distinct
+    nominal types.  The Protocol surface lives in the duck-typed reads
+    below (``cmd.name`` / ``cmd.args`` / ``arg.dest`` / …).
+    """
     p = sub.add_parser(cmd.name, help=cmd.help)
     for arg in cmd.args:
         kwargs: dict = {}

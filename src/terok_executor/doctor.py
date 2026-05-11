@@ -16,6 +16,7 @@ executes inside containers via ``podman exec``.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -166,7 +167,7 @@ def _make_credential_file_checks(roster: AgentRoster) -> list[DoctorCheck]:
         container_path = f"{auth.container_mount}/{route.credential_file}"
         provider_name = name
 
-        def _make_eval(pname: str, cpath: str):  # noqa: ANN202 — closure factory
+        def _make_eval(pname: str, cpath: str) -> Callable[[int, str, str], CheckVerdict]:
             """Create an evaluate closure for a specific provider."""
 
             def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:
@@ -224,7 +225,7 @@ def _make_phantom_token_checks(roster: AgentRoster) -> list[DoctorCheck]:
                 continue
             seen_vars.add(var)
 
-            def _make_eval(env_var: str, pname: str):  # noqa: ANN202
+            def _make_eval(env_var: str, pname: str) -> Callable[[int, str, str], CheckVerdict]:
                 """Create evaluate closure for a specific env var."""
 
                 def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:
@@ -286,7 +287,9 @@ def _make_base_url_checks(roster: AgentRoster, token_broker_port: int | None) ->
             continue
         seen_vars.add(var)
 
-        def _make_eval(env_var: str, pname: str, host: str, mode: str):  # noqa: ANN202
+        def _make_eval(
+            env_var: str, pname: str, host: str, mode: str
+        ) -> Callable[[int, str, str], CheckVerdict]:
             """Create evaluate closure for a base URL check."""
 
             def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:

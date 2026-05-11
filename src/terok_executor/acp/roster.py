@@ -24,7 +24,7 @@ import asyncio
 import logging
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from terok_sandbox import CredentialDB, SandboxConfig
 
@@ -235,7 +235,7 @@ class ACPRoster:
         proxy = ACPProxy(roster=self)
         await proxy.run(reader, writer)
 
-    def exec_wrapper(self, agent_id: str, *, stdin: object, stdout: object) -> int:
+    def exec_wrapper(self, agent_id: str, *, stdin: BinaryIO, stdout: BinaryIO) -> int:
         """Run ``terok-{agent_id}-acp`` in the task container with bridged stdio.
 
         Used by the *probe* path: a short single-shot handshake whose

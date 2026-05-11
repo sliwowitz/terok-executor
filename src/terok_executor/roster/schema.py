@@ -177,7 +177,9 @@ class RawAuth(StrictModel):
     auth_key: RawAuthKey | None = None
     banner_hint: str = ""
     extra_run_args: list[str] = Field(default_factory=list)
-    modes: list[Literal["oauth", "api_key"]] = Field(default_factory=lambda: ["api_key"])
+    modes: list[Literal["oauth", "api_key"]] = Field(
+        default_factory=lambda: ["api_key"]  # type: ignore[arg-type]
+    )
     api_key_hint: str = ""
     post_capture_state: PostCaptureState = Field(
         default_factory=dict,

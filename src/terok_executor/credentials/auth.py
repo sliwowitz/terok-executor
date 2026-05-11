@@ -644,6 +644,7 @@ def _write_codex_phantom_auth_json(cred_data: dict, dest: Path) -> None:
 def _build_codex_shared_id_token(raw_jwt: str) -> str:
     """Return a synthetic JWT with only the Codex-local claims we need."""
     import base64
+    import binascii
     import json
 
     def _b64url(data: dict) -> str:
@@ -656,7 +657,7 @@ def _build_codex_shared_id_token(raw_jwt: str) -> str:
             padded = payload + "=" * (-len(payload) % 4)
             decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
             parsed = json.loads(decoded)
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError, base64.binascii.Error):
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
             return {}
         return parsed if isinstance(parsed, dict) else {}
 

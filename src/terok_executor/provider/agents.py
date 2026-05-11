@@ -12,8 +12,10 @@ import json
 import os
 import shlex
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from terok_executor._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
 
@@ -67,11 +69,18 @@ class AgentConfigSpec:
     mounts_base: Path | None = None
 
     def __post_init__(self) -> None:
-        """Coerce mutable sequences to tuples for true immutability."""
-        if isinstance(self.subagents, list):
-            object.__setattr__(self, "subagents", tuple(self.subagents))
+        """Coerce mutable sequences to tuples for true immutability.
+
+        Defensive against callers that build the spec from
+        ``json.loads`` / ``yaml.load`` output where the runtime types are
+        ``list`` instead of ``tuple``.  Mypy sees the static annotations
+        and reports the ``isinstance(..., list)`` branches as unreachable;
+        the runtime coercion remains correct.
+        """
+        if isinstance(self.subagents, list):  # type: ignore[unreachable]
+            object.__setattr__(self, "subagents", tuple(self.subagents))  # type: ignore[unreachable]
         if isinstance(self.selected_agents, list):
-            object.__setattr__(self, "selected_agents", tuple(self.selected_agents))
+            object.__setattr__(self, "selected_agents", tuple(self.selected_agents))  # type: ignore[unreachable]
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +222,8 @@ def parse_md_agent(file_path: str) -> dict:
 
 
 def _subagents_to_json(
-    subagents: list[dict],
-    selected_agents: list[str] | None = None,
+    subagents: Sequence[dict[str, Any]],
+    selected_agents: Sequence[str] | None = None,
 ) -> str:
     """Convert sub-agent list to JSON dict string for --agents flag.
 

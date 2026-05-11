@@ -27,7 +27,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from terok_executor.roster.loader import AgentRoster
@@ -165,6 +165,8 @@ def apply_shared_config_patches(
             continue
 
         patch = route.shared_config_patch
+        if patch is None:  # filtered out above; narrows for mypy
+            continue
         try:
             shared_dir = mounts_base / auth_info.host_dir_name
             shared_dir.mkdir(parents=True, exist_ok=True)
@@ -205,7 +207,10 @@ def resolve_vault_location() -> VaultLocation:
     if port is None:
         # Socket mode: container mounts the host vault socket directly; the
         # loopback bridge serves clients that can only speak HTTP-over-TCP.
-        return VaultLocation(
+        # (sandbox types ``get_token_broker_port`` as ``-> int`` even though
+        # the socket-mode return is ``None`` — fix upstream then drop the
+        # ``unreachable`` suppression here.)
+        return VaultLocation(  # type: ignore[unreachable]
             url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
             socket=CONTAINER_VAULT_SOCKET,
         )
@@ -457,6 +462,7 @@ def _apply_toml_patch(config_path: Path, patch: dict, location: VaultLocation) -
     existing = _read_toml_mapping(config_path, warn_on_error=True) or {}
 
     values = {k: _substitute(v, location) for k, v in patch["toml_set"].items()}
+    records: list[dict[str, Any]]
     if "toml_table" not in patch:
         existing.update(values)
         records = [{"kind": "toml_top", "values": values}]

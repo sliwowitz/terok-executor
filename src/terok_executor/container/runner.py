@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_sandbox import Sharing, VolumeSpec
+from terok_sandbox import SandboxConfig, Sharing, VolumeSpec
 
 from terok_executor._util import detect_host_timezone
 
@@ -968,7 +968,11 @@ def _generate_task_id() -> str:
 
 
 def _seed_from_cache(
-    workspace: Path, repo_url: str, cfg: object, *, origin_url: str | None = None
+    workspace: Path,
+    repo_url: str,
+    cfg: SandboxConfig | None,
+    *,
+    origin_url: str | None = None,
 ) -> None:
     """Seed *workspace* from the clone cache for *repo_url* (best-effort).
 

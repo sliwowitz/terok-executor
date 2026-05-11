@@ -22,6 +22,7 @@ import os
 import signal
 import socket
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from terok_sandbox import Sandbox, SandboxConfig
@@ -179,7 +180,9 @@ async def _run(
     return 0
 
 
-def _make_handler(roster: ACPRoster):
+def _make_handler(
+    roster: ACPRoster,
+) -> Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]:
     """Return an ``asyncio.start_unix_server`` callback bound to *roster*.
 
     Each accepted connection gets its own :class:`ACPProxy` — no

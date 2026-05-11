@@ -51,7 +51,7 @@ def iter_model_choice_dicts(result: dict[str, Any]) -> Iterator[dict[str, Any]]:
         select = opt.get("select")
         nested = select if isinstance(select, dict) else opt
         if not isinstance(nested, dict):
-            continue
+            continue  # type: ignore[unreachable]
         for key in ("options", "values", "choices"):
             choices = nested.get(key)
             if not isinstance(choices, list):

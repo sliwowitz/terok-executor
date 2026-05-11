@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 from jinja2 import BaseLoader, Environment
 
@@ -751,7 +752,7 @@ def _jinja_env() -> Environment:
     )
 
 
-def _render_template(template_name: str, variables: dict[str, str]) -> str:
+def _render_template(template_name: str, variables: dict[str, Any]) -> str:
     """Render a Jinja2 Dockerfile template from package resources.
 
     Templates live in ``resources/templates/``.  The L0/L1 templates
