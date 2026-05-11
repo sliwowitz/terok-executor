@@ -8,19 +8,27 @@ version = "0.0.138"
 description = "Single-agent task runner for hardened Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
-authors = ["terok maintainers"]
+authors = ["Jiri Vyskocil <jiri@vyskocil.com>"]
 keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Apache Software License",
-  "Environment :: Console",
-  "Operating System :: POSIX :: Linux",
-  "Topic :: Software Development :: Quality Assurance",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
 ]
 
 packages = [
   { include = "terok_executor", from = "src" },
 ]
+maintainers = ["Jiri Vyskocil <jiri@vyskocil.com>"]
+homepage = "https://terok.ai/"
+repository = "https://github.com/terok-ai/terok-executor"
+documentation = "https://terok-ai.github.io/terok-executor/"
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
@@ -59,6 +67,11 @@ mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/downloa
 
 [tool.poetry.scripts]
 terok-executor = "terok_executor.cli:main"
+
+[tool.poetry.urls]
+Issues = "https://github.com/terok-ai/terok-executor/issues"
+Changelog = "https://github.com/terok-ai/terok-executor/releases"
+Security = "https://github.com/terok-ai/terok-executor/security/policy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
