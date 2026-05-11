@@ -13,6 +13,7 @@ set -euo pipefail
 #   GIT_RESET_MODE          - "none" (default), "hard", or "soft"
 #   CLONE_FROM              - optional alternate source to seed the repo (e.g. file:///git-gate/gate.git)
 #   EXTERNAL_REMOTE_URL     - optional URL for upstream repo in gatekeeping mode (added as "external" remote)
+#   GATE_REMOTE_URL         - optional URL for the host-side gate in online mode (added as "gate" remote)
 #   (bridge env vars — TEROK_SSH_SIGNER_PORT, TEROK_SSH_SIGNER_TOKEN, TEROK_TOKEN_BROKER_PORT, GH_TOKEN —
 #    are consumed by ensure-bridges.sh, sourced below)
 
@@ -259,6 +260,22 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     # Remove existing external remote if present (idempotent)
     git -C "${REPO_ROOT}" remote remove external 2>/dev/null || true
     git -C "${REPO_ROOT}" remote add external "${EXTERNAL_REMOTE_URL}"
+  fi
+
+  # In online mode, surface the host-side gate as a "gate" remote so the
+  # agent can push WIP branches host-locally without going to upstream
+  # (and so a human can review them on the host before promoting).
+  # Mirror of the EXTERNAL_REMOTE_URL block above: gatekeeping mode adds
+  # upstream as "external"; online mode adds the gate as "gate".  In
+  # gatekeeping mode the gate is already origin, so terok only sets
+  # GATE_REMOTE_URL in online mode — its absence here is the natural guard.
+  if [[ -n "${GATE_REMOTE_URL:-}" ]]; then
+    # Strip the per-task token from the printed URL — it's per-task Basic
+    # Auth credentials embedded in `http://<token>@host:port/repo`.  The
+    # actual git command below uses the unredacted URL.
+    echo ">> adding 'gate' remote: ${GATE_REMOTE_URL/:\/\/*@/://<token>@}"
+    git -C "${REPO_ROOT}" remote remove gate 2>/dev/null || true
+    git -C "${REPO_ROOT}" remote add gate "${GATE_REMOTE_URL}"
   fi
 
   # Check gate staleness (informational only)
