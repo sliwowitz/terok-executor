@@ -225,10 +225,10 @@ def check_images(base_image: str) -> CheckResult:
 
 def check_credentials(provider: str) -> CheckResult:
     """Check whether credentials are stored for *provider*."""
-    from terok_sandbox import CredentialDB, SandboxConfig
+    from terok_sandbox import SandboxConfig
 
     try:
-        db = CredentialDB(SandboxConfig().db_path)
+        db = SandboxConfig().open_credential_db()
     except Exception:  # noqa: BLE001
         return CheckResult(f"{provider} credentials", False, "credential database unavailable")
     try:
@@ -242,10 +242,10 @@ def check_credentials(provider: str) -> CheckResult:
 
 def check_ssh_key(scope: str = "standalone") -> CheckResult:
     """Check whether a gate-signing SSH key exists for *scope*."""
-    from terok_sandbox import CredentialDB, SandboxConfig
+    from terok_sandbox import SandboxConfig
 
     try:
-        db = CredentialDB(SandboxConfig().db_path)
+        db = SandboxConfig().open_credential_db()
     except Exception:  # noqa: BLE001
         return CheckResult("ssh key", False, "credential database unavailable")
     try:

@@ -26,7 +26,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
-from terok_sandbox import CredentialDB, SandboxConfig
+from terok_sandbox import SandboxConfig
 
 from terok_executor.container.build import AGENTS_LABEL
 
@@ -66,8 +66,23 @@ def list_authenticated_agents(
     outside the vault, so a vault-only filter would silently hide
     working agents).
     """
-    path = db_path or SandboxConfig().db_path
-    db = CredentialDB(path)
+    cfg = SandboxConfig()
+    if db_path is None:
+        db = cfg.open_credential_db()
+    else:
+        # ``cfg.db_path`` is computed as ``vault_dir / "credentials.db"``,
+        # so a ``dataclasses.replace`` on ``vault_dir`` alone would lose
+        # an override that uses a different filename (e.g. tests).
+        # Bypass to the lower-level opener that takes an explicit path,
+        # threading the resolution-chain knobs from ``cfg``.
+        from terok_sandbox.credentials.db import open_credential_db
+
+        db = open_credential_db(
+            db_path,
+            passphrase_file=cfg.vault_passphrase_file,
+            use_keyring=cfg.credentials_use_keyring,
+            config_fallback=cfg.credentials_passphrase,
+        )
     try:
         return list(db.list_credentials(scope))
     finally:

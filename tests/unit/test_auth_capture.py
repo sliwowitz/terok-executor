@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER
+from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER, CredentialDB
 
 from terok_executor.credentials.auth import (
     _apply_post_capture_state,
@@ -20,6 +20,7 @@ from terok_executor.credentials.auth import (
     _write_claude_credentials_file,
     store_api_key,
 )
+from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
 def _fake_jwt(payload: dict | None = None) -> str:
@@ -53,12 +54,14 @@ class TestCaptureCredentials:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("claude", tmp_path, "default")
 
         # Verify it's in the DB
-        from terok_sandbox import CredentialDB
 
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "claude")
         db.close()
         assert stored is not None
@@ -71,11 +74,12 @@ class TestCaptureCredentials:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("blablador", tmp_path, "default")
 
-        from terok_sandbox import CredentialDB
-
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "blablador")
         db.close()
         assert stored["key"] == "blab-key"
@@ -117,11 +121,12 @@ class TestCaptureCredentials:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("kisski", tmp_path, "work-project")
 
-        from terok_sandbox import CredentialDB
-
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("work-project", "kisski")
         db.close()
         assert stored["key"] == "work-key"
@@ -322,6 +327,9 @@ class TestCaptureAppliesPostCaptureState:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
             )
@@ -351,6 +359,9 @@ class TestCaptureAppliesPostCaptureState:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
             )
@@ -387,6 +398,9 @@ class TestCaptureAppliesPostCaptureState:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             # Should NOT raise — error is caught and printed
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
@@ -397,9 +411,8 @@ class TestCaptureAppliesPostCaptureState:
         assert "post_capture_state" in err
 
         # Verify credentials were still stored in the DB
-        from terok_sandbox import CredentialDB
 
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "claude")
         db.close()
         assert stored is not None
@@ -424,6 +437,9 @@ class TestCaptureWritesCredentialsFile:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("claude", tmp_path, "default", mounts_base=mounts)
 
         cred_file = mounts / "_claude-config" / ".credentials.json"
@@ -440,6 +456,9 @@ class TestCaptureWritesCredentialsFile:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("claude", tmp_path, "default", mounts_base=mounts)
 
         assert not (mounts / "_claude-config" / ".credentials.json").exists()
@@ -471,6 +490,9 @@ class TestCaptureWritesCredentialsFile:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials("codex", tmp_path, "default", mounts_base=mounts)
 
         phantom = mounts / "_codex-config" / "auth.json"
@@ -648,6 +670,9 @@ class TestCaptureWithExposeToken:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=True
             )
@@ -667,6 +692,9 @@ class TestCaptureWithExposeToken:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=False
             )
@@ -683,6 +711,9 @@ class TestCaptureWithExposeToken:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=True
             )
@@ -699,13 +730,14 @@ class TestCaptureWithExposeToken:
         mounts = tmp_path / "mounts"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             _capture_credentials(
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=True
             )
 
-        from terok_sandbox import CredentialDB
-
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "claude")
         db.close()
         assert stored is None
@@ -719,11 +751,12 @@ class TestStoreApiKey:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             store_api_key("vibe", "sk-test-key-123")
 
-        from terok_sandbox import CredentialDB
-
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "vibe")
         db.close()
         assert stored == {"type": "api_key", "key": "sk-test-key-123"}
@@ -733,11 +766,12 @@ class TestStoreApiKey:
         db_path = tmp_path / "proxy" / "credentials.db"
         with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
             store_api_key("claude", "sk-ant-key", credential_set="work")
 
-        from terok_sandbox import CredentialDB
-
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("work", "claude")
         db.close()
         assert stored["key"] == "sk-ant-key"

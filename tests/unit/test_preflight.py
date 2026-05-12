@@ -83,7 +83,7 @@ def test_sandbox_services_lists_missing(
 # ── check_credentials ────────────────────────────────────────────────
 
 
-@patch("terok_sandbox.CredentialDB")
+@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
 def test_credentials_found(mock_db_cls: MagicMock) -> None:
     """Credentials stored → ok."""
     db = mock_db_cls.return_value
@@ -92,7 +92,7 @@ def test_credentials_found(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.CredentialDB")
+@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
 def test_credentials_missing(mock_db_cls: MagicMock) -> None:
     """No credentials → fail."""
     db = mock_db_cls.return_value
@@ -103,7 +103,7 @@ def test_credentials_missing(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.CredentialDB", side_effect=Exception("db error"))
+@patch("terok_sandbox.config.SandboxConfig.open_credential_db", side_effect=Exception("db error"))
 def test_credentials_db_unavailable(_cls: MagicMock) -> None:
     """DB open fails → fail with message."""
     r = check_credentials("claude")
@@ -114,7 +114,7 @@ def test_credentials_db_unavailable(_cls: MagicMock) -> None:
 # ── check_ssh_key ────────────────────────────────────────────────────
 
 
-@patch("terok_sandbox.CredentialDB")
+@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
 def test_ssh_key_present(mock_db_cls: MagicMock) -> None:
     """Existing key in scope → ok."""
     db = mock_db_cls.return_value
@@ -124,7 +124,7 @@ def test_ssh_key_present(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.CredentialDB")
+@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
 def test_ssh_key_absent(mock_db_cls: MagicMock) -> None:
     """Empty scope → fail."""
     db = mock_db_cls.return_value

@@ -298,3 +298,79 @@ class TestWarm:
         assert first == ("opus-4.6",)
         assert second == ["claude:opus-4.6"]
         assert attempts == ["claude"]
+
+
+class TestListAuthenticatedAgents:
+    """Top-level credential-store query used by ``acp list``.
+
+    Exercises both code paths of the open-DB seam: the default
+    ``cfg.open_credential_db()`` (covered by the autouse fixture's
+    stub against ``cfg.db_path``) and the ``db_path`` override that
+    routes through the lower-level ``open_credential_db(path, …)``
+    opener so a custom filename is honoured verbatim.
+    """
+
+    def test_returns_provider_names_with_default_cfg(self, tmp_path, monkeypatch) -> None:
+        """Default open path resolves through ``SandboxConfig.open_credential_db``."""
+        import pytest
+        from terok_sandbox import CredentialDB
+
+        from terok_executor.acp.roster import list_authenticated_agents
+        from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+        # Redirect the sandbox state into tmp_path so ``cfg.db_path``
+        # is a clean tmp file rather than the real XDG default
+        # (which may have a DB encrypted with a different key).
+        assert isinstance(monkeypatch, pytest.MonkeyPatch)
+        monkeypatch.setenv("TEROK_SANDBOX_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("TEROK_VAULT_DIR", str(tmp_path / "vault"))
+
+        from terok_sandbox import SandboxConfig
+
+        cfg = SandboxConfig()
+        cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
+        db = CredentialDB(cfg.db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        db.store_credential("default", "claude", {"type": "api_key", "key": "k"})
+        db.store_credential("default", "vibe", {"type": "api_key", "key": "k"})
+        db.close()
+
+        result = list_authenticated_agents()
+        # ``list_credentials`` returns names in insertion order — assert
+        # set membership rather than order.
+        assert set(result) == {"claude", "vibe"}
+
+    def test_db_path_override_honors_exact_filename(self, tmp_path) -> None:
+        """An override at a non-default filename opens that file verbatim.
+
+        Pins the fix for the silent-filename-drop bug: a previous
+        ``dataclasses.replace(cfg, vault_dir=db_path.parent)`` would
+        have computed ``vault_dir / "credentials.db"`` and missed the
+        explicit ``custom.db`` filename.
+        """
+        from terok_sandbox import CredentialDB
+
+        from terok_executor.acp.roster import list_authenticated_agents
+        from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+        explicit = tmp_path / "custom.db"
+        db = CredentialDB(explicit, passphrase=TEST_VAULT_PASSPHRASE)
+        db.store_credential("default", "codex", {"type": "api_key", "key": "k"})
+        db.close()
+
+        assert list_authenticated_agents(db_path=explicit) == ["codex"]
+
+    def test_scope_filter_passes_through(self, tmp_path) -> None:
+        """Non-default scope reaches ``db.list_credentials`` unchanged."""
+        from terok_sandbox import CredentialDB
+
+        from terok_executor.acp.roster import list_authenticated_agents
+        from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+        explicit = tmp_path / "scoped.db"
+        db = CredentialDB(explicit, passphrase=TEST_VAULT_PASSPHRASE)
+        db.store_credential("default", "claude", {"type": "api_key", "key": "k"})
+        db.store_credential("work", "gh", {"type": "api_key", "key": "k"})
+        db.close()
+
+        assert list_authenticated_agents(db_path=explicit, scope="work") == ["gh"]
+        assert list_authenticated_agents(db_path=explicit, scope="ghost") == []

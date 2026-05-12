@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from terok_executor.roster import VaultRoute, get_roster
 from terok_executor.roster.schema import RawAgentYaml
+from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
 def _vault_route(name: str, data: dict) -> VaultRoute | None:
@@ -639,7 +640,7 @@ class TestFormatCredentials:
         from terok_executor.credentials.vault_commands import _format_credentials
 
         db_path = tmp_path / "creds.db"
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         db.store_credential("default", "claude", {"type": "oauth", "access_token": "t"})
         db.store_credential("default", "vibe", {"type": "api_key", "key": "k"})
         db.close()
@@ -658,7 +659,7 @@ class TestFormatCredentials:
         from terok_executor.credentials.vault_commands import _format_credentials
 
         db_path = tmp_path / "creds.db"
-        db = CredentialDB(db_path)
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         db.store_credential("default", "legacy", {"key": "k"})
         db.close()
 

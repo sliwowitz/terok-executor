@@ -825,12 +825,10 @@ class AgentRunner:
         this injects the actual credential.  Safe because sidecar containers
         have no agent code that could leak it.
         """
-        from terok_sandbox import CredentialDB
-
         spec = self.roster.get_sidecar_spec(tool_name)
         cfg = self.sandbox.config
         try:
-            db = CredentialDB(cfg.db_path)
+            db = cfg.open_credential_db()
         except Exception as exc:
             print(
                 f"Warning [runner]: credential DB unavailable: {type(exc).__name__}: {exc}",

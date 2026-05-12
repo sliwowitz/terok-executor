@@ -19,6 +19,7 @@ from terok_executor.container.env import (
     assemble_container_env,
 )
 from terok_executor.roster import get_roster
+from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
 def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpec | None:
@@ -35,7 +36,7 @@ def _make_vault_db(tmp_path: Path, cred_name: str = "claude", cred_data: dict | 
 
     cfg = SandboxConfig(state_dir=tmp_path, vault_dir=tmp_path / "credentials")
     cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
-    db = CredentialDB(cfg.db_path)
+    db = CredentialDB(cfg.db_path, passphrase=TEST_VAULT_PASSPHRASE)
     db.store_credential(
         "default",
         cred_name,
@@ -52,7 +53,7 @@ def _make_vault_db_with_ssh_keys(tmp_path: Path, scope: str = "myproj"):
 
     cfg = _make_vault_db(tmp_path)
     cfg.vault_dir.mkdir(parents=True, exist_ok=True)
-    db = CredentialDB(cfg.db_path)
+    db = CredentialDB(cfg.db_path, passphrase=TEST_VAULT_PASSPHRASE)
     try:
         kp = generate_keypair("ed25519", comment=f"tk-main:{scope}")
         key_id = db.store_ssh_key(
@@ -486,7 +487,10 @@ class TestVaultTokenInjection:
         """DB open failure returns empty env gracefully."""
         with (
             patch("terok_sandbox.is_vault_socket_active", return_value=True),
-            patch("terok_sandbox.CredentialDB", side_effect=OSError("corrupt")),
+            patch(
+                "terok_sandbox.config.SandboxConfig.open_credential_db",
+                side_effect=OSError("corrupt"),
+            ),
         ):
             result = assemble_container_env(base_spec, roster, caller_manages_vault=False)
         assert "ANTHROPIC_API_KEY" not in result.env
@@ -664,7 +668,7 @@ class TestVaultTokenInjection:
         cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
         cfg.vault_dir.mkdir(parents=True, exist_ok=True)
         # DB exists with NO provider credentials — only SSH keys.
-        db = CredentialDB(cfg.db_path)
+        db = CredentialDB(cfg.db_path, passphrase=TEST_VAULT_PASSPHRASE)
         try:
             kp = generate_keypair("ed25519", comment="tk-main:sshonly")
             key_id = db.store_ssh_key(
@@ -691,11 +695,14 @@ class TestVaultTokenInjection:
         assert "ANTHROPIC_API_KEY" not in result.env
 
     def test_vault_required_hard_fails_on_db_error(self, workspace, envs_dir, roster):
-        """vault_required=True raises SystemExit on CredentialDB construction failure."""
+        """vault_required=True raises SystemExit on credential-DB open failure."""
         spec = _spec(workspace, envs_dir, vault_required=True)
         with (
             patch("terok_sandbox.is_vault_socket_active", return_value=True),
-            patch("terok_sandbox.CredentialDB", side_effect=OSError("corrupt")),
+            patch(
+                "terok_sandbox.config.SandboxConfig.open_credential_db",
+                side_effect=OSError("corrupt"),
+            ),
             pytest.raises(SystemExit, match="DB unavailable.*Check logs"),
         ):
             assemble_container_env(spec, roster, caller_manages_vault=False)

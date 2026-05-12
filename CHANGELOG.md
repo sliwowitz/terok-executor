@@ -5,6 +5,12 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.142 — Vault Passphrase
+
+Credentials Vault DB encryption
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.141...v0.0.142
+
 ## v0.0.141 — Checkpoint Charlie
 
 ## What's Changed

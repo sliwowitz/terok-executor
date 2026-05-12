@@ -260,10 +260,10 @@ def store_api_key(
     This is the non-interactive fast path for automated workflows and CI.
     The key is stored as ``{"type": "api_key", "key": "<value>"}``.
     """
-    from terok_sandbox import CredentialDB, SandboxConfig
+    from terok_sandbox import SandboxConfig
 
     cfg = SandboxConfig()
-    db = CredentialDB(cfg.db_path)
+    db = cfg.open_credential_db(prompt_on_tty=True)
     try:
         db.store_credential(credential_set, provider, {"type": "api_key", "key": api_key})
         print(f"API key stored for {provider} (set: {credential_set})")
@@ -468,10 +468,10 @@ def _capture_credentials(
         )
     else:
         try:
-            from terok_sandbox import CredentialDB, SandboxConfig
+            from terok_sandbox import SandboxConfig
 
             cfg = SandboxConfig()
-            db = CredentialDB(cfg.db_path)
+            db = cfg.open_credential_db(prompt_on_tty=True)
             try:
                 db.store_credential(credential_set, provider_name, cred_data)
                 _out.print(

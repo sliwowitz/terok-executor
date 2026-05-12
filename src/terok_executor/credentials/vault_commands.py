@@ -139,15 +139,36 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     return leaked
 
 
-def _format_credentials(status: object) -> str:
-    """Format stored credentials as ``name (type), ...`` for status display."""
-    from terok_sandbox import CredentialDB, VaultStatus
+def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str:
+    """Format stored credentials as ``name (type), ...`` for status display.
 
+    *cfg* threads the caller's chosen passphrase-resolution knobs
+    (session-unlock file, keyring opt-in, config-file fallback) into
+    the DB open — without this hook the function would construct a
+    fresh ``SandboxConfig()`` and silently miss any non-default tier
+    the caller had set up.  Defaults to a fresh config for direct
+    callers that don't have one handy.
+    """
+    from terok_sandbox import SandboxConfig as _SandboxConfig, VaultStatus
+    from terok_sandbox.credentials.db import open_credential_db
+
+    if cfg is None:
+        cfg = _SandboxConfig()
     st: VaultStatus = status  # type: ignore[assignment]
     if not st.credentials_stored:
         return "none stored"
     try:
-        db = CredentialDB(st.db_path)
+        # Bypass ``cfg.open_credential_db`` because it computes
+        # ``vault_dir / "credentials.db"`` from the local config,
+        # which may not match the running daemon's actual ``db_path``
+        # (test fixtures and multi-instance hosts both diverge).
+        # The resolution-chain knobs still come from *cfg*.
+        db = open_credential_db(
+            st.db_path,
+            passphrase_file=cfg.vault_passphrase_file,
+            use_keyring=cfg.credentials_use_keyring,
+            config_fallback=cfg.credentials_passphrase,
+        )
         try:
             parts = []
             for name in st.credentials_stored:
@@ -179,7 +200,7 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     print(f"DB:          {status.db_path}")
     print(f"Routes:      {status.routes_path} ({status.routes_configured} configured)")
     if status.credentials_stored:
-        print(f"Credentials: {_format_credentials(status)}")
+        print(f"Credentials: {_format_credentials(status, cfg)}")
     else:
         print("Credentials: none stored")
     if not status.running and status.mode == "none" and is_vault_systemd_available():

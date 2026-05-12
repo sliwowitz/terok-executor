@@ -449,7 +449,6 @@ def _inject_vault_tokens(
     if the vault is unreachable.
     """
     from terok_sandbox import (
-        CredentialDB,
         SandboxConfig,
         get_ssh_signer_port,
         get_token_broker_port,
@@ -470,7 +469,7 @@ def _inject_vault_tokens(
 
     vault_routes = roster.vault_routes
     try:
-        db = CredentialDB(cfg.db_path)
+        db = cfg.open_credential_db()
     except Exception:
         _logger.exception("Vault DB unavailable")
         if vault_required:
