@@ -52,7 +52,9 @@ class RawImageSection(BaseModel):
         default=None,
         description=(
             'Comma-separated roster entries to install in L1, or "all". '
-            "Inherits from the global config when unset."
+            'Prefix a name with "-" to exclude it from the selection '
+            '(e.g. "all,-vibe" or just "-vibe" — both mean "everything '
+            'except vibe").  Inherits from the global config when unset.'
         ),
     )
     user_snippet_inline: str | None = Field(

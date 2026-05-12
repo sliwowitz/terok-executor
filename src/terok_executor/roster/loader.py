@@ -131,32 +131,50 @@ class AgentRoster:
 
     # ── Selection ──
 
-    def resolve_selection(self, names: str | tuple[str, ...]) -> tuple[str, ...]:
+    def resolve_selection(self, selection: str | tuple[str, ...]) -> tuple[str, ...]:
         """Resolve a user-supplied selection into the full set of roster names to install.
 
         Accepts the literal string ``"all"`` (every roster entry that has an
-        [`InstallSpec`][terok_executor.roster.types.InstallSpec]) or a tuple of names.  Expands ``depends_on``
-        transitively.  Returns the names sorted alphabetically — the canonical
-        order used for the OCI label, the tag suffix, and the in-container
-        manifest.
+        [`InstallSpec`][terok_executor.roster.types.InstallSpec]) or a tuple of
+        selection tokens.  Each token is either a roster name (include) or a
+        name prefixed with ``-`` (exclude).  The pseudo-name ``"all"`` is also
+        valid as an include token, meaning "seed from every installable
+        entry"; this combines naturally with excludes, e.g. ``("all",
+        "-vibe")`` installs everything except vibe.  When no include tokens
+        are present (only excludes), the seed is the full roster.
 
-        Raises ``ValueError`` if a requested name is not in the roster, or
-        ``TypeError`` if *names* is a string other than ``"all"`` (a bare
-        name like ``"claude"`` would otherwise be iterated into characters).
+        Includes are expanded transitively via ``depends_on`` *before*
+        excludes are applied, so an exclude that names a dependency of a
+        kept agent will silently drop that dependency — likely producing a
+        broken image, but matching the user's literal request.
+
+        Returns the names sorted alphabetically — the canonical order used
+        for the OCI label, the tag suffix, and the in-container manifest.
+
+        Raises ``ValueError`` if a requested include or exclude name is not
+        in the roster, or ``TypeError`` if *selection* is a string other
+        than ``"all"`` (a bare name like ``"claude"`` would otherwise be
+        iterated into characters).  Excludes that name a known agent but
+        don't appear in the resolved include set are a no-op.
         """
-        if isinstance(names, str):
-            if names != "all":
+        if isinstance(selection, str):
+            if selection != "all":
                 raise TypeError(
-                    f"Selection must be the literal string 'all' or a tuple of names, got {names!r}"
+                    f"Selection must be the literal string 'all' or a tuple of "
+                    f"tokens, got {selection!r}"
                 )
-            seed = set(self._installs)
-        else:
-            seed = set(names)
+            return tuple(sorted(self._installs))
 
-        unknown = seed - set(self._installs)
+        includes = {t for t in selection if not t.startswith("-")}
+        excludes = {t[1:] for t in selection if t.startswith("-")}
+
+        referenced = (includes | excludes) - {"all"}
+        unknown = referenced - set(self._installs)
         if unknown:
             avail = ", ".join(sorted(self._installs))
             raise ValueError(f"Unknown roster entries: {sorted(unknown)!r}. Available: {avail}")
+
+        seed = set(self._installs) if "all" in includes or not includes else includes
 
         resolved: set[str] = set()
         stack = list(seed)
@@ -176,7 +194,7 @@ class AgentRoster:
                     )
                 if dep not in resolved:
                     stack.append(dep)
-        return tuple(sorted(resolved))
+        return tuple(sorted(resolved - excludes))
 
     @property
     def mounts(self) -> tuple[MountDef, ...]:
@@ -289,18 +307,25 @@ def get_roster() -> AgentRoster:
 def parse_agent_selection(raw: str) -> str | tuple[str, ...]:
     """Normalise a user-supplied agent selection string.
 
-    Accepts a comma-list (``"claude,codex"``) or the literal ``"all"``.
-    Whitespace is stripped, empty / whitespace-only entries dropped,
-    and case folded.  Empty or all-whitespace input collapses to
-    ``"all"`` — the same shape [`AgentRoster.resolve_selection`][terok_executor.roster.loader.AgentRoster.resolve_selection]
+    Accepts a comma-list of selection tokens or the literal ``"all"``.  Each
+    token is either an agent name (``"claude"``) or a name prefixed with
+    ``-`` to exclude it from the selection (``"-vibe"``).  The pseudo-name
+    ``"all"`` is also valid as a token, so ``"all,-vibe"`` means "everything
+    except vibe".  When the input contains only excludes (``"-vibe"``), the
+    selection seeds from every installable entry — same effect as
+    ``"all,-vibe"``.
+
+    Whitespace is stripped, empty / whitespace-only entries dropped, and
+    case folded.  Empty or all-whitespace input collapses to ``"all"`` —
+    the same shape [`AgentRoster.resolve_selection`][terok_executor.roster.loader.AgentRoster.resolve_selection]
     expects.  Unknown names are not checked here; ``resolve_selection``
     does that.
     """
     folded = raw.strip().lower()
     if folded == "all" or not folded:
         return "all"
-    names = tuple(n.strip() for n in folded.split(",") if n.strip())
-    return names or "all"
+    tokens = tuple(n.strip() for n in folded.split(",") if n.strip())
+    return tokens or "all"
 
 
 def load_roster() -> AgentRoster:

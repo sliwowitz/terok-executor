@@ -17,7 +17,7 @@ from terok_executor.roster import (
     SidecarSpec,
     load_roster,
 )
-from terok_executor.roster.loader import _load_bundled_agents
+from terok_executor.roster.loader import _load_bundled_agents, parse_agent_selection
 from terok_executor.roster.schema import RawAgentYaml
 
 
@@ -522,6 +522,75 @@ class TestWebIngress:
         # resolve_selection returns the canonical alphabetical tuple.
         # Asserting the exact set guards against accidental extras creeping in.
         assert reg.resolve_selection(("toad",)) == ("caddy", "toad")
+
+
+class TestSelectionExcludes:
+    """The ``-name`` exclude prefix lets users subtract from a default-everything
+    selection without having to spell out the full include list."""
+
+    def test_exclude_with_all_token_drops_one_agent(self) -> None:
+        reg = load_roster()
+        full = set(reg.resolve_selection("all"))
+        assert "vibe" in full, "test premise: vibe must be in the bundled roster"
+        assert set(reg.resolve_selection(("all", "-vibe"))) == full - {"vibe"}
+
+    def test_bare_exclude_seeds_from_full_roster(self) -> None:
+        """``("-vibe",)`` is shorthand for ``("all", "-vibe")``."""
+        reg = load_roster()
+        assert reg.resolve_selection(("-vibe",)) == reg.resolve_selection(("all", "-vibe"))
+
+    def test_exclude_outside_include_set_is_noop(self) -> None:
+        """``claude,-vibe`` resolves to just claude — the exclude is harmless
+        even though vibe was never selected.  Per the agreed semantics: named
+        sets aren't a concept yet, so a stray exclude is a no-op, not an error."""
+        reg = load_roster()
+        assert reg.resolve_selection(("claude", "-vibe")) == ("claude",)
+
+    def test_unknown_exclude_name_raises(self) -> None:
+        reg = load_roster()
+        with pytest.raises(ValueError, match="Unknown roster entries.*nosuchthing"):
+            reg.resolve_selection(("all", "-nosuchthing"))
+
+    def test_exclude_can_drop_a_dependency(self) -> None:
+        """Excludes apply after dep expansion, so ``toad,-caddy`` yields just
+        ``("toad",)`` — likely a broken image, but matches the literal request.
+        We don't second-guess the user; the downstream build will surface it."""
+        reg = load_roster()
+        assert reg.resolve_selection(("toad", "-caddy")) == ("toad",)
+
+
+class TestParseAgentSelection:
+    """Parsing the user-facing string form into the tuple shape that
+    ``resolve_selection`` consumes."""
+
+    def test_all_passes_through(self) -> None:
+        assert parse_agent_selection("all") == "all"
+
+    def test_empty_string_collapses_to_all(self) -> None:
+        assert parse_agent_selection("") == "all"
+        assert parse_agent_selection("   ") == "all"
+
+    def test_comma_list_becomes_tuple(self) -> None:
+        assert parse_agent_selection("claude,codex") == ("claude", "codex")
+
+    def test_preserves_exclude_prefix(self) -> None:
+        assert parse_agent_selection("claude,-vibe") == ("claude", "-vibe")
+
+    def test_bare_exclude_kept_as_single_token(self) -> None:
+        assert parse_agent_selection("-vibe") == ("-vibe",)
+
+    def test_all_and_exclude_combine(self) -> None:
+        assert parse_agent_selection("all,-vibe") == ("all", "-vibe")
+
+    def test_case_folded_and_whitespace_stripped(self) -> None:
+        assert parse_agent_selection(" Claude , -VIBE ") == ("claude", "-vibe")
+
+    def test_end_to_end_roundtrip_through_resolve(self) -> None:
+        """The CLI/config string ``"-vibe"`` should install everything except vibe."""
+        reg = load_roster()
+        selection = parse_agent_selection("-vibe")
+        full = set(reg.resolve_selection("all"))
+        assert set(reg.resolve_selection(selection)) == full - {"vibe"}
 
 
 # ---------------------------------------------------------------------------
