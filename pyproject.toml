@@ -4,7 +4,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
 name = "terok-executor"
-version = "0.0.141a1"
+version = "0.0.141"
 description = "Single-agent task runner for hardened Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,7 +32,7 @@ documentation = "https://terok-ai.github.io/terok-executor/"
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.15"
-terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.115/terok_sandbox-0.0.115-py3-none-any.whl"}
+terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.116/terok_sandbox-0.0.116-py3-none-any.whl"}
 "ruamel.yaml" = ">=0.18"
 Jinja2 = ">=3.1"
 tomli-w = ">=1.0"
@@ -64,7 +64,7 @@ mkdocstrings = {extras = ["python"], version = ">=0.24"}
 mkdocs-gen-files = ">=0.5"
 mkdocs-literate-nav = ">=0.6"
 mkdocs-section-index = ">=0.3"
-mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/download/v0.5.7a5/mkdocs_terok-0.5.7a5-py3-none-any.whl"}
+mkdocs-terok = "^0.6"
 
 [tool.poetry.scripts]
 terok-executor = "terok_executor.cli:main"

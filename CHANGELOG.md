@@ -5,6 +5,16 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.141 — Checkpoint Charlie
+
+## What's Changed
+
+* seed CHANGELOG.md for the first PyPI release in https://github.com/terok-ai/terok-executor/pull/291
+* support "-name" exclude prefix in agent selection in https://github.com/terok-ai/terok-executor/pull/302
+
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.140...v0.0.141
+
 ## v0.1.0 — first PyPI release
 
 `terok-executor` joined PyPI in v0.1.0. Versions before that were GitHub Release
