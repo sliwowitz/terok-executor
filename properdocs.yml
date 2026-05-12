@@ -58,8 +58,8 @@ plugins:
             merge_init_into_class: true
   - terok:
       ci_map: true
-      quality_report: true
-      quality_report_codecov_repo: terok-ai/terok-executor
+      code_metrics: true
+      code_metrics_codecov_repo: terok-ai/terok-executor
       module_map: true
       ref_pages: true
   - gen-files:
