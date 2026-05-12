@@ -110,6 +110,49 @@ class TestVaultRoutesParsed:
         assert route.oauth_refresh["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann"
 
 
+class TestSharedDomain:
+    """Verify the ``vault.shared_domain`` flag is parsed and surfaced."""
+
+    def test_default_is_false(self) -> None:
+        """API-only upstreams (claude, codex, gh, …) leave the flag unset."""
+        roster = get_roster()
+        for name in ("claude", "codex", "gh", "vibe", "blablador", "kisski", "openrouter"):
+            route = roster.vault_routes[name]
+            assert route.shared_domain is False, f"{name} should not be shared_domain"
+
+    def test_glab_is_shared_domain(self) -> None:
+        """gitlab.com hosts both API and ``git push`` traffic."""
+        assert get_roster().vault_routes["glab"].shared_domain is True
+
+    def test_sonar_is_shared_domain(self) -> None:
+        """sonarcloud.io hosts API + project pages + docs + badges."""
+        assert get_roster().vault_routes["sonar"].shared_domain is True
+
+    def test_unknown_provider_defaults_to_false(self) -> None:
+        """Hand-rolled vault sections without the field default to False."""
+        route = _vault_route(
+            "test",
+            {"vault": {"route_prefix": "t", "upstream": "https://api.example.com"}},
+        )
+        assert route is not None
+        assert route.shared_domain is False
+
+    def test_explicit_true_round_trips(self) -> None:
+        """``shared_domain: true`` is preserved through schema → dataclass."""
+        route = _vault_route(
+            "test",
+            {
+                "vault": {
+                    "route_prefix": "t",
+                    "upstream": "https://example.com",
+                    "shared_domain": True,
+                }
+            },
+        )
+        assert route is not None
+        assert route.shared_domain is True
+
+
 class TestGenerateRoutesJson:
     """Verify routes.json generation."""
 

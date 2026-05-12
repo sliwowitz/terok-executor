@@ -247,6 +247,14 @@ class RawVault(StrictModel):
     shared_config_patch: dict | None = None
     """Free-form dict consumed by the post-auth config patcher (TOML/YAML set ops)."""
     oauth_refresh: RawOAuthRefresh | None = None
+    shared_domain: bool = Field(
+        default=False,
+        description=(
+            "True when ``upstream`` host also serves non-API traffic "
+            "(docs, dashboards, ``git push``…); terok's auth-protect "
+            "layer skips host-level denies for these providers."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -282,6 +290,7 @@ class RawVault(StrictModel):
             socket_env=self.socket_env,
             shared_config_patch=self.shared_config_patch,
             oauth_refresh=refresh,
+            shared_domain=self.shared_domain,
         )
 
 

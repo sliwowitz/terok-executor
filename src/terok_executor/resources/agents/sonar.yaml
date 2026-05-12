@@ -16,6 +16,11 @@ vault:
   phantom_env:
     SONAR_TOKEN: true
   base_url_env: SONAR_HOST_URL
+  # sonarcloud.io serves API + project pages + docs + badges on the same
+  # apex; an nft host-deny would block legitimate browsing/curling in
+  # ``shield down`` mode.  Credential containment (read-only SONAR_TOKEN
+  # shadow) carries the security weight on its own.
+  shared_domain: true
 
 auth:
   host_dir: _sonar-config

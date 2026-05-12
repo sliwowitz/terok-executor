@@ -16,6 +16,10 @@ vault:
   credential_file: config.yml
   phantom_env:
     GITLAB_TOKEN: true
+  # gitlab.com carries both the API and ``git push`` traffic on the same
+  # apex; an nft host-deny would also kill pushes.  Read-only credential
+  # containment is the actual containment story for this provider.
+  shared_domain: true
 
 auth:
   host_dir: _glab-config

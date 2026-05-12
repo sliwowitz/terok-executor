@@ -109,6 +109,19 @@ class VaultRoute:
     oauth_refresh: dict | None = None
     """OAuth refresh config: ``{token_url, client_id, scope}``."""
 
+    shared_domain: bool = False
+    """Whether the upstream host also serves non-API traffic.
+
+    Set on entries whose ``upstream`` host is an apex (or otherwise mixed)
+    domain that legitimately serves docs, dashboards, ``git push``, etc.
+    Host-level egress denies can't separate paths, so terok's auth-protect
+    layer skips these providers when re-applying denies after ``shield
+    down`` — credential containment alone keeps the API safe.
+
+    Examples: ``gitlab.com`` (API + ``git push``), ``sonarcloud.io``
+    (API + project pages + docs + badges).
+    """
+
 
 @dataclass(frozen=True)
 class InstallSpec:
