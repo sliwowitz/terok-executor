@@ -36,7 +36,7 @@ class CacheKey:
 
 
 class AgentRosterCache:
-    """Thread-safe map from :class:`CacheKey` to a tuple of model ids.
+    """Thread-safe map from [`CacheKey`][terok_executor.acp.cache.CacheKey] to a tuple of model ids.
 
     Models are stored as a tuple so cache entries are immutable once
     inserted — callers can return them directly without defensive copying.
@@ -76,6 +76,6 @@ class AgentRosterCache:
 
 
 # Module-level singleton: most callers get this implicitly via
-# :class:`ACPRoster`'s default.  Tests inject a fresh
-# :class:`AgentRosterCache` via the constructor.
+# [`ACPRoster`][terok_executor.acp.roster.ACPRoster]'s default.  Tests inject a fresh
+# [`AgentRosterCache`][terok_executor.acp.cache.AgentRosterCache] via the constructor.
 GLOBAL_CACHE = AgentRosterCache()

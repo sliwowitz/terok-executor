@@ -185,7 +185,7 @@ def _make_handler(
 ) -> Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]:
     """Return an ``asyncio.start_unix_server`` callback bound to *roster*.
 
-    Each accepted connection gets its own :class:`ACPProxy` — no
+    Each accepted connection gets its own [`ACPProxy`][terok_executor.acp.proxy.ACPProxy] — no
     daemon-level concurrency lock.  Concurrent ACP clients on the
     same task are unusual in practice and would only race over the
     backend agent, which the proxy's ``_client_session_id`` check

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""ACP proxy state machine — the JSON-RPC mediator behind :class:`ACPRoster`.
+"""ACP proxy state machine — the JSON-RPC mediator behind [`ACPRoster`][terok_executor.acp.roster.ACPRoster].
 
 The proxy speaks ACP to the connected client and ACP to one chosen
 in-container backend, namespacing the model selector so a multi-agent
@@ -13,14 +13,14 @@ Two phases drive the lifecycle:
 
 - **Pre-bind**: the proxy answers ``initialize`` and ``session/new``
   locally, advertising the aggregated ``agent:model`` list in
-  :class:`acp.schema.SessionModelState` plus a mirroring
+  `acp.schema.SessionModelState` plus a mirroring
   ``configOptions[category=model]``.  No backend process exists yet.
 - **Bound**: on the first model-picking client request — modern
   ACP's ``session/set_model`` or older Zed's
   ``session/set_config_option(configId="model")`` — the proxy
   uses the ``agent:`` namespace prefix to pick which in-container
-  wrapper to spawn via :func:`asyncio.create_subprocess_exec`
-  (argv from :meth:`ACPRoster.wrapper_argv`), replays
+  wrapper to spawn via [`create_subprocess_exec`][asyncio.create_subprocess_exec]
+  (argv from [`wrapper_argv`][terok_executor.acp.roster.ACPRoster.wrapper_argv]), replays
   ``initialize`` + ``session/new`` + ``session/set_model`` (with
   the bare sub-id) to it, and from then on bridges frames in both
   directions.  Backend frames are mutated on the way out so model
@@ -81,15 +81,15 @@ class AgentBindError(RuntimeError):
     """Surface error raised when the proxy fails to bind a backend agent.
 
     Always converted to a JSON-RPC error response on the wire — never
-    bubbles to the caller of :meth:`ACPProxy.run`.
+    bubbles to the caller of [`run`][terok_executor.acp.proxy.ACPProxy.run].
     """
 
 
 class ACPProxy:
     """One client connection's worth of proxy state.
 
-    Constructed by :meth:`ACPRoster.attach`; lives for the duration of
-    a single client connection.  Not reusable — discard after :meth:`run`
+    Constructed by [`attach`][terok_executor.acp.roster.ACPRoster.attach]; lives for the duration of
+    a single client connection.  Not reusable — discard after [`run`][terok_executor.acp.proxy.ACPProxy.run]
     returns.
     """
 
@@ -174,7 +174,7 @@ class ACPProxy:
         Built via the ACP SDK's pydantic model so missing-or-misnamed
         fields fail at construction with a precise traceback rather
         than at the client end with "failed to deserialize".  The
-        capability defaults from :class:`acp.schema.AgentCapabilities`
+        capability defaults from `acp.schema.AgentCapabilities`
         are conservative — clients should treat the proxy's caps as a
         floor; the bound backend's are the real ceiling.
         """
@@ -200,7 +200,7 @@ class ACPProxy:
         Generates a synthetic session id (``proxy-N``) so the client can
         proceed to picking a model before any backend exists.  When a
         backend is later spawned on bind, the backend's real session id
-        is captured in :attr:`_backend_session_id` and translated on
+        is captured in [`_backend_session_id`][] and translated on
         every forwarded frame.
         """
         if self._client_session_id is not None:
@@ -220,7 +220,7 @@ class ACPProxy:
 
         self._client_session_id = "proxy-1"
         models = await self._roster.list_available_agents()
-        # Same first-of-list rule as :func:`_build_session_new_response`'s
+        # Same first-of-list rule as [`_build_session_new_response`][terok_executor.acp.model_options._build_session_new_response]'s
         # ``currentModelId``; record it so a client that skips set_model
         # and goes straight to a backend-needing method can be lazy-bound
         # against the value it already saw advertised.
@@ -239,7 +239,7 @@ class ACPProxy:
 
         Modern ACP's dedicated method for model selection.  Reads
         ``modelId`` from the request, hands the namespaced id to the
-        shared :meth:`_select_model` driver.
+        shared [`_select_model`][terok_executor.acp.proxy.ACPProxy._select_model] driver.
         """
         raw_params = frame.get("params")
         if not isinstance(raw_params, dict):
@@ -268,9 +268,9 @@ class ACPProxy:
         """Bind on category=model; otherwise forward to the bound backend.
 
         Older ACP clients (Zed v1.0.x at the time of writing) pick the
-        model through :data:`session/set_config_option` with the
+        model through [`session/set_config_option`][] with the
         category set to ``"model"`` — modern clients use the dedicated
-        :data:`session/set_model` instead.  We accept both: a model
+        [`session/set_model`][] instead.  We accept both: a model
         category here triggers the same bind flow as ``set_model``,
         any other category passes through to the bound backend, and
         a non-model category pre-bind is rejected as a no-op.
@@ -359,7 +359,7 @@ class ACPProxy:
         ``session/prompt`` and friends arrive here.  If we're already
         bound the proxy stays out of the way.  If we're not — and the
         client skipped explicit model selection — bind lazily to the
-        ``currentModelId`` we advertised in :meth:`_handle_session_new`,
+        ``currentModelId`` we advertised in [`_handle_session_new`][terok_executor.acp.proxy.ACPProxy._handle_session_new],
         because that's the contract Zed-style clients act on (they
         trust the current value and prompt against it without an
         explicit set_model).  If the proxy never advertised a current
@@ -391,10 +391,10 @@ class ACPProxy:
     async def _bind(self, agent_id: str, model_id: str) -> None:
         """Spawn the backend wrapper and replay the handshake.
 
-        On success, sets :attr:`_bound_agent` so subsequent client
+        On success, sets [`_bound_agent`][] so subsequent client
         frames forward to the backend.  On failure, tears the
         partially-set-up backend down and re-raises
-        :class:`AgentBindError`; the caller decides whether to surface
+        [`AgentBindError`][terok_executor.acp.proxy.AgentBindError]; the caller decides whether to surface
         that as a JSON-RPC error or wrap it.
         """
         try:
@@ -419,9 +419,9 @@ class ACPProxy:
         ``ack_kind`` selects the response shape for the triggering
         request:
 
-        - ``"set_model"`` → :class:`SetSessionModelResponse` (empty
+        - ``"set_model"`` → [`SetSessionModelResponse`][] (empty
           ``result: {}`` body).
-        - ``"set_config_option"`` → :class:`SetSessionConfigOptionResponse``
+        - ``"set_config_option"`` → [`SetSessionConfigOptionResponse`][]`
           carrying the post-bind ``configOptions`` snapshot.
 
         On bind failure, replies with a JSON-RPC error in lieu of the
@@ -453,7 +453,7 @@ class ACPProxy:
         models — Zed rebuilds its picker from this response and a
         filtered list silently hides the other agents.  Cross-agent
         switches are still rejected, but at the request level
-        (:meth:`_select_model`), not by erasing the options.
+        ([`_select_model`][terok_executor.acp.proxy.ACPProxy._select_model]), not by erasing the options.
         """
         if ack_kind == "set_model":
             return {}
@@ -467,7 +467,7 @@ class ACPProxy:
     async def _spawn_backend(self, agent_id: str) -> None:
         """Spawn ``terok-{agent_id}-acp`` and attach asyncio pipes for the bind handshake.
 
-        Uses :func:`asyncio.create_subprocess_exec` — proc.stdin /
+        Uses [`create_subprocess_exec`][asyncio.create_subprocess_exec] — proc.stdin /
         proc.stdout become the proxy's writer / reader directly.  The
         probe path goes through sandbox's ``exec_stdio`` instead
         (single-shot, sync-friendly); bind's connection-shaped
@@ -476,7 +476,7 @@ class ACPProxy:
         the extra kernel pipe pair plus pump threads ``exec_stdio``
         layers in.
 
-        :meth:`ACPRoster.wrapper_argv` hides the runtime detail
+        [`wrapper_argv`][terok_executor.acp.roster.ACPRoster.wrapper_argv] hides the runtime detail
         (currently podman-specific) so a future krun runtime can
         plug in its own argv without touching the proxy.
         """
@@ -502,13 +502,13 @@ class ACPProxy:
         task that handles post-bind traffic.  Inline keeps the
         handshake's state local: no parked-future bookkeeping, no
         id-discrimination at the pump, and a failed handshake tears
-        down without leaving an orphan pump.  :meth:`_start_pump_loop`
+        down without leaving an orphan pump.  [`_start_pump_loop`][terok_executor.acp.proxy.ACPProxy._start_pump_loop]
         spins the pump up only after all three frames acknowledge,
         from which point the client owns the conversation.
 
         Captures the backend's session id so subsequent client frames
         can be re-targeted on forwarding.  Errors raise
-        :class:`AgentBindError`.
+        [`AgentBindError`][terok_executor.acp.proxy.AgentBindError].
         """
         await self._inline_request(
             "initialize",
@@ -570,7 +570,7 @@ class ACPProxy:
         ``PROXY_REQUEST_ID_BASE+N`` range so responses are recognisable
         as proxy-originated if the pump later sees one in transit.
 
-        Raises :class:`AgentBindError` on timeout, malformed JSON,
+        Raises [`AgentBindError`][terok_executor.acp.proxy.AgentBindError] on timeout, malformed JSON,
         unexpected ids, or backend disconnect during the read.
         """
         self._proxy_request_counter += 1
@@ -594,7 +594,7 @@ class ACPProxy:
         Skips notifications (no ``id``) so a chatty wrapper's progress
         events don't get mistaken for the reply.  Out-of-order ids on
         a freshly-spawned single-track wrapper signal protocol confusion
-        — bail with :class:`AgentBindError` rather than queue.
+        — bail with [`AgentBindError`][terok_executor.acp.proxy.AgentBindError] rather than queue.
         """
         assert self._backend_reader is not None
         while True:

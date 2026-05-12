@@ -3,17 +3,17 @@
 
 """Per-task ACP roster: aggregates in-container agents into one endpoint.
 
-:class:`ACPRoster` owns the per-task state for the ACP host-proxy:
+[`ACPRoster`][terok_executor.acp.roster.ACPRoster] owns the per-task state for the ACP host-proxy:
 
 - the cache lookup that answers "what models does this agent advertise?"
 - the live walk that answers "what agents are currently authenticated for
   this image?" — re-evaluated on every ``session/new`` so newly-authed
   agents appear without daemon restart
-- the proxy attach loop (delegated to :mod:`.proxy`) that brokers JSON-RPC
+- the proxy attach loop (delegated to [`proxy`][terok_executor.acp.proxy]) that brokers JSON-RPC
   frames between the connected client and the chosen backend
 
 The class follows the shape of
-:class:`terok_executor.container.runner.AgentRunner`: lazy-init
+[`AgentRunner`][terok_executor.container.runner.AgentRunner]: lazy-init
 properties for cross-cutting subsystems, OOP over free functions, no
 mutable state in ``__init__`` beyond the parameters themselves.
 """
@@ -47,9 +47,9 @@ accommodates the change without a schema migration.
 """
 
 DEFAULT_CREDENTIAL_SCOPE = "default"
-"""Scope name used by :class:`terok_sandbox.CredentialDB` for the
+"""Scope name used by [`CredentialDB`][terok_sandbox.CredentialDB] for the
 process-wide credential set.  Mirrors what
-:func:`terok_executor.credentials.auth.authenticate` writes."""
+[`authenticate`][terok_executor.credentials.auth.authenticate] writes."""
 
 
 def list_authenticated_agents(
@@ -59,7 +59,7 @@ def list_authenticated_agents(
 ) -> list[str]:
     """Return provider names that have stored credentials in *scope*.
 
-    Pure query against :class:`terok_sandbox.CredentialDB` — no probing,
+    Pure query against [`CredentialDB`][terok_sandbox.CredentialDB] — no probing,
     no container exec.  Used by the host-side ``acp list`` to classify
     endpoints in its status display; the roster itself doesn't gate
     probing on this anymore (file-based auth like Claude's OAuth lives
@@ -115,7 +115,7 @@ class ACPRoster:
 
         Parsed once per roster instance — the image label is stable for
         the lifetime of the running task.  The label is a comma-
-        separated list (see :data:`terok_executor.container.build.AGENTS_LABEL`).
+        separated list (see [`AGENTS_LABEL`][terok_executor.container.build.AGENTS_LABEL]).
         """
         image = self._sandbox.runtime.image(self._image_id)
         raw = image.labels().get(AGENTS_LABEL, "")
@@ -181,7 +181,7 @@ class ACPRoster:
         Probes every agent in the image's ``ai.terok.agents`` label
         (filtered through the cache) and concatenates the namespaced
         model ids of those that responded.  Cold-cache agents are
-        probed in parallel via :func:`asyncio.gather`, so first-call
+        probed in parallel via [`gather`][asyncio.gather], so first-call
         latency is ``max(probe_time)`` rather than ``sum(probe_time)``.
         Successful probes cache the model tuple for the daemon's
         lifetime; failed probes are *not* cached so a transient cold
@@ -228,7 +228,7 @@ class ACPRoster:
     ) -> None:
         """Run the proxy loop for one connected client until disconnect.
 
-        Delegates the JSON-RPC state machine to :class:`ACPProxy`.  The
+        Delegates the JSON-RPC state machine to [`ACPProxy`][terok_executor.acp.proxy.ACPProxy].  The
         roster owns the data (cache + live walk); the proxy owns the
         protocol.
         """
@@ -240,11 +240,11 @@ class ACPRoster:
 
         Used by the *probe* path: a short single-shot handshake whose
         wrapper subprocess is torn down immediately afterwards.  Sync
-        because :meth:`Sandbox.runtime.exec_stdio` is sync — callers
+        because [`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] is sync — callers
         in async contexts wrap the call in ``loop.run_in_executor``.
 
-        The *bind* path uses :meth:`wrapper_argv` and spawns the
-        wrapper directly via :func:`asyncio.create_subprocess_exec`
+        The *bind* path uses [`wrapper_argv`][terok_executor.acp.roster.ACPRoster.wrapper_argv] and spawns the
+        wrapper directly via [`create_subprocess_exec`][asyncio.create_subprocess_exec]
         instead — fewer hops between the proxy and the subprocess
         (no kernel pipe pair, no pump threads), and the long-lived
         connection-shaped lifecycle there fits asyncio's subprocess
@@ -263,7 +263,7 @@ class ACPRoster:
         """Return the argv that runs ``terok-{agent_id}-acp`` in this container.
 
         Hands back something a caller can pass directly to
-        :func:`asyncio.create_subprocess_exec` — the bind path uses
+        [`create_subprocess_exec`][asyncio.create_subprocess_exec] — the bind path uses
         this so it can attach asyncio's own pipe transports to the
         wrapper subprocess without going through sandbox's pump
         threads.  Currently podman-specific; a krun runtime would

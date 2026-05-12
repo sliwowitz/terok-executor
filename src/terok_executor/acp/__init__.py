@@ -15,9 +15,9 @@ backend-needing method (e.g. ``session/prompt``).  Cross-agent switching
 mid-session is out of scope for v1; subsequent picks against a different
 agent are rejected at the protocol level.
 
-Public surface: :class:`ACPRoster`, :class:`AgentRosterCache`,
-:func:`list_authenticated_agents`, :func:`acp_socket_is_live`,
-plus the daemon entry point :func:`serve_acp`.  Re-exported from
+Public surface: [`ACPRoster`][terok_executor.acp.roster.ACPRoster], [`AgentRosterCache`][terok_executor.acp.cache.AgentRosterCache],
+[`list_authenticated_agents`][terok_executor.acp.roster.list_authenticated_agents], [`acp_socket_is_live`][terok_executor.acp.daemon.acp_socket_is_live],
+plus the daemon entry point [`serve_acp`][terok_executor.acp.daemon.serve_acp].  Re-exported from
 ``terok_executor`` for the host-side caller (terok) so it doesn't
 have to reach into ``terok_executor.acp.daemon`` directly.
 """

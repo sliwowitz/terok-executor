@@ -12,13 +12,13 @@ agent currently advertises, we drive a minimal handshake:
 3. close stdin — agent exits cleanly
 
 The handshake is cheap (a few round-trips) but non-trivial to repeat:
-the result is cached by :class:`~terok_executor.acp.cache.AgentRosterCache`
+the result is cached by [`AgentRosterCache`][terok_executor.acp.cache.AgentRosterCache]
 and reused for the lifetime of the authenticated session.
 
 The probe is transport-agnostic on top of
-:meth:`terok_sandbox.ContainerRuntime.exec_stdio` — it owns no FDs of its
+[`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] — it owns no FDs of its
 own; it spawns the agent in an executor thread and bridges the two ends
-of a pipe pair as asyncio :class:`StreamReader`/:class:`StreamWriter`
+of a pipe pair as asyncio [`StreamReader`][asyncio.StreamReader]/[`StreamWriter`][asyncio.StreamWriter]
 so the proxy loop can drive them naturally and cancel cleanly.
 """
 
@@ -74,12 +74,12 @@ async def probe_agent_models(
     """Drive the minimal ACP handshake against ``terok-{agent_id}-acp``.
 
     Spawns the in-container wrapper via
-    :meth:`terok_sandbox.ContainerRuntime.exec_stdio` (running in an
+    [`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] (running in an
     executor thread because the primitive is sync), sends
     ``initialize`` and ``session/new``, parses the response for the
     ``category: "model"`` configOption, and returns the model ids.
 
-    Raises :class:`ProbeError` on timeout, malformed JSON, or any
+    Raises [`ProbeError`][terok_executor.acp.probe.ProbeError] on timeout, malformed JSON, or any
     other handshake failure.  Callers (the roster cache) typically
     catch it, cache an empty roster, and skip the agent until the
     container is restarted.
@@ -243,8 +243,8 @@ def _extract_model_ids(session_new_result: dict) -> tuple[str, ...]:
     """Return the model ids from a ``session/new`` response.
 
     Walks the ``configOptions[category=model]`` entry via the shared
-    :func:`iter_model_choice_dicts` iterator (so the schema-tolerance
-    logic lives in one place — see :mod:`.proxy`).  Unknown shapes
+    [`iter_model_choice_dicts`][terok_executor.acp.model_options.iter_model_choice_dicts] iterator (so the schema-tolerance
+    logic lives in one place — see [`proxy`][terok_executor.acp.proxy]).  Unknown shapes
     yield an empty tuple, which the caller caches to avoid hammering
     a misbehaving agent on every session.
     """

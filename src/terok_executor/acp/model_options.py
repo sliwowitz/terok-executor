@@ -9,7 +9,7 @@ Three consumers share this vocabulary: the probe reads it to learn
 what an agent can serve, the proxy builds aggregated responses
 pre-bind, and the proxy rewrites it post-bind so the client sees
 the namespaced ``agent:model`` ids it expects.  All three sit on
-top of :func:`iter_model_choice_dicts`, which tolerates the in-flight
+top of [`iter_model_choice_dicts`][terok_executor.acp.model_options.iter_model_choice_dicts], which tolerates the in-flight
 ACP schema variants in one place.
 """
 
@@ -64,7 +64,7 @@ def iter_model_choice_dicts(result: dict[str, Any]) -> Iterator[dict[str, Any]]:
 def _humanise_model_id(namespaced: str) -> str:
     """Render ``claude:opus-4.6`` as ``Claude: opus-4.6`` for the picker.
 
-    Colon (matching the wire-level :data:`MODEL_NAMESPACE_SEP`) keeps
+    Colon (matching the wire-level [`MODEL_NAMESPACE_SEP`][]) keeps
     slashes free for model ids that legitimately contain them, e.g.
     OpenCode's ``opencode:opencode/big-pickle`` — humanising that to
     ``OpenCode: opencode/big-pickle`` reads as one provider plus one
@@ -87,8 +87,8 @@ def _build_model_config_option(
     """Build a ``category: "model"`` ``select`` configOption.
 
     Returns the SDK pydantic model (not a dict) so the caller can drop
-    it straight into a :class:`NewSessionResponse` /
-    :class:`SetSessionConfigOptionResponse`.  ``current`` is required
+    it straight into a [`NewSessionResponse`][] /
+    [`SetSessionConfigOptionResponse`][].  ``current`` is required
     by the schema (``current_value`` is a non-nullable ``str``); the
     caller is expected to handle the empty-models case by skipping
     the option entirely rather than passing a placeholder.
@@ -114,7 +114,7 @@ def _build_session_new_response(session_id: str, models: list[str]) -> NewSessio
     when no agents probed successfully, the ``models`` block and the
     model ``configOption`` are omitted entirely (both have non-nullable
     required fields the proxy can't fill in for an empty list).  The
-    ``modes`` block is also omitted — :class:`SessionModeState` requires
+    ``modes`` block is also omitted — [`SessionModeState`][] requires
     a non-null ``current_mode_id`` and the proxy doesn't manage modes.
     """
     if not models:
