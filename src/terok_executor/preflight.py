@@ -319,7 +319,7 @@ def _fix_ssh_key(scope: str = "standalone") -> bool:
     from terok_sandbox import SandboxConfig, SSHManager
 
     try:
-        with SSHManager.open(scope=scope, db_path=SandboxConfig().db_path) as mgr:
+        with SSHManager.open_for_config(scope=scope, cfg=SandboxConfig()) as mgr:
             result = mgr.init()
     except Exception as exc:  # noqa: BLE001
         print(f"  SSH key generation failed: {exc}", file=sys.stderr)

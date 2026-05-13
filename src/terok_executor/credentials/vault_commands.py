@@ -11,6 +11,7 @@ generation from the YAML roster is performed before ``start`` and
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -150,7 +151,6 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
     callers that don't have one handy.
     """
     from terok_sandbox import SandboxConfig as _SandboxConfig, VaultStatus
-    from terok_sandbox.credentials.db import open_credential_db
 
     if cfg is None:
         cfg = _SandboxConfig()
@@ -158,17 +158,12 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
     if not st.credentials_stored:
         return "none stored"
     try:
-        # Bypass ``cfg.open_credential_db`` because it computes
-        # ``vault_dir / "credentials.db"`` from the local config,
-        # which may not match the running daemon's actual ``db_path``
-        # (test fixtures and multi-instance hosts both diverge).
-        # The resolution-chain knobs still come from *cfg*.
-        db = open_credential_db(
-            st.db_path,
-            passphrase_file=cfg.vault_passphrase_file,
-            use_keyring=cfg.credentials_use_keyring,
-            config_fallback=cfg.credentials_passphrase,
-        )
+        # ``st.db_path`` is the running daemon's actual DB — may diverge
+        # from ``cfg.db_path`` under test fixtures or multi-instance
+        # hosts.  Pass it explicitly; *cfg* still owns the tier policy
+        # so this caller never has to know about session-file /
+        # systemd-creds / keyring / config.
+        db = cfg.open_credential_db(st.db_path)
         try:
             parts = []
             for name in st.credentials_stored:
@@ -188,20 +183,34 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
 
 def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show vault status."""
-    from terok_sandbox import get_vault_status, is_vault_systemd_available
+    from terok_sandbox import get_vault_status, is_vault_systemd_available, sanitize_tty
 
     from terok_executor.paths import mounts_dir
 
     status = get_vault_status(cfg=cfg)
     state = "running" if status.running else "stopped"
-    print(f"Mode:        {status.mode}")
+    # Path fields land in a terminal that interprets ANSI/control chars.
+    # The values originate from the vault daemon's config / live state —
+    # most installs trust those, but a malformed config layer or a
+    # manipulated systemd unit could plant control sequences that would
+    # otherwise spoof prompts or rewrite the screen.  Sanitise at the
+    # render boundary; matches what ``terok-sandbox vault status`` does.
+    print(f"Mode:        {sanitize_tty(status.mode)}")
     print(f"Status:      {state}")
-    print(f"Socket:      {status.socket_path}")
-    print(f"DB:          {status.db_path}")
-    print(f"Routes:      {status.routes_path} ({status.routes_configured} configured)")
+    print(f"Socket:      {sanitize_tty(str(status.socket_path))}")
+    print(f"DB:          {sanitize_tty(str(status.db_path))}")
+    print(
+        f"Routes:      {sanitize_tty(str(status.routes_path))}"
+        f" ({status.routes_configured} configured)"
+    )
     print(f"SSH keys:    {status.ssh_keys_stored}")
+    # ``Locked:`` is the operator-facing question — the chain tier
+    # ``Passphrase:`` answers WHICH tier resolved it; the explicit
+    # ``Locked:`` line answers WHETHER it resolved at all so a
+    # ``grep '^Locked:'`` is enough for scripts.
+    print(f"Locked:      {'yes' if status.locked else 'no'}")
     if status.locked:
-        print("Passphrase:  (vault locked — no tier resolved)")
+        print("Passphrase:  (no tier resolved — run `terok vault unlock`)")
     elif status.passphrase_source is not None:
         print(f"Passphrase:  resolved via {status.passphrase_source}")
     if status.credentials_stored:
@@ -211,6 +220,10 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     if not status.running and status.mode == "none" and is_vault_systemd_available():
         print("\nHint: run 'install' to set up systemd socket activation.")
 
+    plaintext_path = getattr(status, "plaintext_passphrase_path", None)
+    if plaintext_path is not None:
+        _print_plaintext_passphrase_warning(plaintext_path)
+
     leaked = scan_leaked_credentials(mounts_dir())
     if leaked:
         print("\nWARNING: Real credentials found in shared config mounts:")
@@ -218,6 +231,29 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
             print(f"  {provider}: {path}")
         print("These files are mounted into containers alongside vault phantom tokens.")
         print("Run 'clean' to remove them.")
+
+
+def _print_plaintext_passphrase_warning(path: Path) -> None:
+    """Stderr WARNING that the vault passphrase lives in plaintext on disk.
+
+    Mirrors [`terok_sandbox.commands._print_plaintext_passphrase_warning`][terok_sandbox.commands._print_plaintext_passphrase_warning]
+    so ``terok vault status`` (executor-wrapped) and ``terok-sandbox vault status``
+    surface the same operator-actionable warning.  ``getattr`` with a
+    ``None`` default lets the call site work against older
+    ``VaultStatus`` builds that pre-date sandbox#282.
+    """
+    from terok_sandbox import sanitize_tty
+
+    use_color = sys.stderr.isatty()
+    red = "\033[1;31m" if use_color else ""
+    reset = "\033[0m" if use_color else ""
+    safe_path = sanitize_tty(str(path))
+    print(
+        f"{red}WARNING: vault passphrase stored in plaintext at {safe_path}{reset}\n"
+        f"{red}         accept on-disk plaintext as your trust boundary,"
+        f" or migrate to keyring/systemd-creds.{reset}",
+        file=sys.stderr,
+    )
 
 
 def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
@@ -266,29 +302,56 @@ def _handle_clean(*, cfg: SandboxConfig | None = None) -> None:  # noqa: ARG001
         print(f"Removed {provider}: {path}")
 
 
-VAULT_COMMANDS: tuple[CommandDef, ...] = (
-    CommandDef(name="start", help="Start the vault daemon", handler=_handle_start, group="vault"),
-    CommandDef(name="stop", help="Stop the vault daemon", handler=_handle_stop, group="vault"),
-    CommandDef(name="status", help="Show vault status", handler=_handle_status, group="vault"),
-    CommandDef(
-        name="install",
-        help="Install systemd socket activation",
-        handler=_handle_install,
-        group="vault",
-    ),
-    CommandDef(
-        name="uninstall", help="Remove systemd units", handler=_handle_uninstall, group="vault"
-    ),
-    CommandDef(
-        name="routes",
-        help="Regenerate routes.json from YAML roster",
-        handler=_handle_routes,
-        group="vault",
-    ),
-    CommandDef(
-        name="clean",
-        help="Remove leaked credential files from shared mounts",
-        handler=_handle_clean,
-        group="vault",
-    ),
-)
+#: Verbs where executor enriches the sandbox handler (leaked-credential
+#: scans, ``_ensure_routes`` before installs, typed credential listings,
+#: ``SystemExit`` on already-running).  Anything not in this map passes
+#: through from sandbox unchanged — that's how ``unlock`` / ``lock`` /
+#: ``seal`` reach ``terok vault`` without an executor-side handler.
+_HANDLER_OVERRIDES: dict[str, Callable[..., None]] = {
+    "start": _handle_start,
+    "stop": _handle_stop,
+    "status": _handle_status,
+    "install": _handle_install,
+    "uninstall": _handle_uninstall,
+}
+
+
+def _build_vault_commands() -> tuple[CommandDef, ...]:
+    """Compose ``VAULT_COMMANDS`` as an overlay over sandbox's tuple.
+
+    Sandbox owns the verb set + argparse schema (one source of truth
+    for ``--forget``, ``--key=``, help text, etc.).  Executor overlays
+    its enriched handlers for the five shared verbs and appends the
+    two executor-only verbs (``routes`` / ``clean``).  The three
+    sandbox-only verbs (``unlock`` / ``lock`` / ``seal``) flow through
+    so they surface under ``terok vault`` instead of only under
+    ``terok-sandbox vault``.
+    """
+    from dataclasses import replace
+
+    from terok_sandbox import VAULT_COMMANDS as _SANDBOX_VAULT_COMMANDS
+
+    overlaid = tuple(
+        replace(cmd, handler=_HANDLER_OVERRIDES[cmd.name])
+        if cmd.name in _HANDLER_OVERRIDES
+        else cmd
+        for cmd in _SANDBOX_VAULT_COMMANDS
+    )
+    executor_only = (
+        CommandDef(
+            name="routes",
+            help="Regenerate routes.json from YAML roster",
+            handler=_handle_routes,
+            group="vault",
+        ),
+        CommandDef(
+            name="clean",
+            help="Remove leaked credential files from shared mounts",
+            handler=_handle_clean,
+            group="vault",
+        ),
+    )
+    return overlaid + executor_only
+
+
+VAULT_COMMANDS: tuple[CommandDef, ...] = _build_vault_commands()

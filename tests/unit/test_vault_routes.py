@@ -379,7 +379,7 @@ class TestVaultCommandHandlers:
     @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
     @patch("terok_sandbox.get_vault_status")
     def test_status_announces_locked_vault(self, mock_status, _sd, _scan, capsys) -> None:
-        """A locked vault prints an actionable hint instead of an empty source."""
+        """A locked vault prints the explicit ``Locked: yes`` line and the unlock hint."""
         mock_status.return_value = MagicMock(
             mode="daemon",
             running=True,
@@ -396,7 +396,90 @@ class TestVaultCommandHandlers:
 
         _handle_status()
         out = capsys.readouterr().out
-        assert "vault locked" in out
+        assert "Locked:      yes" in out
+        assert "vault unlock" in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_marks_unlocked_explicitly(self, mock_status, _sd, _scan, capsys) -> None:
+        """A resolved vault prints ``Locked: no`` alongside the chain-tier source."""
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "Locked:      no" in out
+        assert "resolved via systemd-creds" in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_surfaces_plaintext_passphrase_warning(
+        self, mock_status, _sd, _scan, capsys
+    ) -> None:
+        """``plaintext_passphrase_path`` lights up a stderr WARNING (sandbox#282)."""
+        from pathlib import Path
+
+        plaintext_path = Path("/etc/terok/config.yml")
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=plaintext_path,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        captured = capsys.readouterr()
+        # Warning lives on stderr so structured stdout stays greppable.
+        assert "WARNING" in captured.err
+        assert "plaintext" in captured.err
+        assert str(plaintext_path) in captured.err
+        assert "WARNING" not in captured.out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_silent_when_no_plaintext_warning(self, mock_status, _sd, _scan, capsys) -> None:
+        """Default-None case is silent — no plaintext line at all."""
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        captured = capsys.readouterr()
+        assert "plaintext" not in captured.err
+        assert "plaintext" not in captured.out
 
     @patch("terok_sandbox.install_vault_systemd")
     @patch("terok_executor.credentials.vault_commands._ensure_routes")
@@ -863,3 +946,62 @@ class TestVaultHandlerCfgSignatures:
         for cmd in VAULT_COMMANDS:
             sig = inspect.signature(cmd.handler)
             assert "cfg" in sig.parameters, f"{cmd.handler.__name__} missing cfg param"
+
+
+class TestVaultCommandsOverlay:
+    """Executor's ``VAULT_COMMANDS`` overlays sandbox's set with enriched handlers.
+
+    Sandbox owns the verb registry and argparse schema; executor only
+    overrides the five shared verbs that need enrichment and appends
+    two executor-only verbs.  The three sandbox-only verbs (``unlock``,
+    ``lock``, ``seal``) pass through so they're visible under
+    ``terok vault`` and not just ``terok-sandbox vault``.
+    """
+
+    def test_sandbox_only_verbs_pass_through(self) -> None:
+        """``unlock`` / ``lock`` / ``seal`` are exposed without an executor handler."""
+        from terok_sandbox import VAULT_COMMANDS as SANDBOX_VAULT_COMMANDS
+
+        from terok_executor.credentials.vault_commands import VAULT_COMMANDS
+
+        by_name = {cmd.name: cmd for cmd in VAULT_COMMANDS}
+        sandbox_by_name = {cmd.name: cmd for cmd in SANDBOX_VAULT_COMMANDS}
+        for verb in ("unlock", "lock", "seal"):
+            assert verb in by_name, f"{verb} not exposed under executor vault"
+            # The handler is sandbox's — the overlay didn't replace it.
+            assert by_name[verb].handler is sandbox_by_name[verb].handler
+            # Argparse schema (``--forget`` / ``--key=``) survives the overlay.
+            assert by_name[verb].args == sandbox_by_name[verb].args
+
+    def test_shared_verbs_use_executor_handlers(self) -> None:
+        """``start`` / ``stop`` / ``status`` / ``install`` / ``uninstall`` route to executor."""
+        from terok_executor.credentials.vault_commands import (
+            VAULT_COMMANDS,
+            _handle_install,
+            _handle_start,
+            _handle_status,
+            _handle_stop,
+            _handle_uninstall,
+        )
+
+        expected = {
+            "start": _handle_start,
+            "stop": _handle_stop,
+            "status": _handle_status,
+            "install": _handle_install,
+            "uninstall": _handle_uninstall,
+        }
+        by_name = {cmd.name: cmd for cmd in VAULT_COMMANDS}
+        for verb, handler in expected.items():
+            assert by_name[verb].handler is handler, f"{verb} should use executor handler"
+
+    def test_executor_only_verbs_appended(self) -> None:
+        """``routes`` and ``clean`` exist in executor's set but not sandbox's."""
+        from terok_sandbox import VAULT_COMMANDS as SANDBOX_VAULT_COMMANDS
+
+        from terok_executor.credentials.vault_commands import VAULT_COMMANDS
+
+        executor_names = {cmd.name for cmd in VAULT_COMMANDS}
+        sandbox_names = {cmd.name for cmd in SANDBOX_VAULT_COMMANDS}
+        executor_only = executor_names - sandbox_names
+        assert executor_only == {"routes", "clean"}

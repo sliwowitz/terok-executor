@@ -67,22 +67,11 @@ def list_authenticated_agents(
     working agents).
     """
     cfg = SandboxConfig()
-    if db_path is None:
-        db = cfg.open_credential_db()
-    else:
-        # ``cfg.db_path`` is computed as ``vault_dir / "credentials.db"``,
-        # so a ``dataclasses.replace`` on ``vault_dir`` alone would lose
-        # an override that uses a different filename (e.g. tests).
-        # Bypass to the lower-level opener that takes an explicit path,
-        # threading the resolution-chain knobs from ``cfg``.
-        from terok_sandbox.credentials.db import open_credential_db
-
-        db = open_credential_db(
-            db_path,
-            passphrase_file=cfg.vault_passphrase_file,
-            use_keyring=cfg.credentials_use_keyring,
-            config_fallback=cfg.credentials_passphrase,
-        )
+    # ``db_path`` override exists for tests + multi-instance hosts; the
+    # cfg still owns the tier policy so this caller never has to know
+    # about the chain mechanism (session-file / systemd-creds /
+    # keyring / config).
+    db = cfg.open_credential_db(db_path)
     try:
         return list(db.list_credentials(scope))
     finally:

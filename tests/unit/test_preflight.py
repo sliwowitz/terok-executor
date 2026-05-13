@@ -326,3 +326,52 @@ class TestRunPreflight:
         assert result is True
         fix_services.assert_called_once()
         mock_input.assert_not_called()
+
+
+class TestFixSshKey:
+    """``_fix_ssh_key`` provisions the gate-signing key via the new cfg seam."""
+
+    def test_success_returns_true_and_reports(self, capsys) -> None:
+        """Happy path: SSHManager opens, init succeeds, we print key + return True."""
+        from terok_executor.preflight import _fix_ssh_key
+
+        fake_mgr = MagicMock()
+        fake_mgr.init.return_value = {
+            "key_type": "ed25519",
+            "fingerprint": "abcdef0123456789" * 4,
+            "public_line": "ssh-ed25519 AAAA… proj-key",
+        }
+        # The context-manager protocol surface ``open_for_config`` uses.
+        fake_ctx = MagicMock()
+        fake_ctx.__enter__.return_value = fake_mgr
+        fake_ctx.__exit__.return_value = False
+        with patch("terok_sandbox.SSHManager.open_for_config", return_value=fake_ctx) as m_open:
+            assert _fix_ssh_key("proj") is True
+        # Sandbox seam called via the new ``open_for_config(cfg=)`` shape — not the
+        # removed ``open(db_path=…)``, which was the leaky tier-knob variant.
+        m_open.assert_called_once()
+        kwargs = m_open.call_args.kwargs
+        assert kwargs["scope"] == "proj"
+        # ``cfg`` is a SandboxConfig instance (the seam takes a config, not knobs).
+        from terok_sandbox import SandboxConfig
+
+        assert isinstance(kwargs["cfg"], SandboxConfig)
+        out = capsys.readouterr().out
+        assert "ed25519" in out
+        assert "ssh-ed25519" in out
+
+    def test_failure_prints_error_and_returns_false(self, capsys) -> None:
+        """If ``mgr.init`` raises, swallow + report on stderr + return False."""
+        from terok_executor.preflight import _fix_ssh_key
+
+        fake_mgr = MagicMock()
+        fake_mgr.init.side_effect = RuntimeError("keygen failed")
+        fake_ctx = MagicMock()
+        fake_ctx.__enter__.return_value = fake_mgr
+        fake_ctx.__exit__.return_value = False
+        with patch("terok_sandbox.SSHManager.open_for_config", return_value=fake_ctx):
+            assert _fix_ssh_key("proj") is False
+        # Operator-actionable diagnostic lands on stderr, not stdout.
+        captured = capsys.readouterr()
+        assert "keygen failed" in captured.err
+        assert "ed25519" not in captured.out

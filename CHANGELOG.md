@@ -5,6 +5,10 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.144 — Passphrase Handling
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.143...v0.0.144
+
 ## v0.0.143 — Trusted Platform Module
 
 ## What's Changed

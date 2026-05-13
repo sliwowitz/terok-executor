@@ -42,8 +42,13 @@ def _stub_credential_db_passphrase() -> Iterator[None]:
 
     from terok_sandbox import CredentialDB
 
-    def _open_method(self, *, prompt_on_tty: bool = False) -> CredentialDB:
-        return CredentialDB(self.db_path, passphrase=TEST_VAULT_PASSPHRASE)
+    def _open_method(
+        self, db_path: Path | None = None, *, prompt_on_tty: bool = False
+    ) -> CredentialDB:
+        return CredentialDB(
+            db_path if db_path is not None else self.db_path,
+            passphrase=TEST_VAULT_PASSPHRASE,
+        )
 
     def _open_module(db_path: Path, **_kw: object) -> CredentialDB:
         return CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
