@@ -338,6 +338,9 @@ class TestVaultCommandHandlers:
             routes_path="/data/routes.json",
             routes_configured=3,
             credentials_stored=("claude", "gh"),
+            ssh_keys_stored=0,
+            passphrase_source="keyring",
+            locked=False,
         )
         from terok_executor.credentials.vault_commands import _handle_status
 
@@ -345,6 +348,55 @@ class TestVaultCommandHandlers:
         out = capsys.readouterr().out
         assert "running" in out
         assert "claude" in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_surfaces_passphrase_source_and_ssh_key_count(
+        self, mock_status, _sd, _scan, capsys
+    ) -> None:
+        """The fields enriched by sandbox#276 round-trip into ``vault status`` output."""
+        mock_status.return_value = MagicMock(
+            mode="daemon",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=7,
+            passphrase_source="systemd-creds",
+            locked=False,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "SSH keys:    7" in out
+        assert "resolved via systemd-creds" in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_announces_locked_vault(self, mock_status, _sd, _scan, capsys) -> None:
+        """A locked vault prints an actionable hint instead of an empty source."""
+        mock_status.return_value = MagicMock(
+            mode="daemon",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source=None,
+            locked=True,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "vault locked" in out
 
     @patch("terok_sandbox.install_vault_systemd")
     @patch("terok_executor.credentials.vault_commands._ensure_routes")
@@ -411,6 +463,9 @@ class TestVaultCommandHandlers:
             routes_path="/data/routes.json",
             routes_configured=3,
             credentials_stored=("claude",),
+            ssh_keys_stored=0,
+            passphrase_source="keyring",
+            locked=False,
         )
         from terok_executor.credentials.vault_commands import _handle_status
 

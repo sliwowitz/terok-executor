@@ -199,6 +199,11 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     print(f"Socket:      {status.socket_path}")
     print(f"DB:          {status.db_path}")
     print(f"Routes:      {status.routes_path} ({status.routes_configured} configured)")
+    print(f"SSH keys:    {status.ssh_keys_stored}")
+    if status.locked:
+        print("Passphrase:  (vault locked — no tier resolved)")
+    elif status.passphrase_source is not None:
+        print(f"Passphrase:  resolved via {status.passphrase_source}")
     if status.credentials_stored:
         print(f"Credentials: {_format_credentials(status, cfg)}")
     else:
