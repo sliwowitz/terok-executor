@@ -5,6 +5,15 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.143 — Trusted Platform Module
+
+## What's Changed
+* ci: split SonarQube into its own workflow; add fork-PR sonar; simplify docs wait by @sliwowitz in https://github.com/terok-ai/terok-executor/pull/305
+* ci(sonar): only allow workflow_dispatch from master by @sliwowitz in https://github.com/terok-ai/terok-executor/pull/306
+
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.142...v0.0.143
+
 ## v0.0.142 — Vault Passphrase
 
 Credentials Vault DB encryption
