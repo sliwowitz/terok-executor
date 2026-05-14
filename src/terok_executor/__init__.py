@@ -62,6 +62,8 @@ from .container.build import (
     l0_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
+    render_l0,
+    render_l1,
     render_l1_sidecar,
     stage_scripts,
     stage_tmux_config,
@@ -108,6 +110,7 @@ from .provider.providers import (
 
 # -- Roster (agent catalog + config resolution) --------------------------------
 from .roster import (
+    AgentRoster,
     SidecarSpec,
     VaultRoute,
     ensure_vault_routes,
@@ -203,6 +206,8 @@ __all__ = [
     "l0_image_tag",
     "l1_image_tag",
     "l1_sidecar_image_tag",
+    "render_l0",
+    "render_l1",
     "render_l1_sidecar",
     "stage_scripts",
     "stage_toad_agents",
@@ -212,6 +217,7 @@ __all__ = [
     "ensure_vault_routes",
     "extract_credential",
     # Roster
+    "AgentRoster",
     "SidecarSpec",
     "get_roster",
     "parse_agent_selection",
