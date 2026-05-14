@@ -5,6 +5,13 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.147 — The State of the Shields
+
+## What's Changed
+* chore: branch-pin terok-sandbox during ShieldState rename chain in https://github.com/terok-ai/terok-executor/pull/314
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.146...v0.0.147
+
 ## v0.0.146 — The Tree of Command
 
 ## What's Changed
