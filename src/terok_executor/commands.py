@@ -3,47 +3,28 @@
 
 """Catalog of every ``terok-executor`` subcommand and its handler.
 
-The ``COMMANDS`` tuple at the bottom is the authoritative registry;
+The ``COMMANDS`` tree at the bottom is the authoritative registry;
 higher-level frontends (``terok``) import it to wire the same commands
 into their own CLI without duplicating argument definitions.
+
+[`CommandDef`][terok_sandbox.commands.CommandDef] /
+[`ArgDef`][terok_sandbox.commands.ArgDef] /
+[`CommandTree`][terok_sandbox.commands.CommandTree] are imported from
+terok-sandbox so the whole stack shares one vocabulary — adding new
+verbs in sandbox flows into executor's tree automatically without an
+overlay update.
 """
 
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from terok_sandbox.commands import ArgDef, CommandDef
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-# ── Vocabulary ──
-
-
-@dataclass(frozen=True)
-class ArgDef:
-    """Definition of a single CLI argument."""
-
-    name: str
-    help: str = ""
-    type: Callable[[str], Any] | None = None
-    default: Any = None
-    action: str | None = None
-    dest: str | None = None
-    nargs: int | str | None = None
-
-
-@dataclass(frozen=True)
-class CommandDef:
-    """Definition of a terok-executor subcommand."""
-
-    name: str
-    help: str = ""
-    handler: Callable[..., None] | None = None
-    args: tuple[ArgDef, ...] = ()
-    group: str = ""
 
 
 # ── Handlers ──

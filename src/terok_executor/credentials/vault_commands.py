@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from terok_sandbox import CommandDef
+from terok_sandbox.commands import CommandTree
 
 if TYPE_CHECKING:
     from terok_sandbox import SandboxConfig
@@ -302,56 +303,65 @@ def _handle_clean(*, cfg: SandboxConfig | None = None) -> None:  # noqa: ARG001
         print(f"Removed {provider}: {path}")
 
 
-#: Verbs where executor enriches the sandbox handler (leaked-credential
-#: scans, ``_ensure_routes`` before installs, typed credential listings,
-#: ``SystemExit`` on already-running).  Anything not in this map passes
-#: through from sandbox unchanged — that's how ``unlock`` / ``lock`` /
-#: ``seal`` reach ``terok vault`` without an executor-side handler.
-_HANDLER_OVERRIDES: dict[str, Callable[..., None]] = {
-    "start": _handle_start,
-    "stop": _handle_stop,
-    "status": _handle_status,
-    "install": _handle_install,
-    "uninstall": _handle_uninstall,
+#: Paths into sandbox's vault subtree where executor swaps in enriched
+#: handlers — leaked-credential scans, ``_ensure_routes`` before
+#: installs, typed credential listings, ``SystemExit`` on already-
+#: running.  Anything not in this map (``unlock`` / ``lock`` /
+#: ``passphrase {seal,to-keyring,destroy}``) flows through unchanged —
+#: that's how new sandbox verbs reach ``terok vault`` zero-edit.
+_VAULT_OVERRIDES: dict[tuple[str, ...], Callable[..., None]] = {
+    ("vault", "start"): _handle_start,
+    ("vault", "stop"): _handle_stop,
+    ("vault", "status"): _handle_status,
+    ("vault", "install"): _handle_install,
+    ("vault", "uninstall"): _handle_uninstall,
 }
 
 
-def _build_vault_commands() -> tuple[CommandDef, ...]:
-    """Compose ``VAULT_COMMANDS`` as an overlay over sandbox's tuple.
+def _build_sandbox_tree() -> CommandTree:
+    """Apply executor's overlays + extensions to sandbox's full command tree.
 
     Sandbox owns the verb set + argparse schema (one source of truth
-    for ``--forget``, ``--key=``, help text, etc.).  Executor overlays
-    its enriched handlers for the five shared verbs and appends the
-    two executor-only verbs (``routes`` / ``clean``).  The three
-    sandbox-only verbs (``unlock`` / ``lock`` / ``seal``) flow through
-    so they surface under ``terok vault`` instead of only under
-    ``terok-sandbox vault``.
+    for ``--key=``, help text, structural nesting of ``vault
+    passphrase``).  Executor overlays its enriched vault handlers at
+    the five paths in :data:`_VAULT_OVERRIDES` and extends the vault
+    subtree with two executor-only verbs (``routes`` / ``clean``).
+    Identity is preserved for every untouched node so a downstream
+    shortcut that splices the same subtree (terok's ``vault`` at
+    top-level) shares the wrap with the deep ``terok executor sandbox
+    vault`` path automatically.
     """
-    from dataclasses import replace
+    from terok_sandbox.commands import COMMANDS as SANDBOX_COMMANDS
 
-    from terok_sandbox import VAULT_COMMANDS as _SANDBOX_VAULT_COMMANDS
-
-    overlaid = tuple(
-        replace(cmd, handler=_HANDLER_OVERRIDES[cmd.name])
-        if cmd.name in _HANDLER_OVERRIDES
-        else cmd
-        for cmd in _SANDBOX_VAULT_COMMANDS
-    )
-    executor_only = (
-        CommandDef(
-            name="routes",
-            help="Regenerate routes.json from YAML roster",
-            handler=_handle_routes,
-            group="vault",
-        ),
-        CommandDef(
-            name="clean",
-            help="Remove leaked credential files from shared mounts",
-            handler=_handle_clean,
-            group="vault",
+    return SANDBOX_COMMANDS.overlay(_VAULT_OVERRIDES).extend_at(
+        ("vault",),
+        (
+            CommandDef(
+                name="routes",
+                help="Regenerate routes.json from YAML roster",
+                handler=_handle_routes,
+            ),
+            CommandDef(
+                name="clean",
+                help="Remove leaked credential files from shared mounts",
+                handler=_handle_clean,
+            ),
         ),
     )
-    return overlaid + executor_only
 
 
-VAULT_COMMANDS: tuple[CommandDef, ...] = _build_vault_commands()
+#: Sandbox's full command tree with executor's overlays + extensions applied.
+#: Wired in two positions of executor's CLI: under ``terok-executor sandbox``
+#: (the full deep path) and selected subtrees promoted to top level as
+#: shortcuts.  Both positions share ``CommandDef`` identity so wraps
+#: applied here propagate through every entry point that references the
+#: same node.
+SANDBOX_TREE: CommandTree = _build_sandbox_tree()
+
+
+#: Sandbox's vault group with executor's overlays applied — a 1-tuple
+#: containing the modified vault ``CommandDef``.  Surfaced at executor's
+#: top level as the ``terok-executor vault …`` shortcut; the same
+#: ``CommandDef`` instance also reaches ``terok-executor sandbox vault …``
+#: via :data:`SANDBOX_TREE`.
+VAULT_COMMANDS: tuple[CommandDef, ...] = (SANDBOX_TREE.find_at(("vault",)),)
