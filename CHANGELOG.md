@@ -5,6 +5,15 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.146 — The Tree of Command
+
+## What's Changed
+* feat(cli): adopt sandbox CommandTree; expose sandbox via deep nesting + shortcut in https://github.com/terok-ai/terok-executor/pull/311
+* chore: refresh virtualenv + python-discovery in poetry.lock by @sliwowitz in https://github.com/terok-ai/terok-executor/pull/312
+
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.145...v0.0.146
+
 ## v0.0.145 — Sandbox API restructure
 
 ## What's Changed

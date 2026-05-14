@@ -938,40 +938,52 @@ class TestEnsureVaultRoutes:
 class TestVaultHandlerCfgSignatures:
     """All vault command handlers accept a ``cfg`` keyword argument."""
 
-    def test_all_handlers_accept_cfg(self) -> None:
+    def test_all_leaf_handlers_accept_cfg(self) -> None:
         import inspect
 
         from terok_executor.credentials.vault_commands import VAULT_COMMANDS
 
-        for cmd in VAULT_COMMANDS:
+        vault_group = VAULT_COMMANDS[0]
+        for cmd in vault_group.children:
+            # Skip the nested ``passphrase`` group; its leaves don't take cfg.
+            if cmd.children:
+                continue
             sig = inspect.signature(cmd.handler)
             assert "cfg" in sig.parameters, f"{cmd.handler.__name__} missing cfg param"
 
 
 class TestVaultCommandsOverlay:
-    """Executor's ``VAULT_COMMANDS`` overlays sandbox's set with enriched handlers.
+    """Executor's ``VAULT_COMMANDS`` overlays sandbox's vault subtree.
 
-    Sandbox owns the verb registry and argparse schema; executor only
-    overrides the five shared verbs that need enrichment and appends
-    two executor-only verbs.  The three sandbox-only verbs (``unlock``,
-    ``lock``, ``seal``) pass through so they're visible under
-    ``terok vault`` and not just ``terok-sandbox vault``.
+    Sandbox owns the verb registry and argparse schema (one source of
+    truth for ``--key=``, structural nesting of ``vault passphrase``).
+    Executor overrides handlers at the five shared paths via
+    ``CommandTree.overlay`` and extends the vault subtree with two
+    executor-only verbs (``routes`` / ``clean``).  Sandbox-only verbs
+    (``unlock`` / ``lock`` / ``passphrase {seal,to-keyring,destroy}``)
+    flow through unchanged — that's the property new sandbox commands
+    rely on to reach ``terok-executor vault …`` zero-edit.
     """
 
     def test_sandbox_only_verbs_pass_through(self) -> None:
-        """``unlock`` / ``lock`` / ``seal`` are exposed without an executor handler."""
-        from terok_sandbox import VAULT_COMMANDS as SANDBOX_VAULT_COMMANDS
+        """``unlock`` / ``lock`` (and the ``passphrase`` subgroup) pass through unchanged."""
+        from terok_sandbox.commands import COMMANDS as SANDBOX_COMMANDS
 
         from terok_executor.credentials.vault_commands import VAULT_COMMANDS
 
-        by_name = {cmd.name: cmd for cmd in VAULT_COMMANDS}
-        sandbox_by_name = {cmd.name: cmd for cmd in SANDBOX_VAULT_COMMANDS}
-        for verb in ("unlock", "lock", "seal"):
-            assert verb in by_name, f"{verb} not exposed under executor vault"
-            # The handler is sandbox's — the overlay didn't replace it.
-            assert by_name[verb].handler is sandbox_by_name[verb].handler
-            # Argparse schema (``--forget`` / ``--key=``) survives the overlay.
-            assert by_name[verb].args == sandbox_by_name[verb].args
+        sandbox_vault = SANDBOX_COMMANDS.find_at(("vault",))
+        executor_vault = VAULT_COMMANDS[0]
+        sandbox_by_name = {c.name: c for c in sandbox_vault.children}
+        executor_by_name = {c.name: c for c in executor_vault.children}
+        for verb in ("unlock", "lock"):
+            assert executor_by_name[verb].handler is sandbox_by_name[verb].handler
+            assert executor_by_name[verb].args == sandbox_by_name[verb].args
+        # Nested ``passphrase`` subgroup survives identically — every leaf
+        # routes to the sandbox handler.
+        sandbox_passphrase = {c.name: c for c in sandbox_by_name["passphrase"].children}
+        executor_passphrase = {c.name: c for c in executor_by_name["passphrase"].children}
+        for verb in ("seal", "to-keyring", "destroy"):
+            assert executor_passphrase[verb].handler is sandbox_passphrase[verb].handler
 
     def test_shared_verbs_use_executor_handlers(self) -> None:
         """``start`` / ``stop`` / ``status`` / ``install`` / ``uninstall`` route to executor."""
@@ -991,17 +1003,47 @@ class TestVaultCommandsOverlay:
             "install": _handle_install,
             "uninstall": _handle_uninstall,
         }
-        by_name = {cmd.name: cmd for cmd in VAULT_COMMANDS}
+        by_name = {cmd.name: cmd for cmd in VAULT_COMMANDS[0].children}
         for verb, handler in expected.items():
             assert by_name[verb].handler is handler, f"{verb} should use executor handler"
 
     def test_executor_only_verbs_appended(self) -> None:
-        """``routes`` and ``clean`` exist in executor's set but not sandbox's."""
-        from terok_sandbox import VAULT_COMMANDS as SANDBOX_VAULT_COMMANDS
+        """``routes`` and ``clean`` exist in executor's vault group but not sandbox's."""
+        from terok_sandbox.commands import COMMANDS as SANDBOX_COMMANDS
 
         from terok_executor.credentials.vault_commands import VAULT_COMMANDS
 
-        executor_names = {cmd.name for cmd in VAULT_COMMANDS}
-        sandbox_names = {cmd.name for cmd in SANDBOX_VAULT_COMMANDS}
+        sandbox_names = {c.name for c in SANDBOX_COMMANDS.find_at(("vault",)).children}
+        executor_names = {c.name for c in VAULT_COMMANDS[0].children}
         executor_only = executor_names - sandbox_names
         assert executor_only == {"routes", "clean"}
+
+    def test_deep_path_shares_identity_with_shortcut(self) -> None:
+        """``terok-executor sandbox vault X`` and ``terok-executor vault X`` resolve to
+        the same ``CommandDef`` — the load-bearing property for wraps to apply uniformly."""
+        from terok_executor.cli import COMMANDS
+
+        deep = COMMANDS.find_at(("sandbox", "vault"))
+        shortcut = COMMANDS.find_at(("vault",))
+        assert deep is shortcut
+
+    def test_argparse_wires_both_paths_to_the_same_handler(self) -> None:
+        """The argparse parser must reach the same handler from both paths.
+
+        ``find_at`` proves the registry is consistent; argparse wiring
+        could still regress (e.g. someone duplicating a CommandDef
+        when constructing a parent group).  Build the actual parser
+        and confirm both ``vault status`` and ``sandbox vault status``
+        dispatch to the same handler object.
+        """
+        import argparse
+
+        from terok_executor.cli import COMMANDS
+
+        parser = argparse.ArgumentParser()
+        COMMANDS.wire(parser)
+
+        deep_args = parser.parse_args(["sandbox", "vault", "status"])
+        short_args = parser.parse_args(["vault", "status"])
+        assert deep_args._cmd is short_args._cmd
+        assert deep_args._cmd.handler is short_args._cmd.handler
