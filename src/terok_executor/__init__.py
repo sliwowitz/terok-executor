@@ -40,6 +40,7 @@ from .acp import (
 )
 
 # -- Commands + CLI surface ----------------------------------------------------
+from .cli import COMMANDS
 from .commands import COMMANDS as AGENT_COMMANDS, CommandDef
 
 # -- Config schema (executor-owned slice of the shared config.yml) -----------
@@ -216,6 +217,7 @@ __all__ = [
     "parse_agent_selection",
     # Command registry
     "AGENT_COMMANDS",
+    "COMMANDS",
     "VAULT_COMMANDS",
     "CommandDef",
     "mounts_dir",
