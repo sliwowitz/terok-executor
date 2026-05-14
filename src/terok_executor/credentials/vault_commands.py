@@ -324,8 +324,10 @@ def _build_sandbox_tree() -> CommandTree:
     Sandbox owns the verb set + argparse schema (one source of truth
     for ``--key=``, help text, structural nesting of ``vault
     passphrase``).  Executor overlays its enriched vault handlers at
-    the five paths in :data:`_VAULT_OVERRIDES` and extends the vault
-    subtree with two executor-only verbs (``routes`` / ``clean``).
+    the five paths in
+    [`_VAULT_OVERRIDES`][terok_executor.credentials.vault_commands._VAULT_OVERRIDES]
+    and extends the vault subtree with two executor-only verbs
+    (``routes`` / ``clean``).
     Identity is preserved for every untouched node so a downstream
     shortcut that splices the same subtree (terok's ``vault`` at
     top-level) shares the wrap with the deep ``terok executor sandbox
@@ -363,5 +365,5 @@ SANDBOX_TREE: CommandTree = _build_sandbox_tree()
 #: containing the modified vault ``CommandDef``.  Surfaced at executor's
 #: top level as the ``terok-executor vault …`` shortcut; the same
 #: ``CommandDef`` instance also reaches ``terok-executor sandbox vault …``
-#: via :data:`SANDBOX_TREE`.
+#: via [`SANDBOX_TREE`][terok_executor.credentials.vault_commands.SANDBOX_TREE].
 VAULT_COMMANDS: tuple[CommandDef, ...] = (SANDBOX_TREE.find_at(("vault",)),)

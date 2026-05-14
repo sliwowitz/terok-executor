@@ -28,6 +28,9 @@ except PackageNotFoundError:
 from terok_sandbox import ConfigScope, ConfigStack
 from terok_sandbox.doctor import CheckVerdict, DoctorCheck
 
+# -- Commands + CLI surface ----------------------------------------------------
+from ._tree import COMMANDS
+
 # -- ACP host-proxy (per-task multi-agent aggregator) -------------------------
 from .acp import (
     ACPEndpointStatus,
@@ -38,9 +41,6 @@ from .acp import (
     acp_socket_is_live,
     list_authenticated_agents,
 )
-
-# -- Commands + CLI surface ----------------------------------------------------
-from .cli import COMMANDS
 from .commands import COMMANDS as AGENT_COMMANDS, CommandDef
 
 # -- Config schema (executor-owned slice of the shared config.yml) -----------

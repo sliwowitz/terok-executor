@@ -5,9 +5,9 @@
 """CLI entry point for terok-executor.
 
 Composes executor's own commands with sandbox's full tree (via
-:data:`terok_executor.credentials.vault_commands.SANDBOX_TREE`) into a
-single [`CommandTree`][terok_sandbox.commands.CommandTree], exposed
-two ways:
+[`SANDBOX_TREE`][terok_executor.credentials.vault_commands.SANDBOX_TREE])
+into a single
+[`CommandTree`][terok_sandbox.commands.CommandTree], exposed two ways:
 
 - *Deep path* — ``terok-executor sandbox <verb>`` reaches every
   sandbox verb verbatim, with executor's overlays applied where they
@@ -26,34 +26,14 @@ from __future__ import annotations
 import argparse
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
-from terok_sandbox.commands import CommandDef, CommandTree
+from terok_sandbox.commands import CommandTree
 
-from .commands import COMMANDS as OWN_COMMANDS
-from .credentials.vault_commands import SANDBOX_TREE, VAULT_COMMANDS
+from ._tree import COMMANDS
 
 try:
     __version__ = _meta_version("terok-executor")
 except PackageNotFoundError:
     __version__ = "0.0.0"
-
-
-#: Executor's top-level command tree.  Composed of:
-#:
-#: - executor's own verbs (``run``, ``run-tool``, ``auth``, …),
-#: - a ``sandbox`` deep-path group exposing the full sandbox tree,
-#: - sandbox shortcuts (``vault``) that share ``CommandDef`` identity
-#:   with the corresponding subtree under ``sandbox``.
-COMMANDS: CommandTree = CommandTree(
-    OWN_COMMANDS
-    + (
-        CommandDef(
-            name="sandbox",
-            help="Sandbox subsystem (full deep tree — same verbs as terok-sandbox)",
-            children=SANDBOX_TREE.roots,
-        ),
-    )
-    + VAULT_COMMANDS
-)
 
 
 def main() -> None:

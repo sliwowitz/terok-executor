@@ -256,12 +256,22 @@ depends_on = [
     "terok_executor.sandbox",
 ]
 
+# Composes the full executor CommandTree (own verbs + sandbox deep
+# path + shortcuts).  Lives below cli.py so the package init can
+# re-export the tree as a public symbol — cli.py is at the top of the
+# dep graph and nothing else may import it.
+[[modules]]
+path = "terok_executor._tree"
+depends_on = [
+    "terok_executor.commands",
+    "terok_executor.credentials.vault_commands",
+]
+
 # CLI entry point — wires command registry to argparse
 [[modules]]
 path = "terok_executor.cli"
 depends_on = [
-    "terok_executor.commands",
-    "terok_executor.credentials.vault_commands",
+    "terok_executor._tree",
 ]
 
 # Agent-level container health checks
@@ -275,6 +285,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor"
 depends_on = [
+    "terok_executor._tree",
     "terok_executor.acp",
     "terok_executor.commands",
     "terok_executor.container.build",

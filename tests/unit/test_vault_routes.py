@@ -1026,3 +1026,24 @@ class TestVaultCommandsOverlay:
         deep = COMMANDS.find_at(("sandbox", "vault"))
         shortcut = COMMANDS.find_at(("vault",))
         assert deep is shortcut
+
+    def test_argparse_wires_both_paths_to_the_same_handler(self) -> None:
+        """The argparse parser must reach the same handler from both paths.
+
+        ``find_at`` proves the registry is consistent; argparse wiring
+        could still regress (e.g. someone duplicating a CommandDef
+        when constructing a parent group).  Build the actual parser
+        and confirm both ``vault status`` and ``sandbox vault status``
+        dispatch to the same handler object.
+        """
+        import argparse
+
+        from terok_executor.cli import COMMANDS
+
+        parser = argparse.ArgumentParser()
+        COMMANDS.wire(parser)
+
+        deep_args = parser.parse_args(["sandbox", "vault", "status"])
+        short_args = parser.parse_args(["vault", "status"])
+        assert deep_args._cmd is short_args._cmd
+        assert deep_args._cmd.handler is short_args._cmd.handler
