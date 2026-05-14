@@ -5,6 +5,13 @@ also the "Changelog" link in PyPI metadata.
 
 [rel]: https://github.com/terok-ai/terok-executor/releases
 
+## v0.0.148 — SELinux Rules Hint
+
+## What's Changed
+* chore(deps): branch-pin terok-sandbox for the SELinux-surfacing chain in https://github.com/terok-ai/terok-executor/pull/313
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.147...v0.0.148
+
 ## v0.0.147 — The State of the Shields
 
 ## What's Changed
