@@ -48,8 +48,8 @@ def _make_vault_db(tmp_path: Path, cred_name: str = "claude", cred_data: dict | 
 
 def _make_vault_db_with_ssh_keys(tmp_path: Path, scope: str = "myproj"):
     """Return a SandboxConfig with credential DB seeded with a key assigned to *scope*."""
-    from terok_sandbox.credentials.db import CredentialDB
-    from terok_sandbox.credentials.ssh_keypair import generate_keypair
+    from terok_sandbox.vault.ssh.keypair import generate_keypair
+    from terok_sandbox.vault.store.db import CredentialDB
 
     cfg = _make_vault_db(tmp_path)
     cfg.vault_dir.mkdir(parents=True, exist_ok=True)
@@ -662,7 +662,7 @@ class TestVaultTokenInjection:
     def test_vault_ssh_only_no_provider_creds(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected even when no provider credentials are stored."""
         from terok_sandbox import CredentialDB, SandboxConfig
-        from terok_sandbox.credentials.ssh_keypair import generate_keypair
+        from terok_sandbox.vault.ssh.keypair import generate_keypair
 
         cfg = SandboxConfig(state_dir=tmp_path, vault_dir=tmp_path / "credentials")
         cfg.db_path.parent.mkdir(parents=True, exist_ok=True)

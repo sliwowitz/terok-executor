@@ -55,6 +55,6 @@ def _stub_credential_db_passphrase() -> Iterator[None]:
 
     with (
         patch("terok_sandbox.config.SandboxConfig.open_credential_db", new=_open_method),
-        patch("terok_sandbox.credentials.db.open_credential_db", new=_open_module),
+        patch("terok_sandbox.vault.store.db.open_credential_db", new=_open_module),
     ):
         yield
