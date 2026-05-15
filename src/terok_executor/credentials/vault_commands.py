@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -226,11 +227,13 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
         # binding visible without needing to read ``systemd-creds
         # list`` manually.
         if status.passphrase_source == "systemd-creds":
-            try:
+            # Best-effort probe — a missing or hanging ``systemd-creds``
+            # binary must not break ``vault status``.  ``suppress`` is
+            # the explicit "intentional swallow" so static analysers
+            # don't flag the bare pass.
+            with suppress(Exception):
                 if systemd_creds_has_tpm2():
                     tier_line = f"{tier_line} (+TPM2)"
-            except Exception:  # noqa: BLE001 — TPM probe is best-effort
-                pass
         print(tier_line)
     if status.credentials_stored:
         print(f"Credentials: {_format_credentials(status, cfg)}")
