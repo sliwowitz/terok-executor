@@ -32,7 +32,7 @@ Homepage = "https://terok.ai/"
 Repository = "https://github.com/terok-ai/terok-executor"
 Documentation = "https://terok-ai.github.io/terok-executor/"
 Issues = "https://github.com/terok-ai/terok-executor/issues"
-Changelog = "https://github.com/terok-ai/terok-executor/releases"
+Changelog = "https://github.com/terok-ai/terok-executor/blob/master/CHANGELOG.md"
 Security = "https://github.com/terok-ai/terok-executor/security/policy"
 
 [project.scripts]
