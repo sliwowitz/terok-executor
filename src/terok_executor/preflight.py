@@ -51,6 +51,8 @@ def run_preflight(
     if not _require_podman():
         return False
 
+    _offer_git()
+
     if not _require_sandbox_services(interactive=interactive, assume_yes=assume_yes):
         all_ready = False
 
@@ -96,6 +98,23 @@ def _require_sandbox_services(*, interactive: bool, assume_yes: bool) -> bool:
     if not r.ok:
         print("      Run: terok-executor setup", file=sys.stderr)
     return r.ok
+
+
+def _offer_git() -> None:
+    """Surface a missing ``git`` binary — gate stops working but launches proceed.
+
+    A container without a gate is just as secure as one with: the gate
+    only provides the git push channel.  So this is informational, not
+    a remediation step — there's no "fix it for me" prompt because
+    installing git is the operator's call (distro-specific package
+    manager, root needed).  The consequence is named explicitly so the
+    operator can decide whether the gate matters to them.
+    """
+    r = check_git()
+    _print_step(r)
+    if not r.ok:
+        print("      Without git, the host-side git gate is disabled —")
+        print("      containers will run without the git push channel.")
 
 
 def _require_images(
@@ -174,17 +193,42 @@ def check_podman() -> CheckResult:
     return CheckResult("podman", True, "ok")
 
 
+def check_git() -> CheckResult:
+    """Report whether ``git`` is available on the host PATH.
+
+    Informational only: terok-sandbox's git gate uses the host git
+    binary to mirror upstream repositories, but a container without a
+    gate is functionally identical from a security perspective — the
+    gate exists to provide a *push channel*, not to enforce isolation.
+    A missing git therefore degrades the workflow (no in-container
+    ``git push``) but never blocks a launch.
+    """
+    if not shutil.which("git"):
+        return CheckResult("git", False, "not found on PATH — git gate disabled")
+    return CheckResult("git", True, "ok")
+
+
 def check_sandbox_services() -> CheckResult:
     """Roll vault + shield-hooks + gate into a single readiness verdict.
 
-    Treated as a unit because all three are installed by the sandbox
-    aggregator and fail the same way on a fresh host — reporting each
-    individually would just clutter the first-run summary.
+    Treated as a unit because the first two — vault and shield — are
+    installed by the sandbox aggregator and fail the same way on a
+    fresh host.  Reporting each individually would just clutter the
+    first-run summary.
+
+    The gate is special-cased: when it's missing because the host has
+    *no way to run it* (no systemd to install units, no git binary to
+    drive mirrors), the verdict reports "gate unavailable: …" as a
+    contextual note rather than a remediation item.  Operators on
+    OpenRC / Gentoo or minimal images see the consequence named
+    instead of being told to "run terok-executor setup" — which
+    wouldn't fix the underlying gap.
     """
     from terok_sandbox import (
         SandboxConfig,
         check_environment,
         get_server_status,
+        is_systemd_available,
         is_vault_running,
         is_vault_socket_active,
     )
@@ -197,11 +241,28 @@ def check_sandbox_services() -> CheckResult:
         missing.append("vault")
     if check_environment(cfg).health != "ok":
         missing.append("shield hooks")
-    if get_server_status(cfg).mode not in ("systemd", "daemon"):
-        missing.append("gate")
+
+    gate_running = get_server_status(cfg).mode in ("systemd", "daemon")
+    gate_reason: str | None = None
+    if not gate_running:
+        # Distinguish "operator hasn't installed it yet" (fixable via
+        # `terok-executor setup`) from "the host can't host one" (don't
+        # send the operator to a setup command that won't help).
+        if not shutil.which("git"):
+            gate_reason = "no git on PATH"
+        elif not is_systemd_available():
+            gate_reason = "no systemd — gate has no managed-daemon fallback yet"
+        else:
+            missing.append("gate")
 
     if missing:
         return CheckResult("sandbox services", False, f"missing: {', '.join(missing)}")
+    if gate_reason:
+        return CheckResult(
+            "sandbox services",
+            True,
+            f"shield + vault ready; gate unavailable: {gate_reason}",
+        )
     return CheckResult("sandbox services", True, "shield + vault + gate ready")
 
 

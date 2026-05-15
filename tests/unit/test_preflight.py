@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 from terok_executor.preflight import (
     CheckResult,
     check_credentials,
+    check_git,
     check_images,
     check_podman,
     check_sandbox_services,
@@ -74,10 +75,72 @@ def test_sandbox_services_lists_missing(
     """Missing items are all named in the same check's message."""
     mock_env.return_value = MagicMock(health="setup-needed")
     mock_status.return_value = MagicMock(mode=None)
-    r = check_sandbox_services()
+    with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
+        r = check_sandbox_services()
     assert r.ok is False
     for expected in ("vault", "shield", "gate"):
         assert expected in r.message
+
+
+@patch("terok_sandbox.is_systemd_available", return_value=True)
+@patch("terok_sandbox.get_server_status")
+@patch("terok_sandbox.check_environment")
+@patch("terok_sandbox.is_vault_running", return_value=True)
+@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+def test_sandbox_services_ok_without_git_marks_gate_unavailable(
+    _sock: MagicMock,
+    _run: MagicMock,
+    mock_env: MagicMock,
+    mock_status: MagicMock,
+    _systemd: MagicMock,
+) -> None:
+    """Missing git on PATH → gate listed as unavailable (no remediation needed)."""
+    mock_env.return_value = MagicMock(health="ok")
+    mock_status.return_value = MagicMock(mode="none")
+    with patch("terok_executor.preflight.shutil.which", return_value=None):
+        r = check_sandbox_services()
+    assert r.ok is True
+    assert "gate unavailable" in r.message
+    assert "no git" in r.message
+
+
+@patch("terok_sandbox.is_systemd_available", return_value=False)
+@patch("terok_sandbox.get_server_status")
+@patch("terok_sandbox.check_environment")
+@patch("terok_sandbox.is_vault_running", return_value=True)
+@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+def test_sandbox_services_ok_without_systemd_marks_gate_unavailable(
+    _sock: MagicMock,
+    _run: MagicMock,
+    mock_env: MagicMock,
+    mock_status: MagicMock,
+    _systemd: MagicMock,
+) -> None:
+    """No user systemd → gate listed as unavailable (no daemon fallback yet)."""
+    mock_env.return_value = MagicMock(health="ok")
+    mock_status.return_value = MagicMock(mode="none")
+    with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
+        r = check_sandbox_services()
+    assert r.ok is True
+    assert "gate unavailable" in r.message
+    assert "systemd" in r.message
+
+
+# ── check_git ────────────────────────────────────────────────────────
+
+
+@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git")
+def test_git_present(_which: MagicMock) -> None:
+    """git on PATH → ok."""
+    assert check_git().ok is True
+
+
+@patch("terok_executor.preflight.shutil.which", return_value=None)
+def test_git_missing_returns_consequence(_which: MagicMock) -> None:
+    """git missing → fail, message names the consequence."""
+    r = check_git()
+    assert r.ok is False
+    assert "gate disabled" in r.message
 
 
 # ── check_credentials ────────────────────────────────────────────────
