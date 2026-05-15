@@ -185,8 +185,9 @@ class TestShowConfigAndOverrides:
 
     def test_show_config_orchestrator_injected_cfg_wins(self) -> None:
         """When a higher-layer orchestrator passes ``cfg=...`` directly, it's used verbatim."""
-        from terok_executor.commands import _handle_show_config
         from terok_sandbox import SandboxConfig
+
+        from terok_executor.commands import _handle_show_config
 
         injected = SandboxConfig(services_mode="tcp", shield_audit=False)
         stdout = StringIO()
