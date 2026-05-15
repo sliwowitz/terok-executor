@@ -26,6 +26,8 @@ from terok_sandbox.commands import ArgDef, CommandDef
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from terok_sandbox import SandboxConfig
+
 
 # ── Handlers ──
 
@@ -440,6 +442,49 @@ def _handle_list() -> None:
         print(f"{name}  {state}")
 
 
+def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
+    """Print the effective `SandboxConfig` as YAML.
+
+    When invoked standalone, ``cfg`` is ``None`` and a fresh
+    [`SandboxConfig`][terok_sandbox.SandboxConfig] is constructed —
+    reading from the layered config.yml chain (or from
+    ``TEROK_CONFIG_FILE`` if set via ``--config`` / ``--raw``).
+
+    When invoked through a higher-layer orchestrator that wraps this
+    handler with a cfg-injection overlay (e.g. terok's ``terok executor
+    show-config``), ``cfg`` is supplied by the wrap and the output
+    reflects the orchestrator's effective sub-environment — diffable
+    against the standalone reading to verify the orchestrator's
+    config-equality contract.
+
+    Sensitive fields (``credentials_passphrase``) are redacted; the
+    output shape stays stable so two runs can be compared field-by-field.
+    """
+    import dataclasses
+    import sys
+
+    from ruamel.yaml import YAML
+    from terok_sandbox import SandboxConfig as _SandboxConfig
+
+    if cfg is None:
+        cfg = _SandboxConfig()
+
+    def _scalar(value: object) -> object:
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, tuple):
+            return list(value)
+        return value
+
+    data = {k: _scalar(v) for k, v in dataclasses.asdict(cfg).items()}
+    if data.get("credentials_passphrase") is not None:
+        data["credentials_passphrase"] = "<redacted>"
+
+    yaml = YAML()
+    yaml.default_flow_style = False
+    yaml.dump(data, sys.stdout)
+
+
 def _handle_stop(*, name: str) -> None:
     """Stop a running container (best-effort)."""
     from terok_sandbox import PodmanRuntime
@@ -751,6 +796,12 @@ ACP_COMMAND = CommandDef(
 
 LIST_COMMAND = CommandDef(name="list", help="List running containers", handler=_handle_list)
 
+SHOW_CONFIG_COMMAND = CommandDef(
+    name="show-config",
+    help="Print the effective SandboxConfig (diffable against higher-layer orchestrators)",
+    handler=_handle_show_config,
+)
+
 STOP_COMMAND = CommandDef(
     name="stop",
     help="Stop a running container",
@@ -839,5 +890,6 @@ COMMANDS: tuple[CommandDef, ...] = (
     UNINSTALL_COMMAND,
     LIST_COMMAND,
     STOP_COMMAND,
+    SHOW_CONFIG_COMMAND,
     ACP_COMMAND,
 )
