@@ -220,6 +220,7 @@ def _handle_run(
     timezone: str | None = None,
     yes: bool = False,
     no_preflight: bool = False,
+    cfg: SandboxConfig | None = None,
 ) -> None:
     """Run an agent in a hardened container."""
     _setup_verdict_or_exit(skip=no_preflight)
@@ -243,7 +244,7 @@ def _handle_run(
             print("Warning: --git-identity-from-host: git config user.name not set, skipping")
 
     effective_gate = gate and not no_gate
-    runner = AgentRunner(base_image=base, family=family)
+    runner = AgentRunner(base_image=base, family=family, cfg=cfg)
     resolved_shared_dir = Path(shared_dir) if shared_dir else None
     common: dict = {
         "gate": effective_gate,
@@ -300,6 +301,7 @@ def _handle_run_tool(
     timezone: str | None = None,
     yes: bool = False,
     no_preflight: bool = False,
+    cfg: SandboxConfig | None = None,
 ) -> None:
     """Run a tool in a sidecar container."""
     _setup_verdict_or_exit(skip=no_preflight)
@@ -311,7 +313,7 @@ def _handle_run_tool(
     from .container.runner import AgentRunner
 
     effective_gate = gate and not no_gate
-    runner = AgentRunner(base_image=base, family=family)
+    runner = AgentRunner(base_image=base, family=family, cfg=cfg)
     cname = runner.run_tool(
         tool,
         repo,
@@ -506,6 +508,7 @@ def _handle_setup(
     no_images: bool = False,
     base: str = "ubuntu:24.04",
     family: str | None = None,
+    cfg: SandboxConfig | None = None,
 ) -> None:
     """Bootstrap the full terok-executor stack on a fresh host.
 
@@ -521,7 +524,7 @@ def _handle_setup(
     if not no_sandbox:
         from .sandbox import ensure_sandbox_ready
 
-        ensure_sandbox_ready(root=root)
+        ensure_sandbox_ready(cfg=cfg, root=root)
 
     if not no_images:
         _build_images_with_banner(base, family)
@@ -538,6 +541,7 @@ def _handle_uninstall(
     no_sandbox: bool = False,
     keep_images: bool = False,
     base: str = "ubuntu:24.04",
+    cfg: SandboxConfig | None = None,
 ) -> None:
     """Remove everything ``terok-executor setup`` installed.
 
@@ -551,7 +555,7 @@ def _handle_uninstall(
     if not no_sandbox:
         from terok_sandbox.commands import _handle_sandbox_uninstall
 
-        _handle_sandbox_uninstall(root=root)
+        _handle_sandbox_uninstall(cfg=cfg, root=root)
 
     print()
     print("Uninstall complete.")

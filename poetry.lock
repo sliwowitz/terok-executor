@@ -3241,7 +3241,7 @@ terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/downloa
 type = "git"
 url = "https://github.com/sliwowitz/terok-sandbox.git"
 reference = "feat/gate-exec-prefix-via-module"
-resolved_reference = "31eb0dbe632236d2b8954ef5e0e4e46195d1f010"
+resolved_reference = "2974fad0c1b966940e9b8063f931a9c931d2da28"
 
 [[package]]
 name = "terok-shield"

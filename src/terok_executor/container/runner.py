@@ -64,6 +64,7 @@ class AgentRunner:
         roster: AgentRoster | None = None,
         base_image: str = "ubuntu:24.04",
         family: str | None = None,
+        cfg: SandboxConfig | None = None,
     ) -> None:
         if sandbox is not None and runtime is not None and sandbox.runtime is not runtime:
             # Split backends would mean port reservations on one runtime
@@ -79,6 +80,7 @@ class AgentRunner:
         self._sandbox: Sandbox | None = sandbox
         self._runtime: ContainerRuntime | None = runtime
         self._roster: AgentRoster | None = roster
+        self._cfg: SandboxConfig | None = cfg
 
     # ------------------------------------------------------------------
     # Properties (lazy init)
@@ -95,7 +97,7 @@ class AgentRunner:
         if self._sandbox is None:
             from terok_sandbox import Sandbox
 
-            self._sandbox = Sandbox(runtime=self._runtime)
+            self._sandbox = Sandbox(config=self._cfg, runtime=self._runtime)
         return self._sandbox
 
     @property
