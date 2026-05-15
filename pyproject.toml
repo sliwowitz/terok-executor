@@ -17,7 +17,7 @@ keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
 dependencies = [
-    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a3/terok_sandbox-0.0.124a3-py3-none-any.whl",
+    "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox.git@feat/vault-manual-daemon-fallback",
     "ruamel.yaml>=0.18",
     "Jinja2>=3.1",
     "tomli-w>=1.0",
