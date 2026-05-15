@@ -184,7 +184,12 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
 
 def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show vault status."""
-    from terok_sandbox import get_vault_status, is_vault_systemd_available, sanitize_tty
+    from terok_sandbox import (
+        get_vault_status,
+        is_vault_systemd_available,
+        sanitize_tty,
+        systemd_creds_has_tpm2,
+    )
 
     from terok_executor.paths import mounts_dir
 
@@ -213,7 +218,20 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     if status.locked:
         print("Passphrase:  (no tier resolved — run `terok vault unlock`)")
     elif status.passphrase_source is not None:
-        print(f"Passphrase:  resolved via {status.passphrase_source}")
+        tier_line = f"Passphrase:  resolved via {status.passphrase_source}"
+        # Surface the TPM2 binding when systemd-creds is the resolved
+        # tier and the host actually has a TPM2 device — operators
+        # using systemd-creds explicitly opted into the higher-end
+        # sealing mode; showing the (+TPM2) annotation makes the
+        # binding visible without needing to read ``systemd-creds
+        # list`` manually.
+        if status.passphrase_source == "systemd-creds":
+            try:
+                if systemd_creds_has_tpm2():
+                    tier_line = f"{tier_line} (+TPM2)"
+            except Exception:  # noqa: BLE001 — TPM probe is best-effort
+                pass
+        print(tier_line)
     if status.credentials_stored:
         print(f"Credentials: {_format_credentials(status, cfg)}")
     else:
