@@ -2,20 +2,49 @@
 requires = ["poetry-core>=1.9.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
 
-[tool.poetry]
+[project]
 name = "terok-executor"
-version = "0.0.149a1"
 description = "Single-agent task runner for hardened Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
-authors = ["Jiri Vyskocil <jiri@vyskocil.com>"]
+authors = [
+    {name = "Jiri Vyskocil", email = "jiri@vyskocil.com"},
+]
+maintainers = [
+    {name = "Jiri Vyskocil", email = "jiri@vyskocil.com"},
+]
 keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
+requires-python = ">=3.12,<3.15"
+dynamic = ["version", "classifiers"]
+dependencies = [
+    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a1/terok_sandbox-0.0.124a1-py3-none-any.whl",
+    "ruamel.yaml>=0.18",
+    "Jinja2>=3.1",
+    "tomli-w>=1.0",
+    "prompt-toolkit>=3.0",
+    "pydantic>=2.9",
+    "rich>=13.0",
+    "agent-client-protocol>=0.7",
+]
+
+[project.urls]
+Homepage = "https://terok.ai/"
+Repository = "https://github.com/terok-ai/terok-executor"
+Documentation = "https://terok-ai.github.io/terok-executor/"
+Issues = "https://github.com/terok-ai/terok-executor/issues"
+Changelog = "https://github.com/terok-ai/terok-executor/blob/master/CHANGELOG.md"
+Security = "https://github.com/terok-ai/terok-executor/security/policy"
+
+[project.scripts]
+terok-executor = "terok_executor.cli:main"
+
+[tool.poetry]
+version = "0.0.149a1"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python",
     "Topic :: Software Development :: Quality Assurance",
@@ -25,21 +54,6 @@ classifiers = [
 packages = [
   { include = "terok_executor", from = "src" },
 ]
-maintainers = ["Jiri Vyskocil <jiri@vyskocil.com>"]
-homepage = "https://terok.ai/"
-repository = "https://github.com/terok-ai/terok-executor"
-documentation = "https://terok-ai.github.io/terok-executor/"
-
-[tool.poetry.dependencies]
-python = ">=3.12,<3.15"
-terok-sandbox = {url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a1/terok_sandbox-0.0.124a1-py3-none-any.whl"}
-"ruamel.yaml" = ">=0.18"
-Jinja2 = ">=3.1"
-tomli-w = ">=1.0"
-prompt-toolkit = ">=3.0"
-pydantic = ">=2.9"
-rich = ">=13.0"
-agent-client-protocol = ">=0.7"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=4.0"
@@ -65,14 +79,6 @@ mkdocs-gen-files = ">=0.5"
 mkdocs-literate-nav = ">=0.6"
 mkdocs-section-index = ">=0.3"
 mkdocs-terok = "^0.6"
-
-[tool.poetry.scripts]
-terok-executor = "terok_executor.cli:main"
-
-[tool.poetry.urls]
-Issues = "https://github.com/terok-ai/terok-executor/issues"
-Changelog = "https://github.com/terok-ai/terok-executor/releases"
-Security = "https://github.com/terok-ai/terok-executor/security/policy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -138,7 +144,7 @@ no_implicit_optional = true
 strict_equality = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
-pretty = false
+pretty = true
 show_error_codes = true
 
 [tool.poetry-dynamic-versioning]
