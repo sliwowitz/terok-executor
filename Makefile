@@ -63,7 +63,7 @@ deadcode:
 
 # Static type check with mypy.
 typecheck:
-	poetry run mypy src/terok_executor/
+	poetry run mypy src/terok_executor/ $(MYPYFLAGS)
 
 # Check REUSE (SPDX license/copyright) compliance
 reuse:
