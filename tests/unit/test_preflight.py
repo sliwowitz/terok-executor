@@ -62,6 +62,7 @@ def test_sandbox_services_ok(
     assert check_sandbox_services().ok is True
 
 
+@patch("terok_sandbox.is_systemd_available", return_value=True)
 @patch("terok_sandbox.get_server_status")
 @patch("terok_sandbox.check_environment")
 @patch("terok_sandbox.is_vault_running", return_value=False)
@@ -71,8 +72,16 @@ def test_sandbox_services_lists_missing(
     _run: MagicMock,
     mock_env: MagicMock,
     mock_status: MagicMock,
+    _systemd: MagicMock,
 ) -> None:
-    """Missing items are all named in the same check's message."""
+    """Missing items are all named in the same check's message.
+
+    Pins ``is_systemd_available`` so the gate-unavailable branching
+    in ``check_sandbox_services`` doesn't depend on whether the host
+    running the tests has a user systemd session — without this mock
+    the gate would be reclassified as "unavailable: no systemd" on a
+    non-systemd runner and drop out of the missing list.
+    """
     mock_env.return_value = MagicMock(health="setup-needed")
     mock_status.return_value = MagicMock(mode=None)
     with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
