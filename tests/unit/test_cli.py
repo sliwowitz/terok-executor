@@ -143,6 +143,61 @@ class TestSharedDirArgs:
         assert "shared_mount" not in call_kwargs.kwargs
 
 
+class TestShowConfigAndOverrides:
+    """``show-config`` verb + top-level ``--config`` / ``--raw`` overrides."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_section_caches(self) -> None:
+        """Reset the per-process lru_caches so TEROK_CONFIG_FILE changes take effect.
+
+        ``_credentials_section`` / ``_shield_section`` are ``@lru_cache``-decorated
+        in ``terok_sandbox.config`` — they hold whichever section was read first,
+        ignoring later env changes.  Same pattern existing sandbox tests use
+        (``test_credential_encryption.py``).
+        """
+        from terok_sandbox import config as _cfg
+        from terok_sandbox.paths import _config_section_cache
+
+        _config_section_cache.clear()
+        _cfg._credentials_section.cache_clear()
+        _cfg._shield_section.cache_clear()
+
+    def test_show_config_emits_yaml_with_redacted_passphrase(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.yml"
+        cfg_path.write_text(
+            "services:\n  mode: tcp\ncredentials:\n  passphrase: secret-pw\n",
+            encoding="utf-8",
+        )
+        out, _, rc = _run_cli("--config", str(cfg_path), "show-config")
+        assert rc == 0
+        assert "services_mode: tcp" in out
+        assert "credentials_passphrase: <redacted>" in out
+        assert "secret-pw" not in out
+
+    def test_raw_flag_bypasses_config_file(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.yml"
+        cfg_path.write_text("services:\n  mode: tcp\n", encoding="utf-8")
+        with patch.dict("os.environ", {"TEROK_CONFIG_FILE": str(cfg_path)}):
+            out, _, rc = _run_cli("--raw", "show-config")
+        assert rc == 0
+        # --raw points TEROK_CONFIG_FILE at /dev/null → sandbox defaults
+        assert "services_mode: socket" in out
+
+    def test_show_config_orchestrator_injected_cfg_wins(self) -> None:
+        """When a higher-layer orchestrator passes ``cfg=...`` directly, it's used verbatim."""
+        from terok_sandbox import SandboxConfig
+
+        from terok_executor.commands import _handle_show_config
+
+        injected = SandboxConfig(services_mode="tcp", shield_audit=False)
+        stdout = StringIO()
+        with patch("sys.stdout", stdout):
+            _handle_show_config(cfg=injected)
+        out = stdout.getvalue()
+        assert "services_mode: tcp" in out
+        assert "shield_audit: false" in out
+
+
 class TestResolveHostGitIdentity:
     """Verify _resolve_host_git_identity reads from host git config."""
 

@@ -95,7 +95,17 @@ systemd service lifecycle.
 | `run-tool` | Run a sidecar tool (CodeRabbit, SonarCloud) |
 | `list` | List running containers |
 | `stop` | Stop a running container |
+| `show-config` | Print the effective `SandboxConfig` as YAML (diffable across orchestrators) |
 | `vault` | Vault management (start, stop, status, install, routes) |
+
+### Config override
+
+Two top-level flags (precede the subcommand, like `docker --config`):
+
+- `--config PATH` — read this `config.yml` instead of the layered system/user paths (sets `TEROK_CONFIG_FILE` for the invocation).
+- `--raw` — ignore any `config.yml`; use sandbox/executor dataclass defaults only.
+
+Higher-layer orchestrators (such as `terok`) typically construct a `SandboxConfig` from their own resolution chain and pass it into the executor as a library; the public expectation is that, for the fields they own in `config.yml`, the resulting sub-environment matches what standalone `terok-executor` would produce against the same file.  Use `show-config` on both sides to verify.
 
 ## Development
 
