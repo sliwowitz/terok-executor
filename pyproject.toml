@@ -17,7 +17,7 @@ keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
 dependencies = [
-    "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox.git@feat/vault-manual-daemon-fallback",
+    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a4/terok_sandbox-0.0.124a4-py3-none-any.whl",
     "ruamel.yaml>=0.18",
     "Jinja2>=3.1",
     "tomli-w>=1.0",
@@ -39,7 +39,7 @@ Security = "https://github.com/terok-ai/terok-executor/security/policy"
 terok-executor = "terok_executor.cli:main"
 
 [tool.poetry]
-version = "0.0.149a3"
+version = "0.0.149a4"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
