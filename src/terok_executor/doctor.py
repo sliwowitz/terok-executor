@@ -296,7 +296,11 @@ def _make_base_url_checks(roster: AgentRoster, token_broker_port: int | None) ->
                 """Check if base URL points to the active vault endpoint."""
                 val = stdout.strip()
                 if not val:
-                    return CheckVerdict("warn", f"{env_var}: not set — vault bypass possible")
+                    # Just "not set" — the original "vault bypass possible"
+                    # was misleading: an agent can override the env var
+                    # any time, so this isn't a bypass *signal*; it just
+                    # means the agent doesn't know where the vault lives.
+                    return CheckVerdict("warn", f"{env_var}: not set")
                 if urlparse(val).netloc == host:
                     return CheckVerdict("ok", f"{env_var}: routed through {mode} ({pname})")
                 return CheckVerdict(

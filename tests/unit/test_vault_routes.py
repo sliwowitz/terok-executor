@@ -423,6 +423,92 @@ class TestVaultCommandHandlers:
         assert "Locked:      no" in out
         assert "resolved via systemd-creds" in out
 
+    @patch("terok_sandbox.systemd_creds_has_tpm2", return_value=True)
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_annotates_systemd_creds_with_tpm2_suffix(
+        self, mock_status, _sd, _scan, _tpm2, capsys
+    ) -> None:
+        """``systemd-creds`` tier + a TPM2 device → ``(+TPM2)`` suffix on the Passphrase line."""
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "resolved via systemd-creds (+TPM2)" in out
+
+    @patch("terok_sandbox.systemd_creds_has_tpm2", return_value=False)
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_omits_tpm2_suffix_when_unavailable(
+        self, mock_status, _sd, _scan, _tpm2, capsys
+    ) -> None:
+        """``systemd-creds`` tier + no TPM2 → bare ``resolved via systemd-creds`` line."""
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "resolved via systemd-creds" in out
+        assert "(+TPM2)" not in out
+
+    @patch(
+        "terok_sandbox.systemd_creds_has_tpm2",
+        side_effect=RuntimeError("systemd-creds binary missing"),
+    )
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_swallows_tpm2_probe_failure(
+        self, mock_status, _sd, _scan, _tpm2, capsys
+    ) -> None:
+        """A raised TPM2 probe must not break ``vault status`` — bare line, no exception."""
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "resolved via systemd-creds" in out
+        assert "(+TPM2)" not in out
+
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
     @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
     @patch("terok_sandbox.get_vault_status")
