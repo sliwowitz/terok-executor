@@ -857,13 +857,8 @@ def _normalize_base_image(base_image: str | None) -> str:
     return (base_image or "").strip() or DEFAULT_BASE_IMAGE
 
 
-# Permissive OCI-ish reference: lowercase alphanumerics, dots, dashes,
-# underscores, slashes, and optionally ``:tag`` and ``@digest``.  We
-# don't ship a full OCI parser — the goal here is to reject any
-# whitespace or control characters that would let a newline-bearing
-# value inject extra Dockerfile directives once interpolated into
-# ``ARG BASE_IMAGE=...``.  The validator runs after the existing
-# detect_family lookup, so well-known prefixes already pass.
+# Permissive OCI-ish reference shape; the WHY (Dockerfile-injection
+# avoidance) lives in ``_validate_base_image``'s docstring.
 _BASE_IMAGE_RE = re.compile(
     r"""^
         [A-Za-z0-9]                                 # leading alnum
