@@ -39,7 +39,7 @@ Security = "https://github.com/terok-ai/terok-executor/security/policy"
 terok-executor = "terok_executor.cli:main"
 
 [tool.poetry]
-version = "0.0.149a7"
+version = "0.0.149a8"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
