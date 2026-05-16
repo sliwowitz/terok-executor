@@ -137,7 +137,16 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
                 _is_injected_credentials_file(path) or _is_injected_codex_auth_file(path)
             ):
                 leaked.append((name, path))
-        except (OSError, TypeError):
+        except (OSError, TypeError) as exc:
+            # Silently skipping turns a real leak into a no-result: the
+            # operator would believe the scan was clean.  Surface a
+            # warning so it's obvious which provider was not checked
+            # and why; the loop continues so other providers still get
+            # scanned.
+            print(
+                f"Warning [vault]: credential leak scan skipped {name!r}: {exc}",
+                file=sys.stderr,
+            )
             continue
     return leaked
 
