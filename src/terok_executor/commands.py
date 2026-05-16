@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 
 from terok_sandbox.commands import ArgDef, CommandDef
 
+from .container.build import DEFAULT_BASE_IMAGE
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -215,7 +217,7 @@ def _handle_run(
     git_identity_from_host: bool = False,
     shared_dir: str | None = None,
     shared_mount: str = "/shared",
-    base: str = "ubuntu:24.04",
+    base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
     timezone: str | None = None,
     yes: bool = False,
@@ -296,7 +298,7 @@ def _handle_run_tool(
     name: str | None = None,
     timeout: int = 600,
     tool_args: list[str] | None = None,
-    base: str = "ubuntu:24.04",
+    base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
     timezone: str | None = None,
     yes: bool = False,
@@ -334,7 +336,6 @@ def _handle_auth(
     base_image: str | None = None,
 ) -> None:
     """Run auth flow for an agent."""
-    from .container.build import DEFAULT_BASE_IMAGE
     from .credentials.auth import AUTH_PROVIDERS, authenticate, store_api_key
 
     if api_key is not None:
@@ -398,7 +399,7 @@ def _handle_agents(*, show_all: bool = False) -> None:
 
 def _handle_build(
     *,
-    base: str = "ubuntu:24.04",
+    base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
     agents: str = "all",
     rebuild: bool = False,
@@ -506,7 +507,7 @@ def _handle_setup(
     root: bool = False,
     no_sandbox: bool = False,
     no_images: bool = False,
-    base: str = "ubuntu:24.04",
+    base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
     cfg: SandboxConfig | None = None,
 ) -> None:
@@ -540,7 +541,7 @@ def _handle_uninstall(
     root: bool = False,
     no_sandbox: bool = False,
     keep_images: bool = False,
-    base: str = "ubuntu:24.04",
+    base: str = DEFAULT_BASE_IMAGE,
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Remove everything ``terok-executor setup`` installed.
@@ -658,7 +659,11 @@ RUN_COMMAND = CommandDef(
             default="/shared",
             help="Container mount point for shared dir (default: /shared)",
         ),
-        ArgDef(name="--base", default="ubuntu:24.04", help="Base OS image (default: ubuntu:24.04)"),
+        ArgDef(
+            name="--base",
+            default=DEFAULT_BASE_IMAGE,
+            help=f"Base OS image (default: {DEFAULT_BASE_IMAGE})",
+        ),
         ArgDef(
             name="--family",
             default=None,
@@ -700,7 +705,11 @@ RUN_TOOL_COMMAND = CommandDef(
         ArgDef(name="--name", help="Container name override"),
         ArgDef(name="--timeout", type=int, default=600, help="Timeout in seconds (default: 600)"),
         ArgDef(name="tool_args", nargs="*", help="Extra args passed to the tool (after --)"),
-        ArgDef(name="--base", default="ubuntu:24.04", help="Base OS image (default: ubuntu:24.04)"),
+        ArgDef(
+            name="--base",
+            default=DEFAULT_BASE_IMAGE,
+            help=f"Base OS image (default: {DEFAULT_BASE_IMAGE})",
+        ),
         ArgDef(
             name="--family",
             default=None,
@@ -738,7 +747,7 @@ AUTH_COMMAND = CommandDef(
         ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
         ArgDef(
             name="--base-image",
-            help="Override the L1 base image (default: ubuntu:24.04 — set per-host once F44 ships)",
+            help=f"Override the L1 base image (default: {DEFAULT_BASE_IMAGE})",
         ),
     ),
 )
@@ -757,7 +766,11 @@ BUILD_COMMAND = CommandDef(
     help="Build L0+L1 container images",
     handler=_handle_build,
     args=(
-        ArgDef(name="--base", default="ubuntu:24.04", help="Base OS image (default: ubuntu:24.04)"),
+        ArgDef(
+            name="--base",
+            default=DEFAULT_BASE_IMAGE,
+            help=f"Base OS image (default: {DEFAULT_BASE_IMAGE})",
+        ),
         ArgDef(
             name="--family",
             default=None,
@@ -842,8 +855,8 @@ SETUP_COMMAND = CommandDef(
         ),
         ArgDef(
             name="--base",
-            default="ubuntu:24.04",
-            help="Base OS image to build L0+L1 on top of (default: ubuntu:24.04)",
+            default=DEFAULT_BASE_IMAGE,
+            help=f"Base OS image to build L0+L1 on top of (default: {DEFAULT_BASE_IMAGE})",
         ),
         ArgDef(
             name="--family",
@@ -877,8 +890,8 @@ UNINSTALL_COMMAND = CommandDef(
         ),
         ArgDef(
             name="--base",
-            default="ubuntu:24.04",
-            help="Base OS image whose L0+L1 cache should be removed (default: ubuntu:24.04)",
+            default=DEFAULT_BASE_IMAGE,
+            help=f"Base OS image whose L0+L1 cache should be removed (default: {DEFAULT_BASE_IMAGE})",
         ),
     ),
 )

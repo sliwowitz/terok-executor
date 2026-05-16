@@ -44,10 +44,10 @@ class TestImageNaming:
         assert _base_tag("ubuntu:24.04") == "ubuntu-24.04"
 
     def test_empty_falls_back(self) -> None:
-        assert _base_tag("") == "ubuntu-24.04"
+        assert _base_tag("") == "fedora-44"
 
     def test_whitespace_falls_back(self) -> None:
-        assert _base_tag("   ") == "ubuntu-24.04"
+        assert _base_tag("   ") == "fedora-44"
 
     def test_nvidia_cuda(self) -> None:
         tag = _base_tag("nvidia/cuda:12.4.1-devel-ubuntu24.04")
@@ -148,10 +148,10 @@ class TestNormalization:
         assert _normalize_base_image("  ubuntu:24.04  ") == "ubuntu:24.04"
 
     def test_empty_to_default(self) -> None:
-        assert _normalize_base_image("") == "ubuntu:24.04"
+        assert _normalize_base_image("") == "fedora:44"
 
     def test_none_to_default(self) -> None:
-        assert _normalize_base_image(None) == "ubuntu:24.04"
+        assert _normalize_base_image(None) == "fedora:44"
 
     def test_passthrough(self) -> None:
         assert _normalize_base_image("nvidia/cuda:12.4") == "nvidia/cuda:12.4"
@@ -808,8 +808,13 @@ class TestDefaultAliasTagging:
     def test_default_build_omits_alias(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 
-        from terok_executor.container.build import build_base_images
+        from terok_executor.container.build import (
+            DEFAULT_BASE_IMAGE,
+            build_base_images,
+            l1_image_tag,
+        )
 
+        default_alias = l1_image_tag(DEFAULT_BASE_IMAGE)
         build_dir = tmp_path / "ctx"
         with (
             patch("terok_executor.container.build._check_podman"),
@@ -818,14 +823,21 @@ class TestDefaultAliasTagging:
         ):
             build_base_images(build_dir=build_dir)
         l1_cmd = mock_run.call_args_list[1][0][0]
-        # No -t terok-l1-cli:ubuntu-24.04 (the unsuffixed alias) on the L1 build
-        assert "terok-l1-cli:ubuntu-24.04" not in l1_cmd
+        # No -t for the unsuffixed default alias on the L1 build.  Compute
+        # the alias from DEFAULT_BASE_IMAGE so this test stays correct
+        # across base-image bumps without churning the assertion.
+        assert default_alias not in l1_cmd
 
     def test_tag_as_default_includes_alias(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 
-        from terok_executor.container.build import build_base_images
+        from terok_executor.container.build import (
+            DEFAULT_BASE_IMAGE,
+            build_base_images,
+            l1_image_tag,
+        )
 
+        default_alias = l1_image_tag(DEFAULT_BASE_IMAGE)
         build_dir = tmp_path / "ctx"
         with (
             patch("terok_executor.container.build._check_podman"),
@@ -834,8 +846,8 @@ class TestDefaultAliasTagging:
         ):
             build_base_images(build_dir=build_dir, tag_as_default=True)
         l1_cmd = mock_run.call_args_list[1][0][0]
-        # Both the suffixed tag AND the unsuffixed alias appear as -t targets
-        assert "terok-l1-cli:ubuntu-24.04" in l1_cmd
+        # Both the suffixed tag AND the unsuffixed default alias appear as -t targets.
+        assert default_alias in l1_cmd
 
 
 class TestImageAgents:
@@ -1135,8 +1147,8 @@ class TestDetectFamily:
             detect_family("ubuntu:24.04", override="alpine")
 
     def test_blank_falls_back_to_default(self) -> None:
-        # _normalize_base_image turns blank into ubuntu:24.04 → deb.
-        assert detect_family("") == "deb"
+        # _normalize_base_image turns blank into fedora:44 → rpm.
+        assert detect_family("") == "rpm"
 
 
 class TestRenderFamilyAware:

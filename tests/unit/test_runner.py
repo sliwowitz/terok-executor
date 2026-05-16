@@ -53,7 +53,7 @@ class TestAgentRunner:
 
     def test_default_construction(self) -> None:
         runner = AgentRunner()
-        assert runner._base_image == "ubuntu:24.04"
+        assert runner._base_image == "fedora:44"
 
     def test_custom_base_image(self) -> None:
         runner = AgentRunner(base_image="nvidia/cuda:12.4")
