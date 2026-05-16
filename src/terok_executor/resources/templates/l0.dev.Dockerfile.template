@@ -38,12 +38,6 @@ RUN set -eux; \
       if getent group "$uid_owner" >/dev/null; then groupmod -n dev "$uid_owner" || true; fi; \
       usermod -l dev "$uid_owner"; \
       usermod -d /home/dev -m dev; \
-      # usermod -l only updates /etc/passwd.  On bases whose UID-1000 user \
-      # ships no /etc/shadow entry (e.g. quay.io/podman/stable, fedora:43), \
-      # pam_unix later fails getspnam("dev") and breaks sudo with a confusing \
-      # "Authentication service cannot retrieve authentication info" error. \
-      # Force a locked shadow row so the account exists for PAM to look up. \
-      usermod -p '!' dev; \
       # usermod -l / groupmod -n don't touch /etc/sub{u,g}id; rewrite \
       # those entries so pre-configured rootless ranges (e.g. the podman \
       # image's `podman:100000:65536`) keep working under the new name. \
@@ -61,7 +55,8 @@ RUN set -eux; \
     echo 'dev ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/dev; \
     chmod 0440 /etc/sudoers.d/dev; \
     visudo -cf /etc/sudoers.d/dev; \
-    mkdir -p /workspace /home/dev/.ssh; \
+{% if family == "rpm" %}    printf '%s\n' '#%PAM-1.0' 'auth [success=1 default=ignore] pam_succeed_if.so user = dev' 'auth include system-auth' 'account [success=1 default=ignore] pam_succeed_if.so user = dev' 'account include system-auth' 'password include system-auth' 'session include system-auth' > /etc/pam.d/sudo; \
+{% endif %}    mkdir -p /workspace /home/dev/.ssh; \
     chown -R dev:dev /home/dev /workspace; \
     chmod 700 /home/dev/.ssh; \
     chmod 0777 /workspace

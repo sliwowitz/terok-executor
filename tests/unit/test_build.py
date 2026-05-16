@@ -481,14 +481,25 @@ class TestTemplateRendering:
         content = render_l0("nvidia/cuda:12.4.1-devel-ubuntu24.04")
         assert "FROM" in content
 
-    def test_l0_forces_shadow_entry_after_rename(self) -> None:
-        # Bases whose UID-1000 user has no /etc/shadow row (quay.io/podman/stable,
-        # fedora:43) silently produce a renamed dev user that pam_unix can't look
-        # up — sudo then fails with "PAM account management error: Authentication
-        # service cannot retrieve authentication info".  ``usermod -p '!' dev``
-        # writes a locked shadow row regardless of what the base shipped.
-        content = render_l0()
-        assert "usermod -p '!' dev" in content
+    def test_l0_rpm_overrides_sudo_pam_stack(self) -> None:
+        # Fedora ships /etc/shadow root:root mode 0000, relying on
+        # CAP_DAC_OVERRIDE for every read.  Inside rootless podman, the kernel
+        # doesn't reliably grant that cap to setuid-root binaries, so
+        # pam_unix's helper (unix_chkpwd) returns AUTHINFO_UNAVAIL and sudo
+        # refuses even with NOPASSWD.  Override sudo's PAM file with a stack
+        # that skips the auth/account checks for `dev` only (via
+        # pam_succeed_if + success=1), leaving the rest of the stack intact
+        # for root and any other caller.
+        rpm = render_l0("registry.fedoraproject.org/fedora:43", family="rpm")
+        assert "[success=1 default=ignore] pam_succeed_if.so user = dev" in rpm
+        assert "> /etc/pam.d/sudo" in rpm
+
+    def test_l0_deb_does_not_override_sudo_pam(self) -> None:
+        # Debian-family bases use a shadow group and pam_unix works fine; the
+        # override is rpm-only.
+        deb = render_l0("ubuntu:24.04", family="deb")
+        assert "pam_succeed_if.so" not in deb
+        assert "/etc/pam.d/sudo" not in deb
 
     def test_l0_validates_sudoers(self) -> None:
         # ``visudo -cf`` fails the build on a malformed sudoers drop-in, which
