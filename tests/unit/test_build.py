@@ -632,14 +632,29 @@ class TestTemplateRendering:
         assert "systemctl enable sshd.socket" in content
 
     def test_l0g_binds_sshd_to_vsock_only(self) -> None:
-        """The systemd drop-in clears TCP listen and binds vsock::22."""
+        """The systemd drop-in clears TCP listen *and* binds vsock::22.
+
+        Both the empty ``ListenStream=`` (which clears the inherited TCP
+        listener) and the vsock re-bind must appear in the rendered
+        printf block, in that order — a missing reset would silently
+        leave the inherited TCP socket open.
+        """
         content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
-        # Empty ListenStream= clears the inherited TCP listener;
-        # the second line re-binds onto vsock.  Both are required for
-        # vsock-only behaviour — TCP would still be open without the clear.
-        assert "ListenStream=\\nListenStream=vsock::22" in content.replace(" ", "").replace(
-            "\n", "\\n"
-        ) or ("ListenStream=" in content and "ListenStream=vsock::22" in content)
+        # Find the printf block that emits the unit override and assert
+        # both directives are present *and* the reset precedes the bind.
+        # ``'ListenStream='`` (empty value) is the wipe; ``'ListenStream=vsock::22'``
+        # is the rebind.  The single-quoted printf args are emitted on
+        # successive lines, so a substring search for the wipe line is
+        # the test — it cannot match the rebind line by accident because
+        # ``'ListenStream=' \\`` carries the trailing backslash separator.
+        wipe = "'ListenStream=' \\"
+        rebind = "'ListenStream=vsock::22' \\"
+        assert wipe in content, "missing empty ListenStream= wipe — TCP would stay open"
+        assert rebind in content, "missing vsock::22 ListenStream re-bind"
+        assert content.index(wipe) < content.index(rebind), (
+            "ListenStream= wipe must precede the vsock::22 rebind for the override"
+            " to take effect"
+        )
 
     def test_l0g_hardens_sshd(self) -> None:
         """sshd drop-in turns off everything but pubkey for the dev user."""
