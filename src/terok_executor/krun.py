@@ -12,10 +12,11 @@ Two responsibilities, both intentionally outside terok:
   view rebuilt per process.
 
 - [`make_krun_runtime`][terok_executor.krun.make_krun_runtime] — one-shot
-  constructor for a production ``terok_sandbox.KrunRuntime`` backed by
-  the vsock-SSH transport, with the keypair already wired in.  terok
-  flips its runtime selector to ``krun`` and calls this; everything
-  else is invisible.
+  constructor for a production
+  [`KrunRuntime`][terok_sandbox.KrunRuntime] backed by the vsock-SSH
+  transport, with the keypair already wired in.  terok flips its
+  runtime selector to ``krun`` and calls this; everything else is
+  invisible.
 
 Living in executor (rather than terok) keeps the rule honest: anything
 that owns ``build_l0g_image`` also owns the trust material that makes
@@ -82,9 +83,10 @@ def ensure_l0g_host_keypair(
 
     The vault is the system of record: the keypair lives in the sandbox
     credential DB under the ``%host`` infrastructure scope.  This
-    helper opens the DB, calls ``terok_sandbox.ensure_infra_keypair``
-    (which generates the key on first call and reloads it thereafter),
-    and writes the OpenSSH-PEM private + the public-key line into
+    helper opens the DB, calls
+    [`ensure_infra_keypair`][terok_sandbox.ensure_infra_keypair] (which
+    generates the key on first call and reloads it thereafter), and
+    writes the OpenSSH-PEM private + the public-key line into
     *runtime_dir* (default:
     [`namespace_runtime_dir()`][terok_sandbox.namespace_runtime_dir]).
 
@@ -133,12 +135,12 @@ def ensure_l0g_host_keypair(
 
 
 def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
-    """Construct a production ``terok_sandbox.KrunRuntime`` in one call.
+    """Construct a production [`KrunRuntime`][terok_sandbox.KrunRuntime] in one call.
 
     Wires together the three production pieces — the vault-backed host
     keypair, the vsock-SSH transport, and a fresh
-    ``terok_sandbox.PodmanRuntime`` for lifecycle — so the
-    orchestrator's runtime selector reduces to a single call:
+    [`PodmanRuntime`][terok_sandbox.PodmanRuntime] for lifecycle —
+    so the orchestrator's runtime selector reduces to a single call:
     ``_runtime = make_krun_runtime(cfg=...)``.  The experimental-flag
     gate stays on the orchestrator side (this factory is reachable
     only when the gate is open).
