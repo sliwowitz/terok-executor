@@ -17,13 +17,16 @@ from terok_executor.container.build import (
     _normalize_base_image,
     _split_image_ref,
     build_base_images,
+    build_l0g_image,
     build_sidecar_image,
     detect_family,
     l0_image_tag,
+    l0g_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
     prepare_build_context,
     render_l0,
+    render_l0g,
     render_l1,
     render_l1_sidecar,
     stage_help_fragments,
@@ -600,6 +603,83 @@ class TestTemplateRendering:
         content = render_l1_sidecar("terok-l0:test", family="deb", tool_name="nonexistent")
         assert "FROM" in content
         assert "coderabbit" not in content.lower()
+
+    def test_l0g_is_valid_dockerfile(self) -> None:
+        """L0G renders a syntactically plausible Dockerfile."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert content.startswith("# syntax=docker")
+        assert "FROM" in content
+        assert 'CMD ["/sbin/init"]' in content
+
+    def test_l0g_deb_uses_apt_and_ssh_socket(self) -> None:
+        """On deb, install via apt and target the `ssh.socket` unit name."""
+        content = render_l0g("ubuntu:24.04", family="deb", host_pubkey="ssh-ed25519 AAAA test")
+        assert "apt-get install" in content
+        assert "openssh-server" in content
+        assert "/etc/systemd/system/ssh.socket.d/" in content
+        assert "systemctl enable ssh.socket" in content
+
+    def test_l0g_rpm_uses_dnf_and_sshd_socket(self) -> None:
+        """On rpm, install via dnf and target the `sshd.socket` unit name."""
+        content = render_l0g(
+            "registry.fedoraproject.org/fedora:44",
+            family="rpm",
+            host_pubkey="ssh-ed25519 AAAA test",
+        )
+        assert "dnf install" in content
+        assert "openssh-server" in content
+        assert "/etc/systemd/system/sshd.socket.d/" in content
+        assert "systemctl enable sshd.socket" in content
+
+    def test_l0g_binds_sshd_to_vsock_only(self) -> None:
+        """The systemd drop-in clears TCP listen and binds vsock::22."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        # Empty ListenStream= clears the inherited TCP listener;
+        # the second line re-binds onto vsock.  Both are required for
+        # vsock-only behaviour — TCP would still be open without the clear.
+        assert "ListenStream=\\nListenStream=vsock::22" in content.replace(" ", "").replace(
+            "\n", "\\n"
+        ) or ("ListenStream=" in content and "ListenStream=vsock::22" in content)
+
+    def test_l0g_hardens_sshd(self) -> None:
+        """sshd drop-in turns off everything but pubkey for the dev user."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        for directive in (
+            "PermitRootLogin no",
+            "PasswordAuthentication no",
+            "PermitEmptyPasswords no",
+            "PubkeyAuthentication yes",
+            "AllowUsers dev",
+            "AllowAgentForwarding no",
+            "AllowTcpForwarding no",
+            "X11Forwarding no",
+            "AuthorizedKeysFile /etc/ssh/authorized_keys.d/terok",
+        ):
+            assert directive in content, f"missing hardening directive: {directive!r}"
+
+    def test_l0g_bakes_host_pubkey_at_build_time(self) -> None:
+        """The host pubkey flows into the Dockerfile via ARG + a `printf` write."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert "ARG KRUN_HOST_PUBKEY" in content
+        assert "/etc/ssh/authorized_keys.d/terok" in content
+
+    def test_l0g_image_tag_naming(self) -> None:
+        """`l0g_image_tag` keeps the same base-tag scheme as L0/L1."""
+        assert l0g_image_tag("ubuntu:24.04") == "terok-l0g:ubuntu-24.04"
+        # The same _base_tag helper L0/L1 use — registry prefixes are
+        # preserved verbatim so two bases with identical leaf names but
+        # different registries don't collide.
+        assert l0g_image_tag("fedora:44") == "terok-l0g:fedora-44"
+
+    def test_build_l0g_rejects_empty_pubkey(self) -> None:
+        """An empty pubkey would build a silently-useless image — refuse it."""
+        with pytest.raises(BuildError, match="non-empty"):
+            build_l0g_image("ubuntu:24.04", host_pubkey="")
+
+    def test_build_l0g_rejects_whitespace_pubkey(self) -> None:
+        """Whitespace-only pubkey is treated as empty (would write a blank line)."""
+        with pytest.raises(BuildError, match="non-empty"):
+            build_l0g_image("ubuntu:24.04", host_pubkey="   \n\t")
 
 
 # ---------------------------------------------------------------------------

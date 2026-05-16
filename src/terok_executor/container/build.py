@@ -504,6 +504,42 @@ def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None
     )
 
 
+# Map of package family → systemd unit name for the sshd socket.  Used
+# only by the L0G (krun guest) template; the regular L0 doesn't run
+# sshd as a system service.
+_FAMILY_SSH_SOCKET_NAME: dict[str, str] = {"deb": "ssh.socket", "rpm": "sshd.socket"}
+
+
+def render_l0g(
+    base_image: str = DEFAULT_BASE_IMAGE,
+    *,
+    family: str | None = None,
+    host_pubkey: str = "",
+) -> str:
+    """Render the L0G (krun guest) Dockerfile.
+
+    L0G is the base image for terok krun microVM guests — parallel to
+    L0 but swapped for an in-guest workload: socket-activated sshd
+    bound to AF_VSOCK with *host_pubkey* baked into authorized_keys.
+
+    *host_pubkey* must be a single OpenSSH public-key line (``"ssh-…
+    …"``); the wrapper [`build_l0g_image`][terok_executor.container.build.build_l0g_image]
+    refuses empty values so silently-useless images never reach the
+    registry.  Rotation = rebuild (no in-guest mutation path).
+    """
+    base_image = _normalize_base_image(base_image)
+    fam = detect_family(base_image, override=family)
+    return _render_template(
+        "l0g.guest.Dockerfile.template",
+        {
+            "BASE_IMAGE": base_image,
+            "family": fam,
+            "ssh_socket_name": _FAMILY_SSH_SOCKET_NAME[fam],
+            "KRUN_HOST_PUBKEY": host_pubkey,
+        },
+    )
+
+
 def render_l1(
     l0_image: str,
     *,
@@ -720,6 +756,83 @@ def l1_image_tag(base_image: str, agents: tuple[str, ...] | None = None) -> str:
 def l1_sidecar_image_tag(base_image: str) -> str:
     """Return the L1 sidecar (tool-only) image tag for *base_image*."""
     return f"terok-l1-sidecar:{_base_tag(base_image)}"
+
+
+def l0g_image_tag(base_image: str) -> str:
+    """Return the L0G (krun guest) image tag for *base_image*."""
+    return f"terok-l0g:{_base_tag(base_image)}"
+
+
+def build_l0g_image(
+    base_image: str = DEFAULT_BASE_IMAGE,
+    *,
+    host_pubkey: str,
+    family: str | None = None,
+    rebuild: bool = False,
+    full_rebuild: bool = False,
+    build_dir: Path | None = None,
+) -> str:
+    """Build the L0G (krun guest) image and return its tag.
+
+    Skips when the image already exists locally unless *rebuild* or
+    *full_rebuild* is set.  *host_pubkey* is the host-side SSH public
+    key baked into ``/etc/ssh/authorized_keys.d/terok``; empty values
+    are rejected because a guest that accepts no connections is
+    silently useless.
+
+    Returns:
+        The L0G image tag (e.g. ``terok-l0g:fedora-44``).
+
+    Raises:
+        BuildError: If podman is missing, the family cannot be resolved,
+            ``host_pubkey`` is empty, or the build step fails.
+        ValueError: If *build_dir* is a file or a non-empty directory.
+    """
+    if not host_pubkey.strip():
+        raise BuildError(
+            "host_pubkey must be a non-empty SSH public-key line; "
+            "an empty value would build an image that accepts no connections."
+        )
+
+    _validate_build_dir(build_dir)
+    _check_podman()
+    base_image = _normalize_base_image(base_image)
+    tag = l0g_image_tag(base_image)
+    if not rebuild and not full_rebuild and _image_exists(tag):
+        return tag
+
+    fam = detect_family(base_image, override=family)
+
+    import tempfile
+
+    own_tmp = build_dir is None
+    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-l0g-"))
+    try:
+        try:
+            context.mkdir(parents=True, exist_ok=True)
+            (context / "L0G.Dockerfile").write_text(
+                render_l0g(base_image, family=fam, host_pubkey=host_pubkey)
+            )
+        except OSError as exc:
+            raise BuildError(
+                f"Image build failed preparing L0G build context at {context}: {exc}"
+            ) from exc
+
+        build_project_image(
+            dockerfile=context / "L0G.Dockerfile",
+            context_dir=context,
+            target_tag=tag,
+            build_args={"BASE_IMAGE": base_image, "KRUN_HOST_PUBKEY": host_pubkey},
+            no_cache=full_rebuild,
+            pull_always=full_rebuild,
+        )
+    finally:
+        if own_tmp:
+            import shutil
+
+            shutil.rmtree(context, ignore_errors=True)
+
+    return tag
 
 
 # ── Private helpers ──
