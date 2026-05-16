@@ -3221,9 +3221,8 @@ description = "Hardened Podman container runner with gate server and shield inte
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = [
-    {file = "terok_sandbox-0.0.124a5-py3-none-any.whl", hash = "sha256:c4e62daedb746732b6d2709ef50745d48494b77cceaf315d68dd053ef26a5b20"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 aiohttp = ">=3.9"
@@ -3239,8 +3238,10 @@ terok_clearance = {url = "https://github.com/terok-ai/terok-clearance/releases/d
 terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.6.42a3/terok_shield-0.6.42a3-py3-none-any.whl"}
 
 [package.source]
-type = "url"
-url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a5/terok_sandbox-0.0.124a5-py3-none-any.whl"
+type = "git"
+url = "https://github.com/sliwowitz/terok-sandbox.git"
+reference = "fix/ssh-init-idempotent-and-profiles-csv"
+resolved_reference = "891473296d21c0801c10a6feae0c3ecb71746e0b"
 
 [[package]]
 name = "terok-shield"
@@ -3658,4 +3659,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "ad388070996b74fdbcf33d1f6cb2e500433f607f1a8750a042a5d3604c4b1ac7"
+content-hash = "99cc42874c13cc30276b4c58a59e1bfd02036cd6ade61e670dbe4b789d761141"
