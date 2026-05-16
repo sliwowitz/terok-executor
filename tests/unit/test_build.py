@@ -491,7 +491,9 @@ class TestTemplateRendering:
         # pam_succeed_if + success=1), leaving the rest of the stack intact
         # for root and any other caller.
         rpm = render_l0("registry.fedoraproject.org/fedora:43", family="rpm")
-        assert "[success=1 default=ignore] pam_succeed_if.so user = dev" in rpm
+        # ``ruser`` (calling user), not ``user`` (target user, which is root
+        # for plain ``sudo ls``) — otherwise the override never matches.
+        assert "[success=1 default=ignore] pam_succeed_if.so ruser = dev" in rpm
         assert "> /etc/pam.d/sudo" in rpm
 
     def test_l0_deb_does_not_override_sudo_pam(self) -> None:
