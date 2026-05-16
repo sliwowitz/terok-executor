@@ -458,7 +458,8 @@ class TestLoadRegistry:
         reg = load_roster()
         env = reg.collect_all_auto_approve_env()
         assert "COPILOT_ALLOW_ALL" in env
-        assert "VIBE_AUTO_APPROVE" in env
+        # Vibe's real yolo field — see vibe.yaml comment.
+        assert "VIBE_BYPASS_TOOL_PERMISSIONS" in env
         assert "OPENCODE_PERMISSION" in env
 
     def test_collect_opencode_provider_env(self) -> None:

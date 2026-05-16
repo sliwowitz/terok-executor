@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 # terok:container — this file is deployed into task containers, not used on the host.
 
 # ACP wrapper for Mistral Vibe.
 #
-# Sets up per-agent git identity and injects terok system instructions
+# Sets up per-agent git identity and injects terok task instructions
 # before exec-ing the real vibe-acp adapter.
 #
-# Instructions: Vibe loads user-level instructions from $VIBE_HOME/AGENTS.md
-# (appended to the system prompt, not replacing it).  Since ~/.vibe is a
-# shared volume we cannot write there directly.  Instead, we create a
-# per-task VIBE_HOME overlay under /home/dev/.terok/vibe-home/ that
-# symlinks the real config/state from ~/.vibe and adds AGENTS.md with
-# the resolved terok instructions.  This keeps ~/.vibe untouched.
+# Instructions injection: Vibe exposes a swappable system-prompt slot
+# via the VIBE_SYSTEM_PROMPT_ID env var (mistral-vibe's
+# vibe.core.config._settings.system_prompt_id, resolved against
+# $VIBE_HOME/prompts/<id>.md without trust requirements).  We write the
+# terok instructions to that directory under a per-task id and point
+# Vibe at it.  Only the persona/behavior slot is replaced — Vibe still
+# composes tool-call schemas, OS info, model name, project context,
+# and user/project AGENTS.md on top (see vibe/core/system_prompt.py
+# get_universal_system_prompt for the full assembly).
 #
-# Unrestricted mode: VIBE_AUTO_APPROVE env var is set at container level
-# by task_runners.py.  VibeConfig uses pydantic-settings with
-# env_prefix="VIBE_", so the env var maps directly to the auto_approve
-# config field in both CLI and ACP modes.
+# Replaces (not appends) Vibe's default cli.md persona: terseness
+# rules, phased workflow, banned phrases, "no emoji", etc.  This is
+# fine because that slot is *designed* to be swapped — Vibe itself
+# ships cli/explore/tests/lean as alternative personas in the same
+# slot (vibe/core/prompts/).  Future enhancement (not implemented):
+# offer a chooser among Vibe's vendored personas and prepend the
+# chosen one to the terok-task instructions so users who like a
+# specific Vibe persona keep it.  Keep this minimal until someone
+# asks for it.
+#
+# Unrestricted mode: VIBE_BYPASS_TOOL_PERMISSIONS env var is set at
+# container level via vibe.yaml's ``auto_approve.env``.  VibeConfig
+# uses pydantic-settings with env_prefix="VIBE_", case_sensitive=False,
+# so the env var maps to ``bypass_tool_permissions: bool`` on the
+# settings model.  ACP gates the approval callback on exactly this
+# field (vibe.acp.acp_agent_loop:330), so True skips every tool prompt
+# — the closest equivalent to other agents' --yolo flag.
 
 set -euo pipefail
 
@@ -27,34 +44,49 @@ _AGENT_EMAIL="noreply@mistral.ai"
 . /usr/local/share/terok/terok-acp-env.sh
 
 _TEROK_INSTR="/home/dev/.terok/instructions.md"
-_REAL_VIBE_HOME="${HOME}/.vibe"
-_TASK_VIBE_HOME="/home/dev/.terok/vibe-home"
+_VIBE_PROMPTS_DIR="${HOME}/.vibe/prompts"
 
-if [[ -f "$_TEROK_INSTR" ]]; then
-    # Build a per-task VIBE_HOME that mirrors ~/.vibe via symlinks
-    # but adds our instructions as AGENTS.md.
-    mkdir -p "$_TASK_VIBE_HOME"
-
-    # Symlink all existing entries from the real VIBE_HOME
-    for item in "$_REAL_VIBE_HOME"/*; do
-        [[ -e "$item" ]] || continue
-        _target="$_TASK_VIBE_HOME/${item##*/}"
-        [[ -e "$_target" ]] || ln -sf "$item" "$_target"
-    done
-    # Also symlink dotfiles (e.g. .env)
-    for item in "$_REAL_VIBE_HOME"/.*; do
-        case "${item##*/}" in .|..) continue ;; esac
-        [[ -e "$item" ]] || continue
-        _target="$_TASK_VIBE_HOME/${item##*/}"
-        [[ -e "$_target" ]] || ln -sf "$item" "$_target"
-    done
-
-    # Remove any stale AGENTS.md symlink and write instructions as the
-    # user-level AGENTS.md that Vibe appends to its system prompt.
-    rm -f "$_TASK_VIBE_HOME/AGENTS.md"
-    cp "$_TEROK_INSTR" "$_TASK_VIBE_HOME/AGENTS.md"
-
-    export VIBE_HOME="$_TASK_VIBE_HOME"
+if [[ -f "$_TEROK_INSTR" && -n "${TASK_ID:-}" ]]; then
+    # Per-task id so parallel tasks don't clobber each other in the
+    # shared ~/.vibe mount.  Cleanup on EXIT bounds growth of the
+    # shared prompts dir to currently-running tasks.
+    _PROMPT_ID="terok-task-${TASK_ID}"
+    mkdir -p "$_VIBE_PROMPTS_DIR"
+    cp "$_TEROK_INSTR" "$_VIBE_PROMPTS_DIR/${_PROMPT_ID}.md"
+    export VIBE_SYSTEM_PROMPT_ID="$_PROMPT_ID"
+    trap 'rm -f "$_VIBE_PROMPTS_DIR/${_PROMPT_ID}.md"' EXIT
 fi
 
-exec vibe-acp "$@"
+# Trust the container's workspace so Vibe's HarnessFilesManager walks
+# the project's AGENTS.md chain into the system prompt.  ACP has no
+# --trust flag; without this, ``trusted_workdir`` is None and
+# ``load_project_docs`` returns early.  ~/.vibe is shared across every
+# task container, so the write is ``flock``-guarded against concurrent
+# updates.  ``/workspace`` is a container-only path that never resolves
+# on the host — persisting it in shared state only affects future
+# containers mounting the same /workspace, which is exactly what we
+# want.
+#
+# The TOML merge itself lives in
+# ``/usr/local/share/terok/terok-trust-workspace.py`` (installed by the
+# L1 Dockerfile); the same script is invoked by the CLI wrapper
+# (``_TRUST_WORKSPACE_FN`` in ``provider/wrappers.py``) so future Vibe
+# schema changes land in one place.
+_terok_trust_workspace_for_vibe() {
+    local _path="$1"
+    local _tf="${HOME}/.vibe/trusted_folders.toml"
+    local _merge=/usr/local/share/terok/terok-trust-workspace.py
+    [ -x "${_merge}" ] || return 0
+    mkdir -p "$(dirname "${_tf}")"
+    (
+        flock -x 200
+        python3 "${_merge}" "${_path}" "${_tf}"
+    ) 200>"${_tf}.lock"
+}
+_terok_trust_workspace_for_vibe /workspace
+
+# No exec: keep the trap alive so the per-task prompt file is removed
+# even on a clean shutdown.  Bash forwards SIGINT/SIGTERM to the
+# foreground child by default; vibe-acp's exit code propagates as our
+# own.
+vibe-acp "$@"

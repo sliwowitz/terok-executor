@@ -18,7 +18,16 @@ headless:
 
 auto_approve:
   env:
-    VIBE_AUTO_APPROVE: "true"
+    # Real Vibe field name (pydantic-settings env_prefix="VIBE_",
+    # case_sensitive=False; vibe.core.config._settings.VibeConfig has
+    # ``bypass_tool_permissions: bool = False``).  ACP gates the
+    # approval callback on this exact field
+    # (vibe.acp.acp_agent_loop:330: ``if not agent_loop.bypass_tool_permissions:``),
+    # so setting it True skips every tool prompt — the closest
+    # equivalent to other agents' --yolo / --dangerously-skip-permissions.
+    # The older ``VIBE_AUTO_APPROVE=true`` was silently dropped (no such
+    # field; ``extra="ignore"``) and matched only the agent-profile name.
+    VIBE_BYPASS_TOOL_PERMISSIONS: "true"
 
 session:
   supports_resume: true
