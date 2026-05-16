@@ -91,6 +91,7 @@ from .credentials.vault_config import ConfigPatchError
 
 # -- Doctor + paths ------------------------------------------------------------
 from .doctor import agent_doctor_checks
+from .krun import L0GHostKeypair, ensure_l0g_host_keypair, make_krun_runtime
 from .paths import mounts_dir
 
 # -- Provider (headless dispatch, instructions, agent config) ------------------
@@ -258,4 +259,8 @@ __all__ = [
     "inject_prompt",
     # Sandbox bootstrap composition
     "ensure_sandbox_ready",
+    # Krun (KVM-microVM) provisioning + runtime factory
+    "L0GHostKeypair",
+    "ensure_l0g_host_keypair",
+    "make_krun_runtime",
 ]
