@@ -695,6 +695,135 @@ class TestTemplateRendering:
         with pytest.raises(BuildError, match="non-empty"):
             build_l0g_image("ubuntu:24.04", host_pubkey="   \n\t")
 
+    def test_build_l0g_skips_when_image_already_present(self) -> None:
+        """A cached L0G tag short-circuits before invoking podman build."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert tag == "terok-l0g:ubuntu-24.04"
+        build.assert_not_called()
+
+    def test_build_l0g_invokes_podman_build_with_buildargs(self, tmp_path: Path) -> None:
+        """End-to-end build path: render, write Dockerfile, shell out.
+
+        The Dockerfile lands in *build_dir*, ``podman build`` is invoked
+        with the pubkey threaded through as a ``--build-arg``, and the
+        returned tag matches ``l0g_image_tag``.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                build_dir=tmp_path,
+            )
+
+        assert tag == "terok-l0g:ubuntu-24.04"
+        dockerfile = tmp_path / "L0G.Dockerfile"
+        assert dockerfile.is_file()
+        rendered = dockerfile.read_text()
+        assert "openssh-server" in rendered
+        build.assert_called_once()
+        call = build.call_args
+        assert call.kwargs["target_tag"] == "terok-l0g:ubuntu-24.04"
+        build_args = call.kwargs["build_args"]
+        assert build_args["BASE_IMAGE"] == "ubuntu:24.04"
+        assert build_args["KRUN_HOST_PUBKEY"] == "ssh-ed25519 AAAA test"
+
+    def test_build_l0g_rebuild_bypasses_image_exists_short_circuit(self, tmp_path: Path) -> None:
+        """``rebuild=True`` forces the build even when the tag already exists."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                rebuild=True,
+                build_dir=tmp_path,
+            )
+        build.assert_called_once()
+
+    def test_build_l0g_full_rebuild_forwards_no_cache_and_pull_always(self, tmp_path: Path) -> None:
+        """``full_rebuild=True`` reaches the podman invocation with cache-busting."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                full_rebuild=True,
+                build_dir=tmp_path,
+            )
+        call = build.call_args
+        assert call.kwargs["no_cache"] is True
+        assert call.kwargs["pull_always"] is True
+
+    def test_build_l0g_without_build_dir_uses_owned_tempdir(self) -> None:
+        """Without an explicit build_dir, the helper mkdtemps + cleans up.
+
+        Exercises the ``own_tmp = True`` branch + the final
+        ``shutil.rmtree`` cleanup that runs when the helper owns its
+        build context.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert tag == "terok-l0g:ubuntu-24.04"
+        # podman build was invoked with a tempdir-rooted dockerfile path.
+        call = build.call_args
+        df = call.kwargs["dockerfile"]
+        assert df.name == "L0G.Dockerfile"
+        # The owned tempdir was removed once the build returned — the
+        # caller never has to worry about leaking ``terok-executor-l0g-*``
+        # directories.
+        assert not df.parent.exists()
+
+    def test_build_l0g_translates_oswrite_failure_to_build_error(self, tmp_path: Path) -> None:
+        """A failed Dockerfile write surfaces as ``BuildError`` with context."""
+        from unittest.mock import patch
+
+        # Make the build context unwritable so write_text raises OSError.
+        ro_dir = tmp_path / "readonly"
+        ro_dir.mkdir()
+        ro_dir.chmod(0o500)  # r-x — no write bit
+        try:
+            with (
+                patch("terok_executor.container.build._check_podman"),
+                patch("terok_executor.container.build._image_exists", return_value=False),
+                patch("terok_executor.container.build.build_project_image"),
+                pytest.raises(BuildError, match="L0G build context"),
+            ):
+                build_l0g_image(
+                    "ubuntu:24.04",
+                    host_pubkey="ssh-ed25519 AAAA test",
+                    build_dir=ro_dir,
+                )
+        finally:
+            ro_dir.chmod(0o700)  # let the tmp_path fixture clean up
+
 
 # ---------------------------------------------------------------------------
 # Build context preparation
