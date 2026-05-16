@@ -504,10 +504,17 @@ def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None
     )
 
 
-# Map of package family → systemd unit name for the sshd socket.  Used
-# only by the L0G (krun guest) template; the regular L0 doesn't run
-# sshd as a system service.
-_FAMILY_SSH_SOCKET_NAME: dict[str, str] = {"deb": "ssh.socket", "rpm": "sshd.socket"}
+# Map of package family → systemd unit names for the L0G guest's sshd.
+# Two units per family: the **socket** unit (our vsock-only override
+# attaches to it) and the **service** unit (the distro's
+# ``openssh-server`` post-install enables this; we mask it so a
+# default-enabled TCP listener can never come up behind our back).
+# The regular L0 image doesn't run sshd as a system service so it has
+# no equivalent need.
+_FAMILY_SSH_UNITS: dict[str, dict[str, str]] = {
+    "deb": {"socket": "ssh.socket", "service": "ssh.service"},
+    "rpm": {"socket": "sshd.socket", "service": "sshd.service"},
+}
 
 
 def render_l0g(
@@ -529,12 +536,14 @@ def render_l0g(
     """
     base_image = _normalize_base_image(base_image)
     fam = detect_family(base_image, override=family)
+    units = _FAMILY_SSH_UNITS[fam]
     return _render_template(
         "l0g.guest.Dockerfile.template",
         {
             "BASE_IMAGE": base_image,
             "family": fam,
-            "ssh_socket_name": _FAMILY_SSH_SOCKET_NAME[fam],
+            "ssh_socket_name": units["socket"],
+            "ssh_service_name": units["service"],
             "KRUN_HOST_PUBKEY": host_pubkey,
         },
     )
@@ -788,15 +797,10 @@ def build_l0g_image(
             ``host_pubkey`` is empty, or the build step fails.
         ValueError: If *build_dir* is a file or a non-empty directory.
     """
-    if not host_pubkey.strip():
-        raise BuildError(
-            "host_pubkey must be a non-empty SSH public-key line; "
-            "an empty value would build an image that accepts no connections."
-        )
-
+    host_pubkey = _validate_host_pubkey(host_pubkey)
     _validate_build_dir(build_dir)
     _check_podman()
-    base_image = _normalize_base_image(base_image)
+    base_image = _validate_base_image(_normalize_base_image(base_image))
     tag = l0g_image_tag(base_image)
     if not rebuild and not full_rebuild and _image_exists(tag):
         return tag
@@ -851,6 +855,89 @@ def _validate_build_dir(build_dir: Path | None) -> None:
 def _normalize_base_image(base_image: str | None) -> str:
     """Normalize a base image string, falling back to the default."""
     return (base_image or "").strip() or DEFAULT_BASE_IMAGE
+
+
+# Permissive OCI-ish reference: lowercase alphanumerics, dots, dashes,
+# underscores, slashes, and optionally ``:tag`` and ``@digest``.  We
+# don't ship a full OCI parser — the goal here is to reject any
+# whitespace or control characters that would let a newline-bearing
+# value inject extra Dockerfile directives once interpolated into
+# ``ARG BASE_IMAGE=...``.  The validator runs after the existing
+# detect_family lookup, so well-known prefixes already pass.
+_BASE_IMAGE_RE = re.compile(
+    r"""^
+        [A-Za-z0-9]                                 # leading alnum
+        (?:[A-Za-z0-9._/-]*[A-Za-z0-9])?            # body, last char alnum
+        (?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?           # optional :tag
+        (?:@sha256:[A-Fa-f0-9]{64})?                # optional @digest
+        $
+    """,
+    re.VERBOSE,
+)
+
+
+def _validate_base_image(ref: str) -> str:
+    """Reject base images that could inject Dockerfile directives at render time.
+
+    ``ARG BASE_IMAGE={{ BASE_IMAGE }}`` interpolates *ref* into the
+    rendered Dockerfile.  A value carrying ``\\n`` or other control
+    bytes would terminate the ARG line and let the rest of the string
+    be parsed as additional instructions (``RUN curl ... | sh``,
+    ``ADD ...``).  Validate up-front; the loose OCI shape covers the
+    real-world bases that ``detect_family`` already accepts without
+    pretending to be a complete parser.
+    """
+    if any(c.isspace() or ord(c) < 0x20 for c in ref):
+        raise BuildError(f"base_image {ref!r}: contains whitespace or control characters")
+    if len(ref) > 256:
+        raise BuildError(f"base_image {ref!r}: exceeds 256-character bound")
+    if not _BASE_IMAGE_RE.fullmatch(ref):
+        raise BuildError(f"base_image {ref!r}: not a recognisable OCI reference shape")
+    return ref
+
+
+# OpenSSH public-key line: ``<type> <base64> [comment]``.  The comment
+# may contain spaces but never a newline (RFC 4253 §6.6).  Keep the key
+# types tight to the ones terok actually ships; expand the list when
+# the orchestrator starts generating other types.
+_HOST_PUBKEY_RE = re.compile(
+    r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521))"
+    r"\s+[A-Za-z0-9+/=]+"
+    r"(?:\s+\S(?:.*\S)?)?$"  # optional comment (no leading/trailing space)
+)
+
+
+def _validate_host_pubkey(host_pubkey: str) -> str:
+    """Return a single-line OpenSSH public-key string, or raise.
+
+    The value is written verbatim into ``authorized_keys.d/terok`` via
+    ``printf '%s\\n' "${KRUN_HOST_PUBKEY}"`` at image build time.  A
+    multi-line value would add extra trust entries or inject
+    ``authorized_keys`` options (``command=``, ``environment=``,
+    ``from=``) that change the guest's security posture.  Reject both
+    cases up front.
+    """
+    if not isinstance(host_pubkey, str):
+        raise BuildError(f"host_pubkey must be a string, got {type(host_pubkey).__name__}")
+    key = host_pubkey.strip()
+    if not key:
+        raise BuildError(
+            "host_pubkey must be a non-empty SSH public-key line; "
+            "an empty value would build an image that accepts no connections."
+        )
+    if "\n" in key or "\r" in key:
+        raise BuildError(
+            "host_pubkey must be a single line — multi-line values would "
+            "add extra trust entries to authorized_keys.d/terok"
+        )
+    if len(key) > 8192:
+        raise BuildError(f"host_pubkey: {len(key)} chars exceeds 8192-byte cap")
+    if not _HOST_PUBKEY_RE.fullmatch(key):
+        raise BuildError(
+            "host_pubkey: not a recognisable OpenSSH public-key line "
+            "(expected '<type> <base64> [comment]' with a supported key type)"
+        )
+    return key
 
 
 def _split_image_ref(ref: str) -> tuple[str, str]:

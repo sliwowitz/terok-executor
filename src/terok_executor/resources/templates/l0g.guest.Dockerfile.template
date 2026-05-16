@@ -77,16 +77,24 @@ RUN install -d -m 0755 /etc/ssh/sshd_config.d \
     && chmod 0644 /etc/ssh/authorized_keys.d/terok
 
 # Force sshd onto AF_VSOCK and away from TCP.  The empty ListenStream=
-# clears the inherited TCP listener; the second line re-binds on vsock
-# port 22.  Unit name differs by family ({{ ssh_socket_name }} resolves
-# via the `family` Jinja variable above).
+# clears the inherited TCP listener on the socket unit; the second
+# line re-binds on vsock port 22.  Unit names differ by family
+# ({{ ssh_socket_name }} / {{ ssh_service_name }} resolve via the
+# `family` Jinja variable above).
+#
+# Additionally **mask** the distro's daemon-mode service unit so a
+# default-enabled ``{{ ssh_service_name }}`` from ``openssh-server``'s
+# post-install can never bring up a TCP listener behind the
+# socket-activated path.  Masking is stronger than ``disable`` — the
+# unit symlinks to ``/dev/null`` and refuses to start.
 RUN install -d -m 0755 /etc/systemd/system/{{ ssh_socket_name }}.d \
     && printf '%s\n' \
         '[Socket]' \
         'ListenStream=' \
         'ListenStream=vsock::22' \
         > /etc/systemd/system/{{ ssh_socket_name }}.d/vsock.conf \
-    && systemctl enable {{ ssh_socket_name }}
+    && systemctl enable {{ ssh_socket_name }} \
+    && systemctl mask {{ ssh_service_name }}
 
 WORKDIR /home/dev
 # systemd as pid 1 — required for socket activation to fire and for
