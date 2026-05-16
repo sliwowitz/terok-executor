@@ -29,10 +29,13 @@
 # specific Vibe persona keep it.  Keep this minimal until someone
 # asks for it.
 #
-# Unrestricted mode: VIBE_AUTO_APPROVE env var is set at container
-# level by task_runners.py.  VibeConfig uses pydantic-settings with
-# env_prefix="VIBE_", so the env var maps directly to the auto_approve
-# config field in both CLI and ACP modes.
+# Unrestricted mode: VIBE_BYPASS_TOOL_PERMISSIONS env var is set at
+# container level via vibe.yaml's ``auto_approve.env``.  VibeConfig
+# uses pydantic-settings with env_prefix="VIBE_", case_sensitive=False,
+# so the env var maps to ``bypass_tool_permissions: bool`` on the
+# settings model.  ACP gates the approval callback on exactly this
+# field (vibe.acp.acp_agent_loop:330), so True skips every tool prompt
+# — the closest equivalent to other agents' --yolo flag.
 
 set -euo pipefail
 
