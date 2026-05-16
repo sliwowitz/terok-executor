@@ -56,6 +56,32 @@ for _mod_name in ("tomli_w", "toml"):
         break
 
 
+def main(target: str, tf_path: pathlib.Path) -> int:
+    """Add *target* to ``trusted`` in *tf_path*; return process exit code."""
+    data = tomllib.loads(tf_path.read_text()) if tf_path.is_file() else {}
+    trusted = list(data.get("trusted", []))
+    if target in trusted:
+        return 0
+    trusted.append(target)
+    data["trusted"] = trusted
+    data.setdefault("untrusted", list(data.get("untrusted", [])))
+
+    payload = _dump(data) if _dump is not None else _minimal_dump(data)
+    # Bash callers already ``mkdir -p`` the parent for their flock lock,
+    # but keep the script standalone-safe so a direct invocation on a
+    # fresh container doesn't trip on the missing ~/.vibe directory.
+    tf_path.parent.mkdir(parents=True, exist_ok=True)
+    tf_path.write_text(payload)
+    return 0
+
+
+# -- Private helpers ----------------------------------------------------------
+# Defined below ``main`` to keep top-down reading order (domain-first
+# public entry point first).  Python resolves names at call time, so
+# ``main`` can still reference these — they're bound by the time the
+# ``__main__`` guard at the bottom of the file calls ``main()``.
+
+
 def _arr(xs: list[str]) -> str:
     """Render a list of strings as a single-line TOML array."""
     return "[" + ", ".join('"' + x.replace('"', '\\"') + '"' for x in xs) + "]"
@@ -72,21 +98,6 @@ def _minimal_dump(data: dict) -> str:
         "trusted = " + _arr(list(data.get("trusted", []))) + "\n"
         "untrusted = " + _arr(list(data.get("untrusted", []))) + "\n"
     )
-
-
-def main(target: str, tf_path: pathlib.Path) -> int:
-    """Add *target* to ``trusted`` in *tf_path*; return process exit code."""
-    data = tomllib.loads(tf_path.read_text()) if tf_path.is_file() else {}
-    trusted = list(data.get("trusted", []))
-    if target in trusted:
-        return 0
-    trusted.append(target)
-    data["trusted"] = trusted
-    data.setdefault("untrusted", list(data.get("untrusted", [])))
-
-    payload = _dump(data) if _dump is not None else _minimal_dump(data)
-    tf_path.write_text(payload)
-    return 0
 
 
 if __name__ == "__main__":
