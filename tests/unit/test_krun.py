@@ -12,6 +12,7 @@ unit-tested only for the wiring shape, not for talking to krun.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -227,6 +228,75 @@ class TestEnsureL0GHostKeypair:
         line = (runtime_dir / "krun_host.key.pub").read_text().strip()
         key_part = " ".join(line.split()[:2])
         serialization.load_ssh_public_key(key_part.encode())  # no raise
+
+
+class TestWriteAtomic:
+    """`_write_atomic` cleans up its tmp file on any failure path."""
+
+    def test_short_write_loop_completes_full_payload(self, tmp_path: Path) -> None:
+        """``os.write`` is short-write-safe: the loop keeps going until all bytes land.
+
+        Simulate a kernel that returns partial counts (one byte at a
+        time) and confirm the resulting file holds the full payload.
+        """
+        from unittest.mock import patch
+
+        from terok_executor.krun import _write_atomic
+
+        target = tmp_path / "out.bin"
+        payload = b"abcdef" * 1000
+
+        real_write = os.write
+
+        def _short_write(fd: int, buf) -> int:
+            # Return one byte at a time so the loop runs many iterations.
+            return real_write(fd, bytes(buf[:1]))
+
+        with patch("terok_executor.krun.os.write", side_effect=_short_write):
+            _write_atomic(target, payload, mode=0o600)
+
+        assert target.read_bytes() == payload
+        assert (target.stat().st_mode & 0o777) == 0o600
+
+    def test_unlinks_tmp_file_on_write_failure(self, tmp_path: Path) -> None:
+        """An ``OSError`` from ``os.write`` leaves no stranded ``out.bin.<rand>``.
+
+        Without the cleanup, the runtime dir would accumulate one
+        leftover tmp per failed mint attempt across the process
+        lifetime, eventually leaking key bytes that didn't make it to
+        the final file.
+        """
+        from unittest.mock import patch
+
+        from terok_executor.krun import _write_atomic
+
+        target = tmp_path / "out.bin"
+        with (
+            patch("terok_executor.krun.os.write", side_effect=OSError("disk full")),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            _write_atomic(target, b"payload", mode=0o600)
+
+        # Final file was never created, and no tmp file is left behind.
+        assert not target.exists()
+        leftovers = list(tmp_path.glob("out.bin.*"))
+        assert leftovers == [], f"stranded tmp files: {leftovers}"
+
+    def test_unlinks_tmp_file_on_replace_failure(self, tmp_path: Path) -> None:
+        """If the final ``os.replace`` fails, the tmp file still gets unlinked."""
+        from unittest.mock import patch
+
+        from terok_executor.krun import _write_atomic
+
+        target = tmp_path / "out.bin"
+        with (
+            patch("terok_executor.krun.os.replace", side_effect=OSError("rename failed")),
+            pytest.raises(OSError, match="rename failed"),
+        ):
+            _write_atomic(target, b"payload", mode=0o600)
+
+        leftovers = list(tmp_path.glob("out.bin.*"))
+        assert leftovers == [], f"stranded tmp files: {leftovers}"
 
 
 class TestMakeKrunRuntime:

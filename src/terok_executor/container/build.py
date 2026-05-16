@@ -861,10 +861,21 @@ def _normalize_base_image(base_image: str | None) -> str:
 
 # Permissive OCI-ish reference shape; the WHY (Dockerfile-injection
 # avoidance) lives in ``_validate_base_image``'s docstring.
+#
+# Three optional pieces compose: an upfront ``host[:port]/`` registry
+# component (the ``:port`` is what made ``localhost:5000/ubuntu:24.04``
+# previously fail — ``:`` was only allowed once, in the tag slot), the
+# name body, and the usual ``:tag`` / ``@sha256:digest`` trailers.
 _BASE_IMAGE_RE = re.compile(
     r"""^
-        [A-Za-z0-9]                                 # leading alnum
-        (?:[A-Za-z0-9._/-]*[A-Za-z0-9])?            # body, last char alnum
+        (?:                                         # optional registry component
+            [A-Za-z0-9]                             #   host: leading alnum
+            (?:[A-Za-z0-9.-]*[A-Za-z0-9])?          #   host body (dots/dashes, no slash)
+            (?::[0-9]+)?                            #   optional :port (digits)
+            /                                       #   trailing slash separates from name
+        )?
+        [A-Za-z0-9]                                 # name: leading alnum
+        (?:[A-Za-z0-9._/-]*[A-Za-z0-9])?            # name body, last char alnum
         (?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?           # optional :tag
         (?:@sha256:[A-Fa-f0-9]{64})?                # optional @digest
         $

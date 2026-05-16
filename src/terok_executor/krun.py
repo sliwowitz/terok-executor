@@ -238,17 +238,39 @@ def _write_atomic(path: Path, data: bytes, *, mode: int) -> None:
     """Write *data* to *path* atomically with *mode* perms.
 
     Uses ``mkstemp`` (``O_EXCL`` — symlinks at the target are ignored)
-    + ``fchmod`` on the descriptor + ``os.replace`` for the rename, so
-    there's no TOCTOU window where an attacker could swap in a
-    hardlink between the write and a chmod-by-path.  No ``fsync``:
-    the path lives under a tmpfs (enforced by
+    + ``fchmod`` on the descriptor + a short-write-safe ``os.write``
+    loop + ``os.replace`` for the rename, so there's no TOCTOU window
+    where an attacker could swap in a hardlink between the write and a
+    chmod-by-path.  Tmp file is unlinked on any failure path so the
+    runtime dir never accumulates stranded ``krun_host.key.<rand>``
+    leftovers.  No ``fsync``: the path lives under a tmpfs (enforced
+    by
     [`_ensure_safe_runtime_dir`][terok_executor.krun._ensure_safe_runtime_dir])
     where it would be a no-op cost.
     """
     fd, tmp_path = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
     try:
         os.fchmod(fd, mode)
-        os.write(fd, data)
-    finally:
+        # POSIX permits ``os.write`` to return fewer bytes than the
+        # buffer length even for regular files; loop until everything
+        # lands or the kernel signals an unrecoverable condition.
+        view = memoryview(data)
+        offset = 0
+        while offset < len(view):
+            written = os.write(fd, view[offset:])
+            if written <= 0:
+                raise OSError(f"os.write made no progress at offset {offset}")
+            offset += written
         os.close(fd)
-    os.replace(tmp_path, path)
+        fd = -1
+        os.replace(tmp_path, path)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        # Best-effort cleanup; if unlink itself fails we already have
+        # an exception in flight and the leftover is the lesser issue.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

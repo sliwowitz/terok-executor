@@ -880,6 +880,31 @@ class TestTemplateRendering:
                 host_pubkey="ssh-ed25519 AAAA t",
             )
 
+    def test_build_l0g_accepts_registry_with_port(self) -> None:
+        """``host:port/name:tag`` (e.g. a local registry) parses cleanly.
+
+        The previous regex only allowed a single ``:`` (interpreted as
+        the tag separator), so refs like ``localhost:5000/ubuntu:24.04``
+        were rejected even though they're standard OCI form and would
+        otherwise build fine.  Pins the registry-with-port case so the
+        regex doesn't regress when it gets re-tightened.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image"),
+            patch(
+                "terok_executor.container.build.detect_family", return_value="deb"
+            ),  # not in _KNOWN_FAMILIES; force the family
+        ):
+            tag = build_l0g_image(
+                "localhost:5000/ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+            )
+        assert tag.startswith("terok-l0g:")
+
     def test_build_l0g_translates_oswrite_failure_to_build_error(self, tmp_path: Path) -> None:
         """A failed Dockerfile write surfaces as ``BuildError`` with context."""
         from unittest.mock import patch
