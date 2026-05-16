@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -165,11 +166,23 @@ def _ensure_safe_runtime_dir(runtime_dir: Path | None) -> Path:
     "vault → disk" leak the vault-backed flow was supposed to prevent,
     so refuse the fallback when no explicit *runtime_dir* is given.
 
-    Caller-supplied paths are trusted (tests, operator overrides).
-    The chmod after ``mkdir`` is unconditional because ``mkdir(mode=…,
-    exist_ok=True)`` is a no-op for an existing dir — a previous run
-    under a more permissive umask could otherwise leave the cache dir
-    world-listable.
+    After ``mkdir + chmod``, ``lstat`` the result and refuse to
+    proceed if it isn't a regular directory owned by the current user
+    with ``0700`` (or stricter) permissions.  Three threats this
+    closes:
+
+    - **Symlink redirection** — ``mkdir(exist_ok=True)`` is a no-op when
+      the target is a symlink to a directory, and a subsequent ``chmod``
+      follows the symlink.  Without ``lstat`` we'd route the keypair
+      write into whatever the symlink points at.
+    - **Cross-user ownership** — a target someone else owns means
+      they can read the key as soon as ``_write_atomic`` produces it.
+    - **Group/world-readable mode** — the explicit ``chmod`` above
+      caps the perms, but the ``lstat`` proves it actually took (no
+      ACL surprises, no mode-bit weirdness on an unusual filesystem).
+
+    Both XDG-derived and caller-supplied paths run through the same
+    checks — they're the same trust tier (the operator running terok).
     """
     if runtime_dir is not None:
         target = runtime_dir
@@ -187,7 +200,38 @@ def _ensure_safe_runtime_dir(runtime_dir: Path | None) -> Path:
 
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(target, 0o700)
+    _assert_owner_private_dir(target)
     return target
+
+
+def _assert_owner_private_dir(path: Path) -> None:
+    """Raise ``SystemExit`` unless *path* is a real dir, uid-owned, 0700-or-stricter.
+
+    Uses ``lstat`` so a symlink at *path* is rejected outright (rather
+    than silently followed).  Called after the ``mkdir`` + ``chmod`` in
+    [`_ensure_safe_runtime_dir`][terok_executor.krun._ensure_safe_runtime_dir]
+    to verify the mode actually took and the entry is genuinely the
+    private directory we expected.
+    """
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise SystemExit(
+            f"krun host-key cache dir {path} is a symlink — refusing to "
+            "write private key material via an indirection.  Remove the "
+            "symlink and re-run."
+        )
+    if not stat.S_ISDIR(st.st_mode):
+        raise SystemExit(f"krun host-key cache dir {path} is not a directory")
+    if st.st_uid != os.getuid():
+        raise SystemExit(
+            f"krun host-key cache dir {path} is owned by uid {st.st_uid}, "
+            f"not the current user (uid {os.getuid()}) — refusing to write."
+        )
+    if st.st_mode & 0o077:
+        raise SystemExit(
+            f"krun host-key cache dir {path} has group/world-accessible "
+            f"mode {st.st_mode & 0o777:o}; expected 0700 or stricter."
+        )
 
 
 def _write_atomic(path: Path, data: bytes, *, mode: int) -> None:

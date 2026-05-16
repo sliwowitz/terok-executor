@@ -96,6 +96,44 @@ class TestEnsureL0GHostKeypair:
         ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
         assert (runtime_dir.stat().st_mode & 0o777) == 0o700
 
+    def test_refuses_symlink_runtime_dir(self, tmp_path: Path, _vault_backed) -> None:
+        """A symlink at the target path is refused before any key is written.
+
+        Without ``lstat``, ``mkdir(exist_ok=True)`` is a no-op on a
+        symlink-to-dir and ``chmod`` follows it — the keypair would be
+        written into the symlink's target instead of the intended dir.
+        ``_assert_owner_private_dir`` raises before the write happens.
+        """
+        real = tmp_path / "real"
+        real.mkdir(mode=0o700)
+        link = tmp_path / "via-symlink"
+        link.symlink_to(real, target_is_directory=True)
+
+        with pytest.raises(SystemExit, match="symlink"):
+            ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=link)
+
+        # The real target was never written into.
+        assert list(real.iterdir()) == []
+
+    def test_refuses_group_or_world_readable_runtime_dir(
+        self, tmp_path: Path, _vault_backed
+    ) -> None:
+        """An ACL/filesystem oddity that prevents the chmod from taking is rejected.
+
+        Hard to reproduce naturally on tmpfs, so simulate by stubbing
+        ``os.chmod`` to a no-op for a directory that starts at 0755.
+        The post-chmod ``lstat`` then sees the wide mode and refuses.
+        """
+        from unittest.mock import patch
+
+        runtime_dir = tmp_path / "wide"
+        runtime_dir.mkdir(mode=0o755)
+        with (
+            patch("terok_executor.krun.os.chmod"),  # chmod becomes a no-op
+            pytest.raises(SystemExit, match="group/world-accessible"),
+        ):
+            ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+
     def test_private_write_is_atomic_no_symlink_clobber(
         self, tmp_path: Path, _vault_backed
     ) -> None:

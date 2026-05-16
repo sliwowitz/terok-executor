@@ -594,12 +594,16 @@ def render_l0g(
     L0 but swapped for an in-guest workload: socket-activated sshd
     bound to AF_VSOCK with *host_pubkey* baked into authorized_keys.
 
-    *host_pubkey* must be a single OpenSSH public-key line (``"ssh-…
-    …"``); the wrapper [`build_l0g_image`][terok_executor.container.build.build_l0g_image]
-    refuses empty values so silently-useless images never reach the
-    registry.  Rotation = rebuild (no in-guest mutation path).
+    *base_image* and *host_pubkey* are validated in-place — the function
+    is a public security boundary, not a thin formatting wrapper, so a
+    caller that hands untrusted input straight to it and pipes the
+    result into ``podman build`` can't smuggle in an extra
+    ``RUN curl … | sh`` line or sneak ``command=…`` options into
+    ``authorized_keys``.  *host_pubkey* must be a single OpenSSH
+    public-key line (``"ssh-… …"``); an empty value is rejected.
     """
-    base_image = _normalize_base_image(base_image)
+    base_image = _validate_base_image(_normalize_base_image(base_image))
+    host_pubkey = _validate_host_pubkey(host_pubkey)
     fam = detect_family(base_image, override=family)
     units = _FAMILY_SSH_UNITS[fam]
     return _render_template(
