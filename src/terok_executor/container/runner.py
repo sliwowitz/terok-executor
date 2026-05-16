@@ -62,7 +62,7 @@ class AgentRunner:
         sandbox: Sandbox | None = None,
         runtime: ContainerRuntime | None = None,
         roster: AgentRoster | None = None,
-        base_image: str = "ubuntu:24.04",
+        base_image: str = "fedora:44",
         family: str | None = None,
         cfg: SandboxConfig | None = None,
     ) -> None:

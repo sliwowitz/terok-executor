@@ -39,7 +39,7 @@ class RawImageSection(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    base_image: str = Field(default="ubuntu:24.04", description="Base container image for builds")
+    base_image: str = Field(default="fedora:44", description="Base container image for builds")
     family: Literal["deb", "rpm"] | None = Field(
         default=None,
         description=(

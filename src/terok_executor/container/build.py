@@ -23,9 +23,9 @@ Usage as a library::
 
     from terok_executor import build_base_images
 
-    images = build_base_images("ubuntu:24.04")
-    # images.l0 = "terok-l0:ubuntu-24.04"
-    # images.l1 = "terok-l1-cli:ubuntu-24.04"
+    images = build_base_images("fedora:44")
+    # images.l0 = "terok-l0:fedora-44"
+    # images.l1 = "terok-l1-cli:fedora-44"
 
 The L0/L1 templates select between Debian/Ubuntu (``apt``) and Fedora-like
 (``dnf``) package managers via a ``family`` Jinja2 variable resolved by
@@ -58,7 +58,7 @@ from jinja2 import BaseLoader, Environment
 
 # ── Vocabulary ──
 
-DEFAULT_BASE_IMAGE = "ubuntu:24.04"
+DEFAULT_BASE_IMAGE = "fedora:44"
 """Default base OS image when none is specified."""
 
 AGENTS_LABEL = "ai.terok.agents"
@@ -91,8 +91,17 @@ def _decode_label_escapes(text: str) -> str:
     return _ESCAPE_RE.sub(lambda m: m.group().encode("ascii").decode("unicode_escape"), text)
 
 
-_DEFAULT_TAG = "ubuntu-24.04"
-"""Pre-sanitized tag fragment for the default base image."""
+_DEFAULT_TAG = "fedora-44"
+"""Pre-sanitized tag fragment for the default base image.
+
+Must stay in sync with the slug of
+[`DEFAULT_BASE_IMAGE`][terok_executor.container.build.DEFAULT_BASE_IMAGE]
+— i.e. the result of feeding ``DEFAULT_BASE_IMAGE`` through the same
+sanitiser ``_base_tag`` applies.  This fallback is reached only when
+the input collapses to an empty string after sanitisation (pathological
+inputs such as ``_base_tag("???")``); normal empty/whitespace input
+short-circuits earlier via ``_normalize_base_image``.
+"""
 
 _MAX_TAG_LEN = 120
 """Cap on the tag portion of an OCI image reference.
@@ -109,7 +118,7 @@ _AGENT_DIGEST_LEN = 12
 # is either a literal ``"deb"``/``"rpm"`` or a tag-aware resolver — used
 # for NVIDIA, where the same repo path ships both Ubuntu (apt) and UBI
 # (dnf) variants and only the tag distinguishes them.
-# "Officially tested" (per AGENTS.md): ubuntu:24.04, fedora:43,
+# "Officially tested" (per AGENTS.md): fedora:44, ubuntu:24.04,
 # quay.io/podman/stable, nvcr.io/nvidia/nvhpc.  Other images in the
 # same family path will match but are unsupported.
 _NVIDIA_UBI_TAG_RE: re.Pattern[str] = re.compile(r"ubi\d+", re.IGNORECASE)
@@ -148,13 +157,13 @@ class ImageSet:
     """L0 + L1 image tags produced by a build."""
 
     l0: str
-    """L0 base dev image tag (e.g. ``terok-l0:ubuntu-24.04``)."""
+    """L0 base dev image tag (e.g. ``terok-l0:fedora-44``)."""
 
     l1: str
-    """L1 agent CLI image tag (e.g. ``terok-l1-cli:ubuntu-24.04``)."""
+    """L1 agent CLI image tag (e.g. ``terok-l1-cli:fedora-44``)."""
 
     l1_sidecar: str | None = None
-    """L1 sidecar image tag, if built (e.g. ``terok-l1-sidecar:ubuntu-24.04``)."""
+    """L1 sidecar image tag, if built (e.g. ``terok-l1-sidecar:fedora-44``)."""
 
 
 # ── Public entry points ──
@@ -263,7 +272,7 @@ def build_base_images(
     non-existent) directory instead.
 
     Args:
-        base_image: Base OS image (e.g. ``ubuntu:24.04``, ``nvidia/cuda:...``).
+        base_image: Base OS image (e.g. ``fedora:44``, ``nvidia/cuda:...``).
         family: Override for the package family (``"deb"`` or ``"rpm"``).
             ``None`` means detect from *base_image* via [`detect_family`][terok_executor.container.build.detect_family].
         agents: Roster entries to install, as the literal string ``"all"``
@@ -394,7 +403,7 @@ def build_sidecar_image(
         build_dir: Build context directory (must be empty or absent).
 
     Returns:
-        The sidecar image tag (e.g. ``terok-l1-sidecar:ubuntu-24.04``).
+        The sidecar image tag (e.g. ``terok-l1-sidecar:fedora-44``).
 
     Raises:
         BuildError: If podman is missing, the family cannot be resolved,
@@ -670,7 +679,7 @@ def l1_image_tag(base_image: str, agents: tuple[str, ...] | None = None) -> str:
     """Return the L1 agent CLI image tag for *base_image* and a selection.
 
     When *agents* is ``None``, returns the unsuffixed **default-alias**
-    (e.g. ``terok-l1-cli:ubuntu-24.04``).  This alias points at whichever
+    (e.g. ``terok-l1-cli:fedora-44``).  This alias points at whichever
     L1 was last built with ``tag_as_default=True`` — i.e. the L1 that
     holds the user's configured default agent selection.  Project /
     per-agent / partial builds get only their suffixed tag and never
@@ -736,7 +745,7 @@ def _split_image_ref(ref: str) -> tuple[str, str]:
 
     Strips an optional ``@digest`` suffix first, then peels off the
     trailing ``:tag`` only when the last ``:`` lies after the last ``/``
-    — so ``localhost:5000/ubuntu:24.04`` keeps the registry port intact
+    — so ``localhost:5000/fedora:44`` keeps the registry port intact
     in *name* and yields ``"24.04"`` as *tag*.  Refs without a tag
     return an empty string for *tag*.
     """

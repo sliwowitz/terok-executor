@@ -80,6 +80,6 @@ def test_view_tolerates_terok_owned_top_level_sections() -> None:
 def test_view_default_construction_is_empty() -> None:
     """An empty ``config.yml`` validates with safe defaults across both layers."""
     view = ExecutorConfigView.model_validate({})
-    assert view.image.base_image == "ubuntu:24.04"
+    assert view.image.base_image == "fedora:44"
     assert view.paths.root is None
     assert view.shield.audit is True
