@@ -652,8 +652,7 @@ class TestTemplateRendering:
         assert wipe in content, "missing empty ListenStream= wipe — TCP would stay open"
         assert rebind in content, "missing vsock::22 ListenStream re-bind"
         assert content.index(wipe) < content.index(rebind), (
-            "ListenStream= wipe must precede the vsock::22 rebind for the override"
-            " to take effect"
+            "ListenStream= wipe must precede the vsock::22 rebind for the override to take effect"
         )
 
     def test_l0g_hardens_sshd(self) -> None:
