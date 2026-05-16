@@ -84,12 +84,14 @@ COPY help.d/ /usr/local/share/terok/help.d/
 RUN set -eux; \
     cp /tmp/terok-scripts/terok-env-git-identity.sh /usr/local/share/terok/; \
     cp /tmp/terok-scripts/terok-acp-env.sh /usr/local/share/terok/; \
+    cp /tmp/terok-scripts/terok-trust-workspace.py /usr/local/share/terok/; \
     cp /tmp/terok-scripts/terok-env.sh /etc/profile.d/terok-env.sh; \
     cp /tmp/terok-scripts/hilfe /usr/local/bin/hilfe; \
     cp /tmp/terok-scripts/allthethings.sh /usr/local/bin/allthethings.sh; \
     cp /tmp/terok-scripts/update-all-the-things /usr/local/bin/update-all-the-things; \
     chmod +x /usr/local/share/terok/terok-env-git-identity.sh \
              /usr/local/share/terok/terok-acp-env.sh \
+             /usr/local/share/terok/terok-trust-workspace.py \
              /usr/local/bin/hilfe \
              /usr/local/bin/allthethings.sh \
              /usr/local/bin/update-all-the-things

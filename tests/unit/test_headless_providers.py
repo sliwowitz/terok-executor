@@ -25,7 +25,7 @@ from terok_executor.provider.wrappers import (
     generate_agent_wrapper,
     generate_all_wrappers,
 )
-from tests.constants import CONTAINER_TEROK_DIR
+from tests.constants import CONTAINER_INSTRUCTIONS_PATH, CONTAINER_TEROK_DIR
 
 
 def _provider_wrapper(
@@ -184,7 +184,7 @@ class TestGenerateAgentWrapper:
         exits so finished tasks don't leave cruft.
         """
         wrapper = _provider_wrapper("vibe")
-        assert 'cp "/home/dev/.terok/instructions.md"' in wrapper
+        assert f'cp "{CONTAINER_INSTRUCTIONS_PATH}"' in wrapper
         assert 'export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"' in wrapper
         # Per-task id and EXIT-cleanup trap.
         assert '_vibe_prompt_id="terok-task-${TASK_ID}"' in wrapper

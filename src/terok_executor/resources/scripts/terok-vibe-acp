@@ -60,43 +60,27 @@ fi
 # Trust the container's workspace so Vibe's HarnessFilesManager walks
 # the project's AGENTS.md chain into the system prompt.  ACP has no
 # --trust flag; without this, ``trusted_workdir`` is None and
-# ``load_project_docs`` returns early.  ~/.vibe is shared across
-# every task container, so the write is ``flock``-guarded against
-# concurrent updates.  ``/workspace`` is a container-only path that
-# never resolves on the host — persisting it in shared state only
-# affects future containers mounting the same /workspace, which is
-# exactly what we want.
+# ``load_project_docs`` returns early.  ~/.vibe is shared across every
+# task container, so the write is ``flock``-guarded against concurrent
+# updates.  ``/workspace`` is a container-only path that never resolves
+# on the host — persisting it in shared state only affects future
+# containers mounting the same /workspace, which is exactly what we
+# want.
+#
+# The TOML merge itself lives in
+# ``/usr/local/share/terok/terok-trust-workspace.py`` (installed by the
+# L1 Dockerfile); the same script is invoked by the CLI wrapper
+# (``_TRUST_WORKSPACE_FN`` in ``provider/wrappers.py``) so future Vibe
+# schema changes land in one place.
 _terok_trust_workspace_for_vibe() {
     local _path="$1"
     local _tf="${HOME}/.vibe/trusted_folders.toml"
+    local _merge=/usr/local/share/terok/terok-trust-workspace.py
+    [ -x "${_merge}" ] || return 0
     mkdir -p "$(dirname "${_tf}")"
     (
         flock -x 200
-        python3 - "${_path}" "${_tf}" <<'PY'
-import sys
-import pathlib
-
-try:
-    import tomllib
-except ImportError:
-    sys.exit(0)  # py<3.11: no stdlib reader, skip the merge
-
-target, tf_path = sys.argv[1], pathlib.Path(sys.argv[2])
-data = tomllib.loads(tf_path.read_text()) if tf_path.is_file() else {}
-trusted = list(data.get("trusted", []))
-untrusted = list(data.get("untrusted", []))
-if target in trusted:
-    sys.exit(0)
-trusted.append(target)
-
-def _arr(xs):
-    return "[" + ", ".join('"' + x.replace('"', '\\"') + '"' for x in xs) + "]"
-
-tf_path.write_text(
-    "trusted = " + _arr(trusted) + "\n"
-    "untrusted = " + _arr(untrusted) + "\n"
-)
-PY
+        python3 "${_merge}" "${_path}" "${_tf}"
     ) 200>"${_tf}.lock"
 }
 _terok_trust_workspace_for_vibe /workspace

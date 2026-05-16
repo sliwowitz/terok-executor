@@ -309,45 +309,29 @@ _TRUST_WORKSPACE_FN = """\
 # benign — it only affects future containers that mount the same
 # /workspace, which is exactly what we want.
 #
-# Python is preferred over sed because Vibe's loader is a real TOML
-# parser; a stray quote in our edit would silently wipe the file.
+# The TOML merge itself lives in
+# ``/usr/local/share/terok/terok-trust-workspace.py`` (installed by the
+# L1 Dockerfile); the same script is invoked by the ACP wrapper
+# (``terok-vibe-acp``) so future Vibe schema changes land in one place.
 _terok_trust_workspace_for_vibe() {
     local _path="$1"
     local _tf="${HOME}/.vibe/trusted_folders.toml"
+    local _merge=/usr/local/share/terok/terok-trust-workspace.py
+    [ -x "${_merge}" ] || return 0
     mkdir -p "$(dirname "${_tf}")"
     (
         flock -x 200
-        python3 - "${_path}" "${_tf}" <<'PY'
-import sys
-import pathlib
-
-try:
-    import tomllib
-except ImportError:
-    sys.exit(0)  # py<3.11: no stdlib reader, skip the merge
-
-target, tf_path = sys.argv[1], pathlib.Path(sys.argv[2])
-data = tomllib.loads(tf_path.read_text()) if tf_path.is_file() else {}
-trusted = list(data.get("trusted", []))
-untrusted = list(data.get("untrusted", []))
-if target in trusted:
-    sys.exit(0)
-trusted.append(target)
-
-def _arr(xs):
-    return "[" + ", ".join('"' + x.replace('"', '\\"') + '"' for x in xs) + "]"
-
-tf_path.write_text(
-    "trusted = " + _arr(trusted) + "\\n"
-    "untrusted = " + _arr(untrusted) + "\\n"
-)
-PY
+        python3 "${_merge}" "${_path}" "${_tf}"
     ) 200>"${_tf}.lock"
 }
 """
 """Top-of-file helper Vibe's per-subshell setup calls into.  Lives at module
 scope (not inside the wrapper function) so it's defined exactly once even
-though the wrapper is per-mode (headless / interactive)."""
+though the wrapper is per-mode (headless / interactive).  The TOML merge
+itself lives in ``resources/scripts/terok-trust-workspace.py`` and is
+deployed to ``/usr/local/share/terok/`` by the L1 Dockerfile template — the
+ACP wrapper invokes the same script, so future Vibe schema changes live in
+one place."""
 
 
 def _vibe_capture_fn(provider: AgentProvider, session_path: str | None) -> list[str]:
