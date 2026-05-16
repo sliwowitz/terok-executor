@@ -275,5 +275,10 @@ class TestGenerateAllWrappers:
         """The merged auto-approve env map contains all provider env vars."""
         merged = collect_all_auto_approve_env()
         assert merged["OPENCODE_PERMISSION"] == '{"*":"allow"}'
-        assert merged["VIBE_AUTO_APPROVE"] == "true"
+        # VIBE_BYPASS_TOOL_PERMISSIONS is the real Vibe field
+        # (vibe.core.config._settings.VibeConfig.bypass_tool_permissions;
+        # ACP gates the approval callback on it at acp_agent_loop.py:330).
+        # The earlier VIBE_AUTO_APPROVE was a no-op — Vibe's pydantic-settings
+        # loads with extra="ignore" and silently drops unknown env.
+        assert merged["VIBE_BYPASS_TOOL_PERMISSIONS"] == "true"
         assert merged["COPILOT_ALLOW_ALL"] == "true"
