@@ -486,18 +486,19 @@ class TestTemplateRendering:
         # CAP_DAC_OVERRIDE for every read.  Inside rootless podman, the kernel
         # doesn't reliably grant that cap to setuid-root binaries, so
         # pam_unix's helper (unix_chkpwd) returns AUTHINFO_UNAVAIL and sudo
-        # refuses even with NOPASSWD.  Replace sudo's PAM file with a stack
-        # that doesn't depend on shadow reads.
+        # refuses even with NOPASSWD.  Override sudo's PAM file with a stack
+        # that skips the auth/account checks for `dev` only (via
+        # pam_succeed_if + success=1), leaving the rest of the stack intact
+        # for root and any other caller.
         rpm = render_l0("registry.fedoraproject.org/fedora:43", family="rpm")
-        assert "auth sufficient pam_permit.so" in rpm
-        assert "account sufficient pam_permit.so" in rpm
+        assert "[success=1 default=ignore] pam_succeed_if.so user = dev" in rpm
         assert "> /etc/pam.d/sudo" in rpm
 
     def test_l0_deb_does_not_override_sudo_pam(self) -> None:
         # Debian-family bases use a shadow group and pam_unix works fine; the
         # override is rpm-only.
         deb = render_l0("ubuntu:24.04", family="deb")
-        assert "pam_permit.so" not in deb
+        assert "pam_succeed_if.so" not in deb
         assert "/etc/pam.d/sudo" not in deb
 
     def test_l0_validates_sudoers(self) -> None:
