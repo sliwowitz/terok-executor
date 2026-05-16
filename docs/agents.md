@@ -25,9 +25,28 @@ Tools run alongside an agent in a separate container:
 ## Listing agents
 
 ```bash
-terok-executor agents            # coding agents only
-terok-executor agents --all      # include tools (gh, glab, coderabbit, sonarcloud)
+terok-executor agents list           # coding agents only
+terok-executor agents list --all     # include tools (gh, glab, coderabbit, sonarcloud)
 ```
+
+## Setting the global default
+
+The same selection string that `terok-executor build --agents …` accepts
+also drives the global default that's baked into L1 images when a
+project does not override `image.agents`:
+
+```bash
+terok-executor agents set                # interactive picker
+terok-executor agents set all            # every roster entry
+terok-executor agents set claude,vibe    # explicit list
+terok-executor agents set all,-vibe      # everything except vibe
+```
+
+The value lands in `~/.config/terok/config.yml` under `image.agents` by
+default — `/etc/terok/config.yml` when running as root, or whatever
+`TEROK_CONFIG_FILE` points at when that env var is set.
+Validation runs against the installed roster up front, so the file
+never references a name that won't resolve at build time.
 
 ## Authentication
 

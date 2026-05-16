@@ -747,10 +747,21 @@ class TestCommandRegistry:
     """Verify the command registry is well-formed."""
 
     def test_all_commands_have_handlers(self) -> None:
+        """Every *leaf* CommandDef must have a handler; groups (children) need none."""
         from terok_executor.commands import COMMANDS
 
+        def _walk_leaves(cmd: object, path: str = "") -> None:
+            qualified = f"{path}{cmd.name}"  # type: ignore[attr-defined]
+            if cmd.is_group:  # type: ignore[attr-defined]
+                for child in cmd.children:  # type: ignore[attr-defined]
+                    _walk_leaves(child, f"{qualified} ")
+            else:
+                assert cmd.handler is not None, (  # type: ignore[attr-defined]
+                    f"Leaf command '{qualified}' has no handler"
+                )
+
         for cmd in COMMANDS:
-            assert cmd.handler is not None, f"Command '{cmd.name}' has no handler"
+            _walk_leaves(cmd)
 
     def test_run_command_has_agent_arg(self) -> None:
         from terok_executor.commands import RUN_COMMAND

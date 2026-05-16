@@ -346,12 +346,13 @@ def _handle_auth(
             raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
         store_api_key(agent, api_key.strip())
     else:
+        from .config import get_global_image_base_image
         from .container.build import ensure_default_l1
         from .paths import mounts_dir
 
         # Lazy: if the user picks API key from the OAuth-or-API-key prompt,
         # ensure_default_l1 is never invoked and we don't pay for an L1 build.
-        base = base_image or DEFAULT_BASE_IMAGE
+        base = base_image or get_global_image_base_image() or DEFAULT_BASE_IMAGE
         authenticate(
             None,
             agent,
@@ -365,7 +366,7 @@ def _handle_auth(
     write_vault_config(agent)
 
 
-def _handle_agents(*, show_all: bool = False) -> None:
+def _handle_agents_list(*, show_all: bool = False) -> None:
     """List registered agents."""
     import sys
 
@@ -395,6 +396,54 @@ def _handle_agents(*, show_all: bool = False) -> None:
     print(f"{'NAME':<{w_name}}  {'LABEL':<{w_label}}  TYPE")
     for name, label, kind in rows:
         print(f"{name:<{w_name}}  {label:<{w_label}}  {kind}")
+
+
+def prompt_agents_selection() -> str:
+    """Print the installed roster and read one line of executor grammar.
+
+    Empty input → ``"all"``.  Non-interactive stdin (closed pipe) exits
+    with a hint to pass the selection positionally instead.
+    """
+    from .roster.loader import get_roster
+
+    roster = get_roster()
+    providers = roster.providers
+    print("\nAvailable agents:")
+    for name in sorted(roster.agent_names):
+        provider = providers.get(name)
+        label = provider.label if provider is not None else name
+        print(f"  · {name}  — {label}")
+    try:
+        raw = input("\nType a comma list, or '-name' to exclude [all]: ").strip()
+    except EOFError as exc:
+        raise SystemExit(
+            "No interactive stdin available.  Pass the selection positionally "
+            "instead, e.g. `terok agents set all`."
+        ) from exc
+    return raw or "all"
+
+
+def validate_agent_selection(raw: str) -> None:
+    """Reject *raw* with ``SystemExit(2)`` if it names roster entries we don't have."""
+    import sys
+
+    from .roster.loader import get_roster, parse_agent_selection
+
+    try:
+        get_roster().resolve_selection(parse_agent_selection(raw))
+    except ValueError as exc:
+        print(f"Invalid agent selection: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def _handle_agents_set(*, selection: str | None = None) -> None:
+    """Write the global ``image.agents`` default to ``config.yml``."""
+    from .config import set_global_image_agents
+
+    raw = selection if selection is not None else prompt_agents_selection()
+    validate_agent_selection(raw)
+    path = set_global_image_agents(raw)
+    print(f"Wrote image.agents = {raw!r} to {path}")
 
 
 def _handle_build(
@@ -747,17 +796,49 @@ AUTH_COMMAND = CommandDef(
         ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
         ArgDef(
             name="--base-image",
-            help=f"Override the L1 base image (default: {DEFAULT_BASE_IMAGE})",
+            help=(
+                "Override the L1 base image "
+                f"(default: image.base_image from config.yml, else {DEFAULT_BASE_IMAGE})"
+            ),
         ),
     ),
 )
 
 AGENTS_COMMAND = CommandDef(
     name="agents",
-    help="List registered agents (use --all to include tools like gh, glab)",
-    handler=_handle_agents,
-    args=(
-        ArgDef(name="--all", action="store_true", dest="show_all", help="Include tools (gh, glab)"),
+    help="Inspect the agent roster and set the build-time default selection",
+    children=(
+        CommandDef(
+            name="list",
+            help="List registered agents (use --all to include tools like gh, glab)",
+            handler=_handle_agents_list,
+            args=(
+                ArgDef(
+                    name="--all",
+                    action="store_true",
+                    dest="show_all",
+                    help="Include tools (gh, glab)",
+                ),
+            ),
+        ),
+        CommandDef(
+            name="set",
+            help="Set the global image.agents default in config.yml (interactive when no arg)",
+            handler=_handle_agents_set,
+            args=(
+                ArgDef(
+                    name="selection",
+                    nargs="?",
+                    default=None,
+                    help=(
+                        "Agent selection in the executor's canonical grammar: "
+                        '"all", a comma list ("claude,vibe"), or "all,-name" '
+                        'to exclude one ("all,-vibe").  Interactive picker '
+                        "when omitted."
+                    ),
+                ),
+            ),
+        ),
     ),
 )
 

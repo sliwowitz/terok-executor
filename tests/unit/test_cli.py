@@ -30,11 +30,11 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
     return stdout.getvalue(), stderr.getvalue(), code
 
 
-class TestAgentsCommand:
-    """Verify ``terok-executor agents`` output."""
+class TestAgentsListCommand:
+    """Verify ``terok-executor agents list`` output."""
 
     def test_agents_lists_agents_only(self) -> None:
-        out, _, rc = _run_cli("agents")
+        out, _, rc = _run_cli("agents", "list")
         assert rc == 0
         assert "claude" in out
         assert "codex" in out
@@ -43,21 +43,21 @@ class TestAgentsCommand:
         assert not any(line.startswith("gh ") for line in data_lines)
 
     def test_agents_all_includes_tools(self) -> None:
-        out, _, rc = _run_cli("agents", "--all")
+        out, _, rc = _run_cli("agents", "list", "--all")
         assert rc == 0
         assert "gh" in out
         assert "glab" in out
         assert "tool" in out
 
     def test_agents_shows_kind_types(self) -> None:
-        out, _, _ = _run_cli("agents", "--all")
+        out, _, _ = _run_cli("agents", "list", "--all")
         assert "native" in out
         assert "opencode" in out
         assert "bridge" in out
         assert "tool" in out
 
     def test_agents_has_header(self) -> None:
-        out, _, _ = _run_cli("agents")
+        out, _, _ = _run_cli("agents", "list")
         assert "NAME" in out
         assert "LABEL" in out
         assert "TYPE" in out
@@ -69,9 +69,16 @@ class TestAgentsCommand:
         assert "usage:" in combined
         assert "agents" in combined
 
+    def test_bare_agents_shows_group_help(self) -> None:
+        """``terok-executor agents`` with no subverb prints the group's help."""
+        out, err, _ = _run_cli("agents")
+        combined = (out + err).lower()
+        assert "list" in combined
+        assert "set" in combined
+
     def test_agents_column_alignment(self) -> None:
         """Header and data columns should be aligned."""
-        out, _, _ = _run_cli("agents")
+        out, _, _ = _run_cli("agents", "list")
         lines = out.strip().split("\n")
         assert "LABEL" in lines[0], "Header missing LABEL column"
         label_col = lines[0].index("LABEL")
@@ -81,6 +88,54 @@ class TestAgentsCommand:
     def test_unknown_subcommand_exits_nonzero(self) -> None:
         _, _, rc = _run_cli("nonexistent")
         assert rc != 0
+
+
+class TestAgentsSetCommand:
+    """Verify ``terok-executor agents set`` writes and validates."""
+
+    @pytest.fixture
+    def override_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Route writes through a per-test config.yml and clear sandbox's cache."""
+        cfg = tmp_path / "config.yml"
+        monkeypatch.setenv("TEROK_CONFIG_FILE", str(cfg))
+
+        from terok_sandbox import paths as sandbox_paths
+
+        sandbox_paths._config_section_cache.clear()
+        return cfg
+
+    def test_set_writes_selection(self, override_config: Path) -> None:
+        out, _, rc = _run_cli("agents", "set", "claude")
+        assert rc == 0
+        assert override_config.read_text(encoding="utf-8").strip().endswith("agents: claude")
+        assert str(override_config) in out
+
+    def test_set_accepts_all(self, override_config: Path) -> None:
+        _, _, rc = _run_cli("agents", "set", "all")
+        assert rc == 0
+        assert "agents: all" in override_config.read_text(encoding="utf-8")
+
+    def test_set_accepts_exclude_form(self, override_config: Path) -> None:
+        _, _, rc = _run_cli("agents", "set", "all,-vibe")
+        assert rc == 0
+        # ruamel may quote the value because of the comma; check substring.
+        assert "all,-vibe" in override_config.read_text(encoding="utf-8")
+
+    def test_set_rejects_unknown_agent(self, override_config: Path) -> None:
+        _, err, rc = _run_cli("agents", "set", "nonexistent-agent")
+        assert rc != 0
+        assert "Invalid agent selection" in err
+        # File should not be created on validation failure.
+        assert not override_config.exists()
+
+    def test_set_prompts_when_no_arg(
+        self, override_config: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty positional → interactive prompt; empty input falls back to ``all``."""
+        monkeypatch.setattr("builtins.input", lambda _prompt="": "")
+        _, _, rc = _run_cli("agents", "set")
+        assert rc == 0
+        assert "agents: all" in override_config.read_text(encoding="utf-8")
 
 
 class TestSharedDirArgs:

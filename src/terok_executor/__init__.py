@@ -41,7 +41,20 @@ from .acp import (
     acp_socket_is_live,
     list_authenticated_agents,
 )
-from .commands import COMMANDS as AGENT_COMMANDS, CommandDef
+from .commands import (
+    COMMANDS as AGENT_COMMANDS,
+    CommandDef,
+    prompt_agents_selection,
+    validate_agent_selection,
+)
+
+# -- Global config writers (executor-owned slices of config.yml) ---------------
+from .config import (
+    get_global_image_agents,
+    get_global_image_base_image,
+    set_global_image_agents,
+    writable_config_path,
+)
 
 # -- Config schema (executor-owned slice of the shared config.yml) -----------
 from .config_schema import ExecutorConfigView, RawImageSection
@@ -191,6 +204,11 @@ __all__ = [
     # Config schema (executor-owned slice of the shared config.yml)
     "ExecutorConfigView",
     "RawImageSection",
+    # Global config writers (executor-owned slices of config.yml)
+    "get_global_image_agents",
+    "get_global_image_base_image",
+    "set_global_image_agents",
+    "writable_config_path",
     # Build: image construction + resource staging
     "AGENTS_LABEL",
     "DEFAULT_BASE_IMAGE",
@@ -226,6 +244,8 @@ __all__ = [
     "COMMANDS",
     "VAULT_COMMANDS",
     "CommandDef",
+    "prompt_agents_selection",
+    "validate_agent_selection",
     "mounts_dir",
     "scan_leaked_credentials",
     "ConfigPatchError",
