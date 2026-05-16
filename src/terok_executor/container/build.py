@@ -378,6 +378,71 @@ def build_base_images(
     return ImageSet(l0=l0_tag, l1=l1_tag)
 
 
+def build_l0g_image(
+    base_image: str = DEFAULT_BASE_IMAGE,
+    *,
+    host_pubkey: str,
+    family: str | None = None,
+    rebuild: bool = False,
+    full_rebuild: bool = False,
+    build_dir: Path | None = None,
+) -> str:
+    """Build the L0G (krun guest) image and return its tag.
+
+    Skips when the image already exists locally unless *rebuild* or
+    *full_rebuild* is set.  *host_pubkey* is the host-side SSH public
+    key baked into ``/etc/ssh/authorized_keys.d/terok``; empty values
+    are rejected because a guest that accepts no connections is
+    silently useless.
+
+    Returns:
+        The L0G image tag (e.g. ``terok-l0g:fedora-44``).
+
+    Raises:
+        BuildError: If podman is missing, the family cannot be resolved,
+            ``host_pubkey`` is empty, or the build step fails.
+        ValueError: If *build_dir* is a file or a non-empty directory.
+    """
+    host_pubkey = _validate_host_pubkey(host_pubkey)
+    _validate_build_dir(build_dir)
+    _check_podman()
+    base_image = _validate_base_image(_normalize_base_image(base_image))
+    tag = l0g_image_tag(base_image)
+    if not rebuild and not full_rebuild and _image_exists(tag):
+        return tag
+
+    fam = detect_family(base_image, override=family)
+
+    import tempfile
+
+    own_tmp = build_dir is None
+    context = build_dir or Path(tempfile.mkdtemp(prefix="terok-executor-l0g-"))
+    try:
+        try:
+            context.mkdir(parents=True, exist_ok=True)
+            (context / "L0G.Dockerfile").write_text(
+                render_l0g(base_image, family=fam, host_pubkey=host_pubkey)
+            )
+        except OSError as exc:
+            raise BuildError(
+                f"Image build failed preparing L0G build context at {context}: {exc}"
+            ) from exc
+
+        build_project_image(
+            dockerfile=context / "L0G.Dockerfile",
+            context_dir=context,
+            target_tag=tag,
+            build_args={"BASE_IMAGE": base_image, "KRUN_HOST_PUBKEY": host_pubkey},
+            no_cache=full_rebuild,
+            pull_always=full_rebuild,
+        )
+    finally:
+        if own_tmp:
+            shutil.rmtree(context, ignore_errors=True)
+
+    return tag
+
+
 def build_sidecar_image(
     base_image: str = DEFAULT_BASE_IMAGE,
     *,
@@ -501,6 +566,51 @@ def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None
     return _render_template(
         "l0.dev.Dockerfile.template",
         {"BASE_IMAGE": base_image, "family": fam},
+    )
+
+
+# Map of package family → systemd unit names for the L0G guest's sshd.
+# Two units per family: the **socket** unit (our vsock-only override
+# attaches to it) and the **service** unit (the distro's
+# ``openssh-server`` post-install enables this; we mask it so a
+# default-enabled TCP listener can never come up behind our back).
+# The regular L0 image doesn't run sshd as a system service so it has
+# no equivalent need.
+_FAMILY_SSH_UNITS: dict[str, dict[str, str]] = {
+    "deb": {"socket": "ssh.socket", "service": "ssh.service"},
+    "rpm": {"socket": "sshd.socket", "service": "sshd.service"},
+}
+
+
+def render_l0g(
+    base_image: str = DEFAULT_BASE_IMAGE,
+    *,
+    family: str | None = None,
+    host_pubkey: str = "",
+) -> str:
+    """Render the L0G (krun guest) Dockerfile.
+
+    L0G is the base image for terok krun microVM guests — parallel to
+    L0 but swapped for an in-guest workload: socket-activated sshd
+    bound to AF_VSOCK with *host_pubkey* baked into authorized_keys.
+
+    *host_pubkey* must be a single OpenSSH public-key line (``"ssh-…
+    …"``); the wrapper [`build_l0g_image`][terok_executor.container.build.build_l0g_image]
+    refuses empty values so silently-useless images never reach the
+    registry.  Rotation = rebuild (no in-guest mutation path).
+    """
+    base_image = _normalize_base_image(base_image)
+    fam = detect_family(base_image, override=family)
+    units = _FAMILY_SSH_UNITS[fam]
+    return _render_template(
+        "l0g.guest.Dockerfile.template",
+        {
+            "BASE_IMAGE": base_image,
+            "family": fam,
+            "ssh_socket_name": units["socket"],
+            "ssh_service_name": units["service"],
+            "KRUN_HOST_PUBKEY": host_pubkey,
+        },
     )
 
 
@@ -722,6 +832,11 @@ def l1_sidecar_image_tag(base_image: str) -> str:
     return f"terok-l1-sidecar:{_base_tag(base_image)}"
 
 
+def l0g_image_tag(base_image: str) -> str:
+    """Return the L0G (krun guest) image tag for *base_image*."""
+    return f"terok-l0g:{_base_tag(base_image)}"
+
+
 # ── Private helpers ──
 
 
@@ -738,6 +853,84 @@ def _validate_build_dir(build_dir: Path | None) -> None:
 def _normalize_base_image(base_image: str | None) -> str:
     """Normalize a base image string, falling back to the default."""
     return (base_image or "").strip() or DEFAULT_BASE_IMAGE
+
+
+# Permissive OCI-ish reference shape; the WHY (Dockerfile-injection
+# avoidance) lives in ``_validate_base_image``'s docstring.
+_BASE_IMAGE_RE = re.compile(
+    r"""^
+        [A-Za-z0-9]                                 # leading alnum
+        (?:[A-Za-z0-9._/-]*[A-Za-z0-9])?            # body, last char alnum
+        (?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?           # optional :tag
+        (?:@sha256:[A-Fa-f0-9]{64})?                # optional @digest
+        $
+    """,
+    re.VERBOSE,
+)
+
+
+def _validate_base_image(ref: str) -> str:
+    """Reject base images that could inject Dockerfile directives at render time.
+
+    ``ARG BASE_IMAGE={{ BASE_IMAGE }}`` interpolates *ref* into the
+    rendered Dockerfile.  A value carrying ``\\n`` or other control
+    bytes would terminate the ARG line and let the rest of the string
+    be parsed as additional instructions (``RUN curl ... | sh``,
+    ``ADD ...``).  Validate up-front; the loose OCI shape covers the
+    real-world bases that ``detect_family`` already accepts without
+    pretending to be a complete parser.
+    """
+    if any(c.isspace() or ord(c) < 0x20 for c in ref):
+        raise BuildError(f"base_image {ref!r}: contains whitespace or control characters")
+    if len(ref) > 256:
+        raise BuildError(f"base_image {ref!r}: exceeds 256-character bound")
+    if not _BASE_IMAGE_RE.fullmatch(ref):
+        raise BuildError(f"base_image {ref!r}: not a recognisable OCI reference shape")
+    return ref
+
+
+# OpenSSH public-key line: ``<type> <base64> [comment]``.  The comment
+# may contain spaces but never a newline (RFC 4253 §6.6).  Keep the key
+# types tight to the ones terok actually ships; expand the list when
+# the orchestrator starts generating other types.
+_HOST_PUBKEY_RE = re.compile(
+    r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521))"
+    r"\s+[A-Za-z0-9+/=]+"
+    r"(?:\s+\S(?:.*\S)?)?$"  # optional comment (no leading/trailing space)
+)
+
+
+def _validate_host_pubkey(host_pubkey: str) -> str:
+    """Return a single-line OpenSSH public-key string, or raise.
+
+    The value is written verbatim into ``authorized_keys.d/terok`` via
+    ``printf '%s\\n' "${KRUN_HOST_PUBKEY}"`` at image build time.  A
+    multi-line value would add extra trust entries or inject
+    ``authorized_keys`` options (``command=``, ``environment=``,
+    ``from=``) that change the guest's security posture.  Reject both
+    cases up front.
+    """
+    if not isinstance(host_pubkey, str):
+        raise BuildError(f"host_pubkey must be a string, got {type(host_pubkey).__name__}")
+    key = host_pubkey.strip()
+    if not key:
+        raise BuildError(
+            "host_pubkey must be a non-empty SSH public-key line; "
+            "an empty value would build an image that accepts no connections."
+        )
+    if "\n" in key or "\r" in key:
+        raise BuildError(
+            "host_pubkey must be a single line — multi-line values would "
+            "add extra trust entries to authorized_keys.d/terok"
+        )
+    if len(key) > 8192:
+        raise BuildError(f"host_pubkey: {len(key)} chars exceeds 8192-byte cap")
+    if not _HOST_PUBKEY_RE.fullmatch(key):
+        raise BuildError(
+            "host_pubkey: not a recognisable OpenSSH public-key line "
+            "(expected '<type> <base64> [comment]' with a supported key type)"
+        )
+    return key
 
 
 def _split_image_ref(ref: str) -> tuple[str, str]:

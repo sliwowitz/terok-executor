@@ -756,7 +756,13 @@ class AgentRunner:
                 ready_check=lambda line: "__CLI_READY__" in line or READY_MARKER in line,
             )
             if ready:
-                print(f"\nContainer ready. Login with:\n  podman exec -it {cname} bash -l")
+                # `login_command` is runtime-aware: PodmanContainer emits
+                # `podman exec -it …`, KrunContainer emits `ssh -tt -i …
+                # ProxyCommand=…`.  One code path serves both backends.
+                import shlex as _shlex
+
+                argv = self.runtime.container(cname).login_command(command=("bash", "-l"))
+                print(f"\nContainer ready. Login with:\n  {_shlex.join(argv)}")
         elif mode == "web" and port:
             from terok_sandbox import READY_MARKER
 

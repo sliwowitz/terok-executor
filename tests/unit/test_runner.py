@@ -789,4 +789,15 @@ def _mock_sandbox() -> Mock:
     sandbox.pre_start_args.return_value = []
     sandbox.stream_logs.return_value = True
     sandbox.wait_for_exit.return_value = 0
+    # The interactive-ready hint prints whatever `runtime.container(...).login_command()`
+    # returns; give it a list[str] shape so the path through `shlex.join` is exercised
+    # without requiring a real podman container handle.
+    sandbox.runtime.container.return_value.login_command.return_value = [
+        "podman",
+        "exec",
+        "-it",
+        "terok-x",
+        "bash",
+        "-l",
+    ]
     return sandbox

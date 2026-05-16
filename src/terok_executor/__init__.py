@@ -67,15 +67,18 @@ from .container.build import (
     BuildError,
     ImageSet,
     build_base_images,
+    build_l0g_image,
     build_project_image,
     build_sidecar_image,
     detect_family,
     ensure_default_l1,
     image_agents,
     l0_image_tag,
+    l0g_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
     render_l0,
+    render_l0g,
     render_l1,
     render_l1_sidecar,
     stage_scripts,
@@ -101,6 +104,7 @@ from .credentials.vault_config import ConfigPatchError
 
 # -- Doctor + paths ------------------------------------------------------------
 from .doctor import agent_doctor_checks
+from .krun import L0GHostKeypair, ensure_l0g_host_keypair, make_krun_runtime
 from .paths import mounts_dir
 
 # -- Provider (headless dispatch, instructions, agent config) ------------------
@@ -216,15 +220,18 @@ __all__ = [
     "BuildError",
     "ImageSet",
     "build_base_images",
+    "build_l0g_image",
     "build_project_image",
     "build_sidecar_image",
     "detect_family",
     "ensure_default_l1",
     "image_agents",
     "l0_image_tag",
+    "l0g_image_tag",
     "l1_image_tag",
     "l1_sidecar_image_tag",
     "render_l0",
+    "render_l0g",
     "render_l1",
     "render_l1_sidecar",
     "stage_scripts",
@@ -272,4 +279,8 @@ __all__ = [
     "inject_prompt",
     # Sandbox bootstrap composition
     "ensure_sandbox_ready",
+    # Krun (KVM-microVM) provisioning + runtime factory
+    "L0GHostKeypair",
+    "ensure_l0g_host_keypair",
+    "make_krun_runtime",
 ]
