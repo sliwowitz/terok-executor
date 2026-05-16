@@ -487,15 +487,24 @@ class TestTemplateRendering:
         # doesn't reliably grant that cap to setuid-root binaries, so
         # pam_unix's helper (unix_chkpwd) returns AUTHINFO_UNAVAIL and sudo
         # refuses even with NOPASSWD.  Override sudo's PAM file with a stack
-        # that skips the auth/account checks for `dev` only (via
-        # pam_succeed_if + success=1), leaving the rest of the stack intact
-        # for root and any other caller.
+        # that short-circuits the auth/account checks for `dev` only (via
+        # ``sufficient pam_succeed_if`` on the calling user), leaving the
+        # stack intact for root and any other caller.
+        #
+        # ``sufficient`` (= ``[success=done default=ignore]``) is required
+        # rather than a bare ``[success=1 default=ignore]``: the latter only
+        # jumps, it does *not* contribute a positive status to the dispatch
+        # accumulator (libpam/pam_dispatch.c), so the stack would end at
+        # PAM_MUST_FAIL_CODE (= PAM_PERM_DENIED) with no preceding
+        # required-class success.  ``done`` both contributes SUCCESS and
+        # terminates the stack — which is what we want here.
         rpm = render_l0("registry.fedoraproject.org/fedora:43", family="rpm")
-        # ``ruser`` (calling user), not ``user`` (target user, which is root
-        # for plain ``sudo ls``) — otherwise the override never matches and
-        # the stack falls through to the broken pam_unix account check.
-        assert "[success=1 default=ignore] pam_succeed_if.so ruser = dev" in rpm
+        assert "sufficient pam_succeed_if.so ruser = dev" in rpm
         assert "> /etc/pam.d/sudo" in rpm
+        # Self-targets via shadow mode so we don't gratuitously rewrite
+        # /etc/pam.d/sudo on openSUSE/SLES (rpm-family but uses a shadow
+        # group like Debian, so pam_unix works fine).
+        assert "stat -c '%a' /etc/shadow" in rpm
 
     def test_l0_deb_does_not_override_sudo_pam(self) -> None:
         # Debian-family bases use a shadow group and pam_unix works fine; the
