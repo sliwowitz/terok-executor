@@ -27,6 +27,12 @@ INITIAL_PROMPT_PATH = "/home/dev/.terok/initial-prompt.txt"
 INITIAL_PROMPT_CONSUMED_PATH = "/home/dev/.terok/initial-prompt.consumed.txt"
 """Where the prompt file is moved after an agent picks it up (one-shot semantics)."""
 
+INSTRUCTIONS_PATH = "/home/dev/.terok/instructions.md"
+"""Container path of the resolved terok per-task system instructions."""
+
+CONTAINER_WORKSPACE = "/workspace"
+"""Container path the host-side repo is bind-mounted at (see container/env.py)."""
+
 
 @dataclass(frozen=True)
 class WrapperConfig:
@@ -88,7 +94,7 @@ def generate_all_wrappers(
     Args:
         claude_wrapper_fn: Required -- produces the Claude wrapper.
     """
-    sections: list[str] = [_RESUME_FALLBACK_FN]
+    sections: list[str] = [_RESUME_FALLBACK_FN, _TRUST_WORKSPACE_FN]
     for provider in AGENT_PROVIDERS.values():
         section = generate_agent_wrapper(
             provider,
@@ -226,6 +232,124 @@ def _vibe_model_sync_block(provider: AgentProvider) -> list[str]:
     ]
 
 
+def _vibe_subshell_setup_block(provider: AgentProvider) -> list[str]:
+    """Emit bash lines that prep Vibe's per-task settings inside each subshell.
+
+    Mistral Vibe exposes no theme/instructions override on the CLI itself —
+    every knob terok cares about flows through env vars consumed by
+    ``vibe.core.config._settings.VibeConfig`` (pydantic-settings,
+    ``env_prefix="VIBE_"``, ``case_sensitive=False``).  This block:
+
+    1. **Forces yolo mode** by exporting ``VIBE_BYPASS_TOOL_PERMISSIONS=true``.
+       Maps to the model's ``bypass_tool_permissions`` field at
+       ``vibe/core/config/_settings.py:510``; both the CLI and the ACP
+       loop short-circuit the approval callback when it's True.
+       Unconditional here (the ``unrestricted`` mode in
+       ``container/env.py:339-341`` only fires for autopilot tasks, so
+       interactive ``vibe`` invocations would otherwise nag for every
+       tool use).
+
+    2. **Injects per-task instructions** by writing
+       ``/home/dev/.terok/instructions.md`` to
+       ``$HOME/.vibe/prompts/terok-task-<TASK_ID>.md`` and exporting
+       ``VIBE_SYSTEM_PROMPT_ID=terok-task-<TASK_ID>``.  Resolution path:
+       ``VibeConfig.system_prompt`` property
+       (``vibe/core/config/_settings.py:703``) walks the trust-free
+       ``user_prompts_dirs`` (``$VIBE_HOME/prompts``,
+       ``vibe/core/config/harness_files/_harness_manager.py:120-125``).
+       Trap on subshell ``EXIT`` removes the per-task file so the
+       shared ``~/.vibe`` mount doesn't accumulate cruft from finished
+       tasks.
+
+    3. **Trusts ``/workspace``** by appending it to
+       ``$HOME/.vibe/trusted_folders.toml`` (idempotent, ``flock``-guarded).
+       Without this, ``HarnessFilesManager.load_project_docs`` returns
+       early (workdir untrusted) and the project's ``AGENTS.md`` chain
+       never composes into the prompt
+       (``vibe/core/config/harness_files/_harness_manager.py:196``).
+
+    Bash function variables are declared ``local`` so they don't leak
+    into the user's shell when the function returns.
+
+    Empty list for non-vibe providers — keeps the rendered wrapper a
+    no-op everywhere else.
+    """
+    if provider.name != "vibe":
+        return []
+    return [
+        "    # ── Vibe: yolo + per-task instructions + workspace trust ──",
+        "    export VIBE_BYPASS_TOOL_PERMISSIONS=true",
+        '    if [ -f "' + INSTRUCTIONS_PATH + '" ] && [ -n "${TASK_ID:-}" ]; then',
+        '        local _vibe_prompt_id="terok-task-${TASK_ID}"',
+        '        local _vibe_prompts_dir="${HOME}/.vibe/prompts"',
+        '        local _vibe_prompt_file="${_vibe_prompts_dir}/${_vibe_prompt_id}.md"',
+        '        mkdir -p "${_vibe_prompts_dir}"',
+        '        cp "' + INSTRUCTIONS_PATH + '" "${_vibe_prompt_file}"',
+        '        export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"',
+        "        trap 'rm -f \"${_vibe_prompt_file}\"' EXIT",
+        "    fi",
+        '    _terok_trust_workspace_for_vibe "' + CONTAINER_WORKSPACE + '"',
+    ]
+
+
+_TRUST_WORKSPACE_FN = """\
+# Idempotently mark a container path as trusted in Vibe.
+#
+# Vibe's trust system lives at $VIBE_HOME/trusted_folders.toml as
+# ``trusted = [...]`` + ``untrusted = [...]``.  The CLI has a --trust
+# flag; the ACP entrypoint has no equivalent.  Without trust, the
+# project's AGENTS.md chain isn't composed into the system prompt
+# (vibe/core/config/harness_files/_harness_manager.py:196 returns early
+# when ``trusted_workdir`` is None).
+#
+# ~/.vibe is shared across every task container, so the write is
+# guarded with ``flock`` to avoid TOML corruption when two tasks land
+# at the same moment.  ``/workspace`` is a container-only path that
+# never resolves on the host, so persisting it in shared state is
+# benign — it only affects future containers that mount the same
+# /workspace, which is exactly what we want.
+#
+# Python is preferred over sed because Vibe's loader is a real TOML
+# parser; a stray quote in our edit would silently wipe the file.
+_terok_trust_workspace_for_vibe() {
+    local _path="$1"
+    local _tf="${HOME}/.vibe/trusted_folders.toml"
+    mkdir -p "$(dirname "${_tf}")"
+    (
+        flock -x 200
+        python3 - "${_path}" "${_tf}" <<'PY'
+import sys
+import pathlib
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(0)  # py<3.11: no stdlib reader, skip the merge
+
+target, tf_path = sys.argv[1], pathlib.Path(sys.argv[2])
+data = tomllib.loads(tf_path.read_text()) if tf_path.is_file() else {}
+trusted = list(data.get("trusted", []))
+untrusted = list(data.get("untrusted", []))
+if target in trusted:
+    sys.exit(0)
+trusted.append(target)
+
+def _arr(xs):
+    return "[" + ", ".join('"' + x.replace('"', '\\"') + '"' for x in xs) + "]"
+
+tf_path.write_text(
+    "trusted = " + _arr(trusted) + "\\n"
+    "untrusted = " + _arr(untrusted) + "\\n"
+)
+PY
+    ) 200>"${_tf}.lock"
+}
+"""
+"""Top-of-file helper Vibe's per-subshell setup calls into.  Lives at module
+scope (not inside the wrapper function) so it's defined exactly once even
+though the wrapper is per-mode (headless / interactive)."""
+
+
 def _vibe_capture_fn(provider: AgentProvider, session_path: str | None) -> list[str]:
     """Emit bash lines for Vibe post-run session capture helper."""
     if not (provider.name == "vibe" and session_path):
@@ -357,10 +481,18 @@ def _generate_generic_wrapper(provider: AgentProvider) -> str:
     )
     interactive_cmd = _wrap_invocation(f'command {binary}{extra} "$@"', provider, session_path)
 
+    # Vibe-only subshell setup: forced yolo env, per-task system-prompt
+    # injection (with EXIT trap cleanup), and workspace trust.  Empty
+    # list for every other provider, so the rendering is identical to
+    # the pre-#47 generator for non-vibe wrappers.  Re-indent from the
+    # block's native 4-space depth to the subshell-body 12-space depth.
+    vibe_setup = ["            " + line[4:] for line in _vibe_subshell_setup_block(provider)]
+
     # Headless mode (with timeout)
     lines.append('    if [ -n "$_timeout" ]; then')
     lines.append("        (")
     lines.append(f"            _terok_apply_git_identity {author_name} {author_email}")
+    lines.extend(vibe_setup)
     if session_path:
         lines.append(f"            export TEROK_SESSION_FILE={session_path}")
     lines.append(f"        {headless_cmd}")
@@ -372,6 +504,7 @@ def _generate_generic_wrapper(provider: AgentProvider) -> str:
     lines.append("    else")
     lines.append("        (")
     lines.append(f"            _terok_apply_git_identity {author_name} {author_email}")
+    lines.extend(vibe_setup)
     if session_path:
         lines.append(f"            export TEROK_SESSION_FILE={session_path}")
     lines.append(f"        {interactive_cmd}")

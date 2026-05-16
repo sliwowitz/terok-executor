@@ -159,6 +159,87 @@ class TestGenerateAgentWrapper:
             wrapper = _provider_wrapper(name)
             assert "vibe-model-sync" not in wrapper, f"{name} should not have model sync"
 
+    def test_vibe_wrapper_forces_yolo_unconditionally(self) -> None:
+        """``vibe()`` exports VIBE_BYPASS_TOOL_PERMISSIONS inside its subshells.
+
+        ``container/env.py:339-341`` only applies the roster-declared
+        ``auto_approve_env`` when ``spec.unrestricted`` is True — which
+        excludes interactive ``vibe`` invocations.  The wrapper unblocks
+        every tool prompt by setting the real Vibe field
+        (``VibeConfig.bypass_tool_permissions``) on the function's own
+        subshell, so the user never sees an approval popup in a terok
+        task.  Pinned per #47 follow-up after we discovered the env was
+        absent in interactive containers.
+        """
+        wrapper = _provider_wrapper("vibe")
+        assert "export VIBE_BYPASS_TOOL_PERMISSIONS=true" in wrapper
+
+    def test_vibe_wrapper_injects_per_task_system_prompt(self) -> None:
+        """``vibe()`` writes a per-task prompt + exports VIBE_SYSTEM_PROMPT_ID.
+
+        Pinned per #47 follow-up — the CLI path needs the same prompt-id
+        injection the ACP wrapper does.  Per-task naming keeps parallel
+        containers from clobbering each other in the shared ~/.vibe
+        prompts dir; the EXIT trap removes the file when the subshell
+        exits so finished tasks don't leave cruft.
+        """
+        wrapper = _provider_wrapper("vibe")
+        assert 'cp "/home/dev/.terok/instructions.md"' in wrapper
+        assert 'export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"' in wrapper
+        # Per-task id and EXIT-cleanup trap.
+        assert '_vibe_prompt_id="terok-task-${TASK_ID}"' in wrapper
+        assert "trap 'rm -f \"${_vibe_prompt_file}\"' EXIT" in wrapper
+
+    def test_vibe_wrapper_trusts_workspace(self) -> None:
+        """``vibe()`` adds /workspace to ~/.vibe/trusted_folders.toml.
+
+        Without the trust marker, ``HarnessFilesManager.load_project_docs``
+        returns early (``trusted_workdir`` is None) and the project's
+        ``AGENTS.md`` chain never composes into the prompt.  Vibe's CLI
+        has a ``--trust`` flag for this; ACP and our wrapper have no
+        equivalent so we write the TOML file directly with a flock-
+        guarded helper.
+        """
+        wrapper = _provider_wrapper("vibe")
+        assert "_terok_trust_workspace_for_vibe" in wrapper
+        assert '_terok_trust_workspace_for_vibe "/workspace"' in wrapper
+
+    def test_trust_workspace_helper_is_defined_once(self) -> None:
+        """The shared ``_terok_trust_workspace_for_vibe`` lives at the top of the file.
+
+        Defined in ``_TRUST_WORKSPACE_FN`` and emitted alongside
+        ``_RESUME_FALLBACK_FN`` by ``generate_all_wrappers`` so multiple
+        provider sections (today: just vibe; future: anyone else that
+        needs trust) reference one helper instead of inlining the
+        Python + flock block per wrapper.
+        """
+        from terok_executor.provider.wrappers import generate_all_wrappers
+
+        all_wrappers = generate_all_wrappers(has_agents=True, claude_wrapper_fn=lambda _c: "")
+        # Definition appears exactly once (no duplicate inlines)…
+        assert all_wrappers.count("_terok_trust_workspace_for_vibe()") == 1
+        # …and the flock guard is wired up.
+        assert "flock -x 200" in all_wrappers
+
+    def test_non_vibe_wrappers_lack_vibe_setup_block(self) -> None:
+        """Only vibe gets the yolo / prompt-id / trust block.
+
+        Empty list for non-vibe providers in
+        ``_vibe_subshell_setup_block`` keeps the rendered wrapper
+        unchanged for every other agent.
+        """
+        for name in AGENT_PROVIDERS:
+            if name == "vibe":
+                continue
+            wrapper = _provider_wrapper(name)
+            assert "VIBE_BYPASS_TOOL_PERMISSIONS" not in wrapper, (
+                f"{name} should not touch Vibe env"
+            )
+            assert "VIBE_SYSTEM_PROMPT_ID" not in wrapper, f"{name} should not touch Vibe env"
+            assert "_terok_trust_workspace_for_vibe" not in wrapper, (
+                f"{name} should not call Vibe's trust helper"
+            )
+
     def test_all_wrappers_pick_up_initial_prompt(self) -> None:
         """Every provider's wrapper consumes initial-prompt.txt one-shot."""
         for name in AGENT_PROVIDERS:
