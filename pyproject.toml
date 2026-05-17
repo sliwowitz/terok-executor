@@ -17,10 +17,6 @@ keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
 dependencies = [
-    # Pinned to the sliwowitz fork branch carrying the sandbox-owned
-    # ``run:`` config section (sliwowitz/terok-sandbox PR / branch
-    # feat/run-section-on-sandbox).  Restore the release-wheel pin
-    # before this PR merges.
     "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a10/terok_sandbox-0.0.124a10-py3-none-any.whl",
     "ruamel.yaml>=0.18",
     "Jinja2>=3.1",
