@@ -39,7 +39,6 @@ Security = "https://github.com/terok-ai/terok-executor/security/policy"
 terok-executor = "terok_executor.cli:main"
 
 [tool.poetry]
-version = "0.0.149a13"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -54,6 +53,7 @@ classifiers = [
 packages = [
   { include = "terok_executor", from = "src" },
 ]
+version = "0.0.149a13"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=4.0"
