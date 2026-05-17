@@ -4,22 +4,19 @@
 #
 # Identical image content under both supported OCI runtimes (``crun``
 # and ``krun``).  The single switch between "no sshd" and "sshd on
-# TCP 22" is a stock ``ConditionFileNotEmpty=`` on our own
-# ``sshd-terok.service`` unit, gated on
-# ``/etc/ssh/authorized_keys.d/terok``.  Under crun the placeholder
-# file is empty ⇒ systemd skips the unit at boot ⇒ sshd never starts
-# (the package's own ``ssh.service``/``sshd.service`` is masked).
-# Under krun terok bind-mounts the live host pubkey over the
-# placeholder ⇒ the file is non-empty ⇒ the unit starts ⇒ sshd
-# listens on TCP 22, which podman has forwarded from a per-task host
-# port through crun-krun's passt; the host reaches in with plain
-# ``ssh -p <host_port> dev@127.0.0.1``.
+# TCP 22" is a ``[[ -s /etc/ssh/authorized_keys.d/terok ]]`` check at
+# the top of ``init-ssh-and-repo.sh``: under crun the placeholder file
+# ships empty so the check is false and sshd never starts; under krun
+# terok bind-mounts the live host pubkey over the placeholder so the
+# file is non-empty and the script launches sshd on TCP 22, reachable
+# from the host via the per-task port that podman's passt has
+# forwarded into the guest namespace (``ssh -p <host_port>
+# dev@127.0.0.1``).
 #
-# One vendor unit file (``sshd-terok.service``) ships in
-# ``/usr/lib/systemd/system/`` — the vendor location, alongside the
-# package's own units, not as a drop-in over them.  ``systemctl
-# list-units`` shows exactly one terok-injected service with a clear
-# "condition not met" reason whenever it's dormant.
+# No systemd as PID 1 — the container CMD is bash + the init script —
+# so the launch is a plain ``sudo /usr/sbin/sshd -e`` (sshd
+# self-daemonises), gated by the same one-line file test the systemd
+# unit used to express.
 
 ARG BASE_IMAGE={{ BASE_IMAGE }}
 FROM ${BASE_IMAGE}
@@ -35,14 +32,13 @@ ENV {% if family == "deb" %}DEBIAN_FRONTEND=noninteractive \
 # Basic dev tooling common to all projects.  ``tzdata`` is explicit on
 # both families so the runtime ``TZ`` env var — set from the host's
 # timezone — can resolve against ``/usr/share/zoneinfo``.
-# ``openssh-server`` + ``systemd`` are included so the krun-mode sshd
-# path works; under crun they're inert.  ``socat`` is used by the
-# in-container bridge scripts (SSH agent forwarding, vault loopback)
-# regardless of runtime.
+# ``openssh-server`` is included so the krun-mode sshd path works;
+# under crun it's inert.  ``socat`` is used by the in-container bridge
+# scripts (SSH agent forwarding, vault loopback) regardless of runtime.
 {% if family == "deb" -%}
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg git locales openssh-client openssh-server \
-      socat sudo systemd-sysv ripgrep vim tmux tzdata \
+      socat sudo ripgrep vim tmux tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Ensure en_US.UTF-8 exists so bash and agent-spawned shells can always set LC_ALL safely.
@@ -54,7 +50,7 @@ RUN set -eux; \
 # glibc-langpack-en provides en_US.UTF-8 directly — no locale-gen step needed.
 RUN dnf install -y --setopt=install_weak_deps=False \
       ca-certificates curl gnupg2 git glibc-langpack-en openssh-clients openssh-server \
-      socat sudo systemd ripgrep vim tmux tzdata \
+      socat sudo ripgrep vim tmux tzdata \
     && dnf clean all
 {%- endif %}
 
@@ -104,15 +100,12 @@ RUN set -eux; \
 # pubkey is bind-mounted in at task launch by terok, so the L0 image
 # never carries a per-installation secret.
 #
-# The single switch is a stock ``ConditionFileNotEmpty=`` on our own
-# ``sshd-terok.service`` unit: if no host pubkey was bind-mounted, the
-# trust file is zero bytes, systemd skips the unit at boot, sshd never
-# starts.  No init script, no oneshot, no label parsing — the
-# activation prerequisite *is* sshd's auth prerequisite, expressed in
-# one stock systemd directive.
-#
-# Stock {% if family == "deb" %}``ssh.service``/``ssh.socket``{% else %}``sshd.service``/``sshd.socket``{% endif %} are masked so even an
-# unrelated post-install hook can't bring a TCP listener up.
+# Host keys are pre-generated at build time (``ssh-keygen -A``) so
+# ``sshd`` has keys to read when ``init-ssh-and-repo.sh`` launches it
+# under krun.  The shared keys across containers built from one L0 are
+# acceptable: clients use ``StrictHostKeyChecking=no`` +
+# ``UserKnownHostsFile=/dev/null``, and the per-task host port is
+# loopback-bound (experimental-runtime tradeoff).
 RUN install -d -m 0755 /etc/ssh/sshd_config.d \
     && install -d -m 0755 /etc/ssh/authorized_keys.d \
     && printf '%s\n' \
@@ -132,30 +125,7 @@ RUN install -d -m 0755 /etc/ssh/sshd_config.d \
         > /etc/ssh/sshd_config.d/00-terok.conf \
     && : > /etc/ssh/authorized_keys.d/terok \
     && chmod 0644 /etc/ssh/authorized_keys.d/terok \
-    && ssh-keygen -A \
-    && install -d -m 0755 /usr/lib/systemd/system \
-    && printf '%s\n' \
-        '[Unit]' \
-        'Description=Terok SSH listener' \
-        'Documentation=https://github.com/terok-ai/terok' \
-        'ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok' \
-        'After=network.target' \
-        '' \
-        '[Service]' \
-        'Type=simple' \
-        'ExecStartPre=/usr/sbin/sshd -t' \
-        'ExecStart=/usr/sbin/sshd -D -e' \
-        'Restart=on-failure' \
-        '' \
-        '[Install]' \
-        'WantedBy=multi-user.target' \
-        > /usr/lib/systemd/system/sshd-terok.service \
-    && systemctl enable sshd-terok.service \
-{% if family == "deb" -%}
-    && systemctl mask ssh.service ssh.socket
-{%- else -%}
-    && systemctl mask sshd.service sshd.socket
-{%- endif %}
+    && ssh-keygen -A
 
 WORKDIR /workspace
 

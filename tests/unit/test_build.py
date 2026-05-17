@@ -604,15 +604,14 @@ class TestTemplateRendering:
     # ─ Unified L0 — sshd structurally off unless host pubkey is bind-mounted ─
     #
     # The L0 image carries sshd infrastructure (openssh-server, hardened
-    # sshd config drop-in, vendor unit ``sshd-terok.service`` gated on
-    # ``ConditionFileNotEmpty=``, masked stock service+socket, empty
-    # placeholder authorized_keys file, pre-generated host keys).  Under
-    # crun the placeholder is empty ⇒ the condition fails ⇒ the unit is
-    # skipped at boot ⇒ sshd never starts.  Under krun terok bind-mounts
-    # the live host pubkey over the placeholder ⇒ condition passes ⇒
-    # sshd starts on TCP 22 and podman has forwarded a per-task host
-    # port to it through crun-krun's passt.  These tests pin the
-    # directives sandbox/terok rely on at launch time.
+    # sshd config drop-in, empty placeholder authorized_keys file,
+    # pre-generated host keys).  Under crun the placeholder is empty
+    # and ``init-ssh-and-repo.sh``'s ``[[ -s ... ]]`` test is false, so
+    # sshd never starts.  Under krun terok bind-mounts the live host
+    # pubkey over the placeholder ⇒ test is true ⇒ the script launches
+    # sshd on TCP 22 and podman has forwarded a per-task host port to
+    # it through crun-krun's passt.  These tests pin the directives
+    # sandbox/terok rely on at launch time.
 
     def test_l0_installs_openssh_server_under_both_families(self) -> None:
         """``openssh-server`` ships in the package list on deb and rpm alike."""
@@ -621,19 +620,9 @@ class TestTemplateRendering:
         assert "openssh-server" in deb
         assert "openssh-server" in rpm
 
-    def test_l0_ships_vendor_service_gated_on_authorized_keys(self) -> None:
-        """``sshd-terok.service`` is the single switch: stock ``ConditionFileNotEmpty=``
-        on the bind-mount target, so under crun (empty placeholder) systemd
-        skips the unit at boot and sshd never starts."""
-        content = render_l0("ubuntu:24.04", family="deb")
-        assert "/usr/lib/systemd/system/sshd-terok.service" in content
-        assert "ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok" in content
-        assert "ExecStart=/usr/sbin/sshd -D -e" in content
-        assert "WantedBy=multi-user.target" in content
-        assert "systemctl enable sshd-terok.service" in content
-
     def test_l0_pregenerates_host_keys(self) -> None:
-        """``ssh-keygen -A`` at build time so ``sshd -D`` has host keys to read.
+        """``ssh-keygen -A`` at build time so ``sshd`` has host keys to read
+        when the init script launches it.
 
         Identical host keys across containers built from the same L0 are
         acceptable: the client side uses ``StrictHostKeyChecking=no`` +
@@ -642,18 +631,47 @@ class TestTemplateRendering:
         content = render_l0("ubuntu:24.04", family="deb")
         assert "ssh-keygen -A" in content
 
-    def test_l0_masks_stock_sshd_under_both_families(self) -> None:
-        """Mask the package's own TCP service+socket so post-install hooks
-        can't bring up a TCP listener.  Unit names differ by family —
-        ``ssh.*`` on deb, ``sshd.*`` on rpm — and we mask exactly the
-        ones that exist (no dead symlinks for the other family's names)."""
-        deb = render_l0("ubuntu:24.04", family="deb")
-        assert "systemctl mask ssh.service ssh.socket" in deb
-        assert "sshd.service" not in deb.split("systemctl mask")[1].split("\n")[0]
+    def test_l0_ships_no_systemd_units_or_systemctl_calls(self) -> None:
+        """No systemd as PID 1 in the container, so systemd units and
+        ``systemctl`` calls would be dead weight — they would never run.
+        Sshd is started directly from ``init-ssh-and-repo.sh`` instead.
 
+        Both the rpm vendor unit path (``/usr/lib/systemd/system``) and
+        the deb-conventional one (``/lib/systemd/system``) are checked
+        — a regression that re-introduces a unit file under either
+        location fails here."""
+        deb = render_l0("ubuntu:24.04", family="deb")
         rpm = render_l0("fedora:44", family="rpm")
-        assert "systemctl mask sshd.service sshd.socket" in rpm
-        assert "ssh.service" not in rpm.split("systemctl mask")[1].split("\n")[0]
+        for content in (deb, rpm):
+            assert "systemctl" not in content
+            assert "sshd-terok.service" not in content
+            assert "/usr/lib/systemd/system" not in content
+            assert "/lib/systemd/system" not in content
+
+    def test_init_script_carries_krun_sshd_supervisor(self) -> None:
+        """``init-ssh-and-repo.sh`` is what actually starts sshd under krun
+        (no systemd to do it).  Pin the three load-bearing tokens so a
+        regression that silently strips the launch is caught at build time
+        rather than at the next failed ``terok login``:
+
+        - ``TEROK_CONTAINER_RUNTIME`` — the explicit gate (set by terok
+          only under krun; absent under crun ⇒ no sshd)
+        - ``/usr/sbin/sshd`` — the actual binary invocation
+        - ``setsid`` — the supervisor loop runs in a detached session so
+          the outer init shell exiting can't take it down
+        """
+        script_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "src"
+            / "terok_executor"
+            / "resources"
+            / "scripts"
+            / "init-ssh-and-repo.sh"
+        )
+        text = script_path.read_text()
+        assert "TEROK_CONTAINER_RUNTIME" in text
+        assert "/usr/sbin/sshd" in text
+        assert "setsid" in text
 
     def test_l0_hardens_sshd_to_pubkey_only_dev_only_no_forwarding(self) -> None:
         """The sshd config drop-in collapses the surface to a single
@@ -677,8 +695,8 @@ class TestTemplateRendering:
     def test_l0_ships_empty_authorized_keys_placeholder(self) -> None:
         """The trust file ships **empty** — the live host pubkey is
         bind-mounted in at task launch by terok.  An empty file is also
-        the off-switch: ``ConditionFileNotEmpty=`` on the socket unit
-        means zero-bytes ⇒ socket never loads ⇒ sshd unreachable."""
+        the off-switch: ``init-ssh-and-repo.sh``'s ``[[ -s ... ]]`` test
+        is false ⇒ sshd never launches ⇒ port 22 has no listener."""
         content = render_l0("ubuntu:24.04", family="deb")
         assert ": > /etc/ssh/authorized_keys.d/terok" in content
         # And the L0 build path carries no ``KRUN_HOST_PUBKEY`` build arg.

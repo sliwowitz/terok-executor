@@ -21,6 +21,34 @@ set -euo pipefail
 
 : "${HOME:=/home/dev}"
 
+# Under krun ``podman exec`` can't enter the guest, so we ship an
+# sshd inside the image and reach it via the per-task ``-p HOST:22``
+# forward.  Done first so ``terok login`` can attach even if the rest
+# of init fails (DNS-inside-guest is a separate follow-up).
+#
+# The gate is ``TEROK_CONTAINER_RUNTIME=krun`` — set by terok's
+# ``_project_runtime_flags`` only when launching under krun.  An
+# explicit runtime signal rather than inferring from the bind-mount,
+# so a botched L0 with a non-empty placeholder can't accidentally
+# expose sshd under crun.
+#
+# The supervisor loop restarts sshd if it crashes (panic, OOM, etc.);
+# ``setsid`` puts the loop in its own session so SIGHUP from the outer
+# init shell (which exits after ``exec bash`` below) can't take it
+# down.  ``/run/sshd`` is sshd's privsep chroot — package-created on
+# rpm but not always on deb, so we mkdir defensively.
+if [[ "${TEROK_CONTAINER_RUNTIME:-}" == "krun" ]]; then
+  echo ">> starting sshd supervisor on TCP 22 (krun mode)"
+  sudo mkdir -p /run/sshd
+  sudo setsid bash -c '
+    while :; do
+      /usr/sbin/sshd -D -e
+      echo "[sshd-supervisor] sshd exited (code $?); restarting in 1s" >&2
+      sleep 1
+    done
+  ' </dev/null &
+fi
+
 # Per-task permission mode: write managed settings for agents that need
 # file-based config.  Must run BEFORE git operations — a clone failure under
 # set -e would skip this if it were at the end of the script.
