@@ -1,4 +1,23 @@
 # syntax=docker/dockerfile:1
+#
+# L0 — base dev image shared by every terok project.
+#
+# Identical image content under both supported OCI runtimes (``crun``
+# and ``krun``).  The single switch between "no sshd" and "sshd-on-vsock"
+# is a stock ``ConditionFileNotEmpty=`` on our own ``sshd-vsock.socket``
+# unit, gated on ``/etc/ssh/authorized_keys.d/terok``.  Under crun the
+# placeholder file is empty ⇒ systemd skips the socket at boot ⇒ sshd
+# has no path to start (the package's own ``ssh.service``/``sshd.service``
+# is masked).  Under krun terok bind-mounts the live host pubkey over
+# the placeholder ⇒ the file is non-empty ⇒ the socket activates ⇒
+# the host reaches in via ``ssh -o ProxyCommand=socat -…``.
+#
+# Two vendor unit files (``sshd-vsock.socket`` + ``sshd-vsock@.service``)
+# ship in ``/usr/lib/systemd/system/`` — the vendor location, alongside
+# the package's own units, not as drop-ins over them.  ``systemctl
+# list-units`` shows exactly one terok-injected socket with a clear
+# "condition not met" reason whenever it's dormant.
+
 ARG BASE_IMAGE={{ BASE_IMAGE }}
 FROM ${BASE_IMAGE}
 
@@ -10,13 +29,15 @@ ENV {% if family == "deb" %}DEBIAN_FRONTEND=noninteractive \
     LANGUAGE="en_US:en" \
     USER="dev"
 
-# Basic dev tooling common to all projects.  ``tzdata`` is explicit on both
-# families so the runtime ``TZ`` env var — set from the host's timezone —
-# can resolve against ``/usr/share/zoneinfo``.
+# Basic dev tooling common to all projects.  ``tzdata`` is explicit on
+# both families so the runtime ``TZ`` env var — set from the host's
+# timezone — can resolve against ``/usr/share/zoneinfo``.
+# ``openssh-server`` + ``socat`` + ``systemd`` are included so the
+# krun-mode sshd-on-vsock path works; under crun they're inert.
 {% if family == "deb" -%}
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg git locales openssh-client socat sudo \
-      ripgrep vim tmux tzdata \
+      ca-certificates curl gnupg git locales openssh-client openssh-server \
+      socat sudo systemd-sysv ripgrep vim tmux tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Ensure en_US.UTF-8 exists so bash and agent-spawned shells can always set LC_ALL safely.
@@ -27,8 +48,8 @@ RUN set -eux; \
 {%- else -%}
 # glibc-langpack-en provides en_US.UTF-8 directly — no locale-gen step needed.
 RUN dnf install -y --setopt=install_weak_deps=False \
-      ca-certificates curl gnupg2 git glibc-langpack-en openssh-clients \
-      socat sudo ripgrep vim tmux tzdata \
+      ca-certificates curl gnupg2 git glibc-langpack-en openssh-clients openssh-server \
+      socat sudo systemd ripgrep vim tmux tzdata \
     && dnf clean all
 {%- endif %}
 
@@ -69,6 +90,73 @@ RUN set -eux; \
     chown -R dev:dev /home/dev /workspace; \
     chmod 700 /home/dev/.ssh; \
     chmod 0777 /workspace
+
+# ── sshd-on-vsock: structurally off unless authorized_keys is populated ───
+#
+# Pubkey-only sshd hardened down to the single ``dev`` account, no
+# forwarding of any kind.  The trust file at
+# ``/etc/ssh/authorized_keys.d/terok`` ships **empty** — the live host
+# pubkey is bind-mounted in at task launch by terok, so the L0 image
+# never carries a per-installation secret.
+#
+# The single switch is a stock ``ConditionFileNotEmpty=`` on our own
+# ``sshd-vsock.socket`` unit: if no host pubkey was bind-mounted, the
+# trust file is zero bytes, systemd skips the unit at boot, sshd is
+# unreachable.  No init script, no oneshot, no label parsing — the
+# activation prerequisite *is* sshd's auth prerequisite, expressed in
+# one stock systemd directive.
+#
+# Stock {% if family == "deb" %}``ssh.service``/``ssh.socket``{% else %}``sshd.service``/``sshd.socket``{% endif %} are masked so even an
+# unrelated post-install hook can't bring a TCP listener up.
+RUN install -d -m 0755 /etc/ssh/sshd_config.d \
+    && install -d -m 0755 /etc/ssh/authorized_keys.d \
+    && printf '%s\n' \
+        '# terok sshd hardening — vsock-only path, pubkey-only, single account.' \
+        'PermitRootLogin no' \
+        'PasswordAuthentication no' \
+        'PermitEmptyPasswords no' \
+        'KbdInteractiveAuthentication no' \
+        'PubkeyAuthentication yes' \
+        'AllowUsers dev' \
+        'AllowAgentForwarding no' \
+        'AllowTcpForwarding no' \
+        'X11Forwarding no' \
+        'PermitTunnel no' \
+        'GatewayPorts no' \
+        'AuthorizedKeysFile /etc/ssh/authorized_keys.d/terok' \
+        > /etc/ssh/sshd_config.d/00-terok.conf \
+    && : > /etc/ssh/authorized_keys.d/terok \
+    && chmod 0644 /etc/ssh/authorized_keys.d/terok \
+    && install -d -m 0755 /usr/lib/systemd/system \
+    && printf '%s\n' \
+        '[Unit]' \
+        'Description=Terok SSH-over-vsock listener' \
+        'Documentation=https://github.com/terok-ai/terok' \
+        'ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok' \
+        '' \
+        '[Socket]' \
+        'ListenStream=vsock::22' \
+        'Accept=yes' \
+        '' \
+        '[Install]' \
+        'WantedBy=sockets.target' \
+        > /usr/lib/systemd/system/sshd-vsock.socket \
+    && printf '%s\n' \
+        '[Unit]' \
+        'Description=Terok SSH-over-vsock per-connection daemon' \
+        'Documentation=https://github.com/terok-ai/terok' \
+        '' \
+        '[Service]' \
+        'ExecStart=-/usr/sbin/sshd -i -e' \
+        'StandardInput=socket' \
+        'StandardError=journal' \
+        > /usr/lib/systemd/system/sshd-vsock@.service \
+    && systemctl enable sshd-vsock.socket \
+{% if family == "deb" -%}
+    && systemctl mask ssh.service ssh.socket
+{%- else -%}
+    && systemctl mask sshd.service sshd.socket
+{%- endif %}
 
 WORKDIR /workspace
 
