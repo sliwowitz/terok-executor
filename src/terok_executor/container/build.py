@@ -497,15 +497,14 @@ def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None
     template; ``None`` resolves it via [`detect_family`][terok_executor.container.build.detect_family].
 
     The rendered template ships a single vendor unit
-    (``sshd-vsock.socket`` + matching per-connection
-    ``sshd-vsock@.service``) gated on a stock
-    ``ConditionFileNotEmpty=`` over ``/etc/ssh/authorized_keys.d/terok``.
-    The trust file ships empty, so the unit is skipped at boot under
-    crun (no keys ⇒ no listener); under krun terok bind-mounts the
-    live host pubkey over it at launch, the condition flips to true,
-    socket activation kicks in, and the host reaches the guest via
-    SSH-over-vsock.  One image, one build, two runtimes — and "off"
-    is structural, not just inert.
+    (``sshd-terok.service``) gated on a stock ``ConditionFileNotEmpty=``
+    over ``/etc/ssh/authorized_keys.d/terok``.  The trust file ships
+    empty, so the unit is skipped at boot under crun (no keys ⇒ no
+    listener); under krun terok bind-mounts the live host pubkey over
+    it at launch, the condition flips to true, sshd starts on TCP 22,
+    and the host reaches the guest via the per-task host port that
+    podman's passt has forwarded into the guest namespace.  One image,
+    one build, two runtimes — and "off" is structural, not just inert.
     """
     base_image = _normalize_base_image(base_image)
     fam = detect_family(base_image, override=family)

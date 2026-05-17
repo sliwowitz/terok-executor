@@ -601,17 +601,18 @@ class TestTemplateRendering:
         assert "FROM" in content
         assert "coderabbit" not in content.lower()
 
-    # ─ Unified L0 — sshd-on-vsock structurally off unless host pubkey is bind-mounted ─
+    # ─ Unified L0 — sshd structurally off unless host pubkey is bind-mounted ─
     #
-    # The L0 image carries sshd-on-vsock infrastructure (openssh-server,
-    # hardened sshd config drop-in, vendor unit pair ``sshd-vsock.socket`` +
-    # ``sshd-vsock@.service`` gated on ``ConditionFileNotEmpty=``, masked
-    # stock service+socket, empty placeholder authorized_keys file).  Under
-    # crun the placeholder is empty ⇒ the condition fails ⇒ the socket is
-    # skipped at boot ⇒ sshd is unreachable.  Under krun terok bind-mounts
+    # The L0 image carries sshd infrastructure (openssh-server, hardened
+    # sshd config drop-in, vendor unit ``sshd-terok.service`` gated on
+    # ``ConditionFileNotEmpty=``, masked stock service+socket, empty
+    # placeholder authorized_keys file, pre-generated host keys).  Under
+    # crun the placeholder is empty ⇒ the condition fails ⇒ the unit is
+    # skipped at boot ⇒ sshd never starts.  Under krun terok bind-mounts
     # the live host pubkey over the placeholder ⇒ condition passes ⇒
-    # socket activates.  These tests pin the directives sandbox/terok rely
-    # on at launch time.
+    # sshd starts on TCP 22 and podman has forwarded a per-task host
+    # port to it through crun-krun's passt.  These tests pin the
+    # directives sandbox/terok rely on at launch time.
 
     def test_l0_installs_openssh_server_under_both_families(self) -> None:
         """``openssh-server`` ships in the package list on deb and rpm alike."""
@@ -620,27 +621,26 @@ class TestTemplateRendering:
         assert "openssh-server" in deb
         assert "openssh-server" in rpm
 
-    def test_l0_ships_vendor_socket_unit_gated_on_authorized_keys(self) -> None:
-        """``sshd-vsock.socket`` is the single switch: stock ``ConditionFileNotEmpty=``
+    def test_l0_ships_vendor_service_gated_on_authorized_keys(self) -> None:
+        """``sshd-terok.service`` is the single switch: stock ``ConditionFileNotEmpty=``
         on the bind-mount target, so under crun (empty placeholder) systemd
-        skips the unit at boot and sshd has no path to start."""
+        skips the unit at boot and sshd never starts."""
         content = render_l0("ubuntu:24.04", family="deb")
-        assert "/usr/lib/systemd/system/sshd-vsock.socket" in content
+        assert "/usr/lib/systemd/system/sshd-terok.service" in content
         assert "ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok" in content
-        assert "ListenStream=vsock::22" in content
-        assert "Accept=yes" in content
-        assert "WantedBy=sockets.target" in content
-        assert "systemctl enable sshd-vsock.socket" in content
+        assert "ExecStart=/usr/sbin/sshd -D -e" in content
+        assert "WantedBy=multi-user.target" in content
+        assert "systemctl enable sshd-terok.service" in content
 
-    def test_l0_ships_per_connection_service_template(self) -> None:
-        """Socket activation with ``Accept=yes`` invokes ``<basename>@.service``
-        per connection — ship our own template so we don't depend on the
-        package's ``sshd@.service``/``ssh@.service`` (name differs by family,
-        existence differs by version)."""
+    def test_l0_pregenerates_host_keys(self) -> None:
+        """``ssh-keygen -A`` at build time so ``sshd -D`` has host keys to read.
+
+        Identical host keys across containers built from the same L0 are
+        acceptable: the client side uses ``StrictHostKeyChecking=no`` +
+        ``UserKnownHostsFile=/dev/null``, and the per-task host port is
+        loopback-only (experimental-runtime tradeoff)."""
         content = render_l0("ubuntu:24.04", family="deb")
-        assert "/usr/lib/systemd/system/sshd-vsock@.service" in content
-        assert "ExecStart=-/usr/sbin/sshd -i -e" in content
-        assert "StandardInput=socket" in content
+        assert "ssh-keygen -A" in content
 
     def test_l0_masks_stock_sshd_under_both_families(self) -> None:
         """Mask the package's own TCP service+socket so post-install hooks

@@ -6,17 +6,17 @@
 Two responsibilities, both intentionally outside terok:
 
 - [`ensure_krun_host_keypair`][terok_executor.krun.ensure_krun_host_keypair]
-  — mint or load the SSH keypair the L0 guest's ``sshd``-on-vsock
-  trusts, and materialise both halves onto tmpfs files: the private
-  half so ``ssh -i`` can read it, and the public half so the
-  orchestrator can bind-mount it into the running guest at
+  — mint or load the SSH keypair the L0 guest's ``sshd`` trusts, and
+  materialise both halves onto tmpfs files: the private half so
+  ``ssh -i`` can read it, and the public half so the orchestrator can
+  bind-mount it into the running guest at
   ``/etc/ssh/authorized_keys.d/terok``.  The vault is the system of
   record; the tmpfs cache is a derived view rebuilt per process.
 
 - [`make_krun_runtime`][terok_executor.krun.make_krun_runtime] — one-shot
   constructor for a production
-  [`KrunRuntime`][terok_sandbox.KrunRuntime] backed by the vsock-SSH
-  transport, with the keypair already wired in.  terok flips its
+  [`KrunRuntime`][terok_sandbox.KrunRuntime] backed by the TCP-over-passt
+  SSH transport, with the keypair already wired in.  terok flips its
   runtime selector to ``krun`` and calls this; everything else is
   invisible.
 
@@ -38,10 +38,10 @@ from terok_sandbox import (
     KrunRuntime,
     PodmanRuntime,
     SandboxConfig,
-    VsockSSHTransport,
+    TcpSSHTransport,
     ensure_infra_keypair,
     namespace_runtime_dir,
-    podman_annotation_resolver,
+    podman_port_resolver,
 )
 
 # Names matching the L0 guest's ``/etc/ssh/authorized_keys.d/terok``
@@ -96,9 +96,8 @@ def ensure_krun_host_keypair(
 
     The orchestrator bind-mounts ``public_path`` into the running
     krun guest at ``/etc/ssh/authorized_keys.d/terok`` so the
-    guest's sshd-on-vsock accepts our private key.  The L0 image
-    itself ships an empty placeholder at that path; the bind-mount
-    overlays it.
+    guest's sshd accepts our private key.  The L0 image itself ships
+    an empty placeholder at that path; the bind-mount overlays it.
 
     Rotation = clear the ``%host`` scope in the vault, then re-run.
     Typically called per task launch under krun (idempotent — loads
@@ -144,7 +143,7 @@ def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
     """Construct a production [`KrunRuntime`][terok_sandbox.KrunRuntime] in one call.
 
     Wires together the three production pieces — the vault-backed host
-    keypair, the vsock-SSH transport, and a fresh
+    keypair, the TCP-over-passt SSH transport, and a fresh
     [`PodmanRuntime`][terok_sandbox.PodmanRuntime] for lifecycle —
     so the orchestrator's runtime selector reduces to a single call:
     ``_runtime = make_krun_runtime(cfg=...)``.  The experimental-flag
@@ -152,9 +151,9 @@ def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
     only when the gate is open).
     """
     kp = ensure_krun_host_keypair(cfg=cfg)
-    transport = VsockSSHTransport(
+    transport = TcpSSHTransport(
         identity_file=kp.private_path,
-        endpoint_resolver=podman_annotation_resolver(),
+        endpoint_resolver=podman_port_resolver(),
     )
     return KrunRuntime(transport=transport, podman=PodmanRuntime())
 

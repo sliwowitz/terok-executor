@@ -300,12 +300,12 @@ class TestWriteAtomic:
 
 
 class TestMakeKrunRuntime:
-    """`make_krun_runtime` wires the vault key into a VsockSSHTransport-backed runtime."""
+    """`make_krun_runtime` wires the vault key into a TcpSSHTransport-backed runtime."""
 
-    def test_returns_krun_runtime_with_vsock_transport(self, tmp_path: Path, _vault_backed) -> None:
-        """Production factory: KrunRuntime + VsockSSHTransport, identity from %host."""
+    def test_returns_krun_runtime_with_tcp_transport(self, tmp_path: Path, _vault_backed) -> None:
+        """Production factory: KrunRuntime + TcpSSHTransport, identity from %host."""
         from terok_sandbox import KrunRuntime, PodmanRuntime
-        from terok_sandbox.runtime.krun_transport import VsockSSHTransport
+        from terok_sandbox.runtime.krun_transport import TcpSSHTransport
 
         # Force the helper to use our temp runtime_dir by patching it at
         # call time — the factory itself doesn't expose runtime_dir.
@@ -315,6 +315,6 @@ class TestMakeKrunRuntime:
             rt = make_krun_runtime(cfg=_vault_backed)
 
         assert isinstance(rt, KrunRuntime)
-        assert isinstance(rt.transport, VsockSSHTransport)
+        assert isinstance(rt.transport, TcpSSHTransport)
         # The runtime composes a fresh PodmanRuntime for lifecycle verbs.
         assert isinstance(rt._podman, PodmanRuntime)
