@@ -41,7 +41,7 @@ from terok_sandbox import (
     TcpSSHTransport,
     ensure_infra_keypair,
     namespace_runtime_dir,
-    port_annotation_resolver,
+    podman_port_resolver,
 )
 
 # Names matching the L0 guest's ``/etc/ssh/authorized_keys.d/terok``
@@ -153,7 +153,7 @@ def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
     kp = ensure_krun_host_keypair(cfg=cfg)
     transport = TcpSSHTransport(
         identity_file=kp.private_path,
-        endpoint_resolver=port_annotation_resolver(),
+        endpoint_resolver=podman_port_resolver(),
     )
     return KrunRuntime(transport=transport, podman=PodmanRuntime())
 
