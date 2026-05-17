@@ -43,6 +43,12 @@ depends_on = []
 path = "terok_executor.vault_addr"
 depends_on = []
 
+# Global config.yml writers (executor-owned sections — currently image.agents).
+# Depends only on terok_sandbox (external).
+[[modules]]
+path = "terok_executor.config"
+depends_on = []
+
 # ── roster/ — agent catalog ─────────────────────────────────────────
 
 # Runtime dataclasses — pure data, zero deps
@@ -246,6 +252,7 @@ depends_on = [
 path = "terok_executor.commands"
 depends_on = [
     "terok_executor.acp",
+    "terok_executor.config",
     "terok_executor.container.build",
     "terok_executor.container.runner",
     "terok_executor.credentials.auth",
@@ -288,6 +295,7 @@ depends_on = [
     "terok_executor._tree",
     "terok_executor.acp",
     "terok_executor.commands",
+    "terok_executor.config",
     "terok_executor.container.build",
     "terok_executor.container.cache",
     "terok_executor.container.env",
