@@ -3216,13 +3216,13 @@ url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.6.14a4/t
 
 [[package]]
 name = "terok-sandbox"
-version = "0.0.124a8"
+version = "0.0.124a9"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_sandbox-0.0.124a8-py3-none-any.whl", hash = "sha256:600f9a28a776e90accc8ba3946405c7f308f0c08fa9619bc71ace88f228af6d2"},
+    {file = "terok_sandbox-0.0.124a9-py3-none-any.whl", hash = "sha256:9ef020a430228b84bce4687049f81ce3d93d954cf610352ed50b39ebc65cf578"},
 ]
 
 [package.dependencies]
@@ -3240,7 +3240,7 @@ terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/downloa
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a8/terok_sandbox-0.0.124a8-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a9/terok_sandbox-0.0.124a9-py3-none-any.whl"
 
 [[package]]
 name = "terok-shield"
@@ -3658,4 +3658,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "5358ee2f7926bd5f963e999df5afa1041318ffa7d7f5b9268d8c25c9950d0cd1"
+content-hash = "373e1eb60899feb2d5ca9029feefd5f2555201afbe974fd96768eb6ebf10e819"
