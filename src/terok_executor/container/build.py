@@ -488,17 +488,6 @@ def prepare_build_context(dest: Path) -> None:
 # ── Dockerfile rendering ──
 
 
-# systemd unit names for openssh-server differ across package families:
-# ``ssh.socket`` / ``ssh.service`` on Debian/Ubuntu, ``sshd.socket`` /
-# ``sshd.service`` on Fedora-like.  The L0 template threads both names
-# in via Jinja so the krun socket drop-in and the service mask land on
-# the right unit regardless of the base distro.
-_FAMILY_SSH_UNITS: dict[str, dict[str, str]] = {
-    "deb": {"socket": "ssh.socket", "service": "ssh.service"},
-    "rpm": {"socket": "sshd.socket", "service": "sshd.service"},
-}
-
-
 def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None) -> str:
     """Render the L0 (base dev) Dockerfile.
 
@@ -507,29 +496,22 @@ def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None
     (``"deb"`` or ``"rpm"``) selects the package-manager branch of the
     template; ``None`` resolves it via [`detect_family`][terok_executor.container.build.detect_family].
 
-    The rendered template carries the krun-mode sshd-on-vsock
-    infrastructure (openssh-server, hardened sshd config drop-in,
-    ``{{ ssh_socket_name }}`` vsock binding, masked
-    ``{{ ssh_service_name }}``) so the **same L0 image serves both
-    crun and krun**.  Under crun the vsock socket has nothing to bind
-    to and the machinery stays dormant; under krun the socket
-    activates and the host can reach in via SSH-over-vsock.  The trust
-    file at ``/etc/ssh/authorized_keys.d/terok`` ships empty — the
-    live host pubkey is bind-mounted in by the orchestrator at task
-    launch, so the L0 image stays free of per-installation secrets and
-    caches identically across hosts.
+    The rendered template ships a single vendor unit
+    (``sshd-vsock.socket`` + matching per-connection
+    ``sshd-vsock@.service``) gated on a stock
+    ``ConditionFileNotEmpty=`` over ``/etc/ssh/authorized_keys.d/terok``.
+    The trust file ships empty, so the unit is skipped at boot under
+    crun (no keys ⇒ no listener); under krun terok bind-mounts the
+    live host pubkey over it at launch, the condition flips to true,
+    socket activation kicks in, and the host reaches the guest via
+    SSH-over-vsock.  One image, one build, two runtimes — and "off"
+    is structural, not just inert.
     """
     base_image = _normalize_base_image(base_image)
     fam = detect_family(base_image, override=family)
-    units = _FAMILY_SSH_UNITS[fam]
     return _render_template(
         "l0.dev.Dockerfile.template",
-        {
-            "BASE_IMAGE": base_image,
-            "family": fam,
-            "ssh_socket_name": units["socket"],
-            "ssh_service_name": units["service"],
-        },
+        {"BASE_IMAGE": base_image, "family": fam},
     )
 
 

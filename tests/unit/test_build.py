@@ -601,14 +601,17 @@ class TestTemplateRendering:
         assert "FROM" in content
         assert "coderabbit" not in content.lower()
 
-    # ─ Unified L0 — krun-mode infrastructure baked into the regular L0 ─
+    # ─ Unified L0 — sshd-on-vsock structurally off unless host pubkey is bind-mounted ─
     #
     # The L0 image carries sshd-on-vsock infrastructure (openssh-server,
-    # hardened sshd config drop-in, vsock socket unit, masked TCP service
-    # unit, empty placeholder for the bind-mounted authorized_keys file)
-    # so it serves both crun and krun consumers from a single cache
-    # layer.  These tests pin the directives sandbox/terok rely on at
-    # launch time.
+    # hardened sshd config drop-in, vendor unit pair ``sshd-vsock.socket`` +
+    # ``sshd-vsock@.service`` gated on ``ConditionFileNotEmpty=``, masked
+    # stock service+socket, empty placeholder authorized_keys file).  Under
+    # crun the placeholder is empty ⇒ the condition fails ⇒ the socket is
+    # skipped at boot ⇒ sshd is unreachable.  Under krun terok bind-mounts
+    # the live host pubkey over the placeholder ⇒ condition passes ⇒
+    # socket activates.  These tests pin the directives sandbox/terok rely
+    # on at launch time.
 
     def test_l0_installs_openssh_server_under_both_families(self) -> None:
         """``openssh-server`` ships in the package list on deb and rpm alike."""
@@ -617,31 +620,40 @@ class TestTemplateRendering:
         assert "openssh-server" in deb
         assert "openssh-server" in rpm
 
-    def test_l0_threads_family_specific_ssh_unit_names(self) -> None:
-        """``ssh.socket`` on deb, ``sshd.socket`` on rpm — the systemd drop-in
-        path and the masked service unit name both branch on the family."""
+    def test_l0_ships_vendor_socket_unit_gated_on_authorized_keys(self) -> None:
+        """``sshd-vsock.socket`` is the single switch: stock ``ConditionFileNotEmpty=``
+        on the bind-mount target, so under crun (empty placeholder) systemd
+        skips the unit at boot and sshd has no path to start."""
+        content = render_l0("ubuntu:24.04", family="deb")
+        assert "/usr/lib/systemd/system/sshd-vsock.socket" in content
+        assert "ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok" in content
+        assert "ListenStream=vsock::22" in content
+        assert "Accept=yes" in content
+        assert "WantedBy=sockets.target" in content
+        assert "systemctl enable sshd-vsock.socket" in content
+
+    def test_l0_ships_per_connection_service_template(self) -> None:
+        """Socket activation with ``Accept=yes`` invokes ``<basename>@.service``
+        per connection — ship our own template so we don't depend on the
+        package's ``sshd@.service``/``ssh@.service`` (name differs by family,
+        existence differs by version)."""
+        content = render_l0("ubuntu:24.04", family="deb")
+        assert "/usr/lib/systemd/system/sshd-vsock@.service" in content
+        assert "ExecStart=-/usr/sbin/sshd -i -e" in content
+        assert "StandardInput=socket" in content
+
+    def test_l0_masks_stock_sshd_under_both_families(self) -> None:
+        """Mask the package's own TCP service+socket so post-install hooks
+        can't bring up a TCP listener.  Unit names differ by family —
+        ``ssh.*`` on deb, ``sshd.*`` on rpm — and we mask exactly the
+        ones that exist (no dead symlinks for the other family's names)."""
         deb = render_l0("ubuntu:24.04", family="deb")
-        assert "/etc/systemd/system/ssh.socket.d/" in deb
-        assert "systemctl enable ssh.socket" in deb
-        assert "systemctl mask ssh.service" in deb
+        assert "systemctl mask ssh.service ssh.socket" in deb
+        assert "sshd.service" not in deb.split("systemctl mask")[1].split("\n")[0]
 
         rpm = render_l0("fedora:44", family="rpm")
-        assert "/etc/systemd/system/sshd.socket.d/" in rpm
-        assert "systemctl enable sshd.socket" in rpm
-        assert "systemctl mask sshd.service" in rpm
-
-    def test_l0_binds_sshd_to_vsock_only_with_tcp_reset_first(self) -> None:
-        """The sshd.socket drop-in wipes the inherited TCP ``ListenStream=``
-        before rebinding to ``vsock::22`` — order matters, a missing reset
-        would silently leave the TCP listener open under krun."""
-        content = render_l0("ubuntu:24.04", family="deb")
-        wipe = "'ListenStream=' \\"
-        rebind = "'ListenStream=vsock::22' \\"
-        assert wipe in content, "missing empty ListenStream= wipe — TCP would stay open"
-        assert rebind in content, "missing vsock::22 ListenStream re-bind"
-        assert content.index(wipe) < content.index(rebind), (
-            "ListenStream= wipe must precede the vsock::22 rebind for the override to take effect"
-        )
+        assert "systemctl mask sshd.service sshd.socket" in rpm
+        assert "ssh.service" not in rpm.split("systemctl mask")[1].split("\n")[0]
 
     def test_l0_hardens_sshd_to_pubkey_only_dev_only_no_forwarding(self) -> None:
         """The sshd config drop-in collapses the surface to a single
@@ -664,10 +676,9 @@ class TestTemplateRendering:
 
     def test_l0_ships_empty_authorized_keys_placeholder(self) -> None:
         """The trust file ships **empty** — the live host pubkey is
-        bind-mounted in at task launch by terok.  Pinning ``: > …``
-        (the empty-out shell idiom) catches an accidental swap to a
-        baked-in host key, which would defeat the cache stability the
-        unified-L0 design rests on."""
+        bind-mounted in at task launch by terok.  An empty file is also
+        the off-switch: ``ConditionFileNotEmpty=`` on the socket unit
+        means zero-bytes ⇒ socket never loads ⇒ sshd unreachable."""
         content = render_l0("ubuntu:24.04", family="deb")
         assert ": > /etc/ssh/authorized_keys.d/terok" in content
         # And the L0 build path carries no ``KRUN_HOST_PUBKEY`` build arg.

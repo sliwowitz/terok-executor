@@ -3,23 +3,20 @@
 # L0 — base dev image shared by every terok project.
 #
 # Identical image content under both supported OCI runtimes (``crun``
-# and ``krun``).  The vsock-bound sshd machinery added below is
-# **dormant under crun** (no ``vhost-vsock`` device in the namespace ⇒
-# ``sshd.socket`` has nothing to bind to) and **active under krun**
-# (the microVM exposes vsock, the socket activates, the host can
-# reach in via ``ssh -o ProxyCommand=socat -…``).  One image, one
-# build, two runtimes.
+# and ``krun``).  The single switch between "no sshd" and "sshd-on-vsock"
+# is a stock ``ConditionFileNotEmpty=`` on our own ``sshd-vsock.socket``
+# unit, gated on ``/etc/ssh/authorized_keys.d/terok``.  Under crun the
+# placeholder file is empty ⇒ systemd skips the socket at boot ⇒ sshd
+# has no path to start (the package's own ``ssh.service``/``sshd.service``
+# is masked).  Under krun terok bind-mounts the live host pubkey over
+# the placeholder ⇒ the file is non-empty ⇒ the socket activates ⇒
+# the host reaches in via ``ssh -o ProxyCommand=socat -…``.
 #
-# The trust file ``/etc/ssh/authorized_keys.d/terok`` ships **empty**:
-# the live host pubkey is bind-mounted in at task launch by terok,
-# so the image never carries a per-installation secret and stays
-# cacheable across hosts.
-#
-# Family branching (apt vs dnf) follows the ``family`` Jinja variable;
-# systemd socket/service names differ by family
-# ({{ ssh_socket_name }} / {{ ssh_service_name }} resolve to
-# ``ssh.socket``/``ssh.service`` on deb, ``sshd.socket``/``sshd.service``
-# on rpm).
+# Two vendor unit files (``sshd-vsock.socket`` + ``sshd-vsock@.service``)
+# ship in ``/usr/lib/systemd/system/`` — the vendor location, alongside
+# the package's own units, not as drop-ins over them.  ``systemctl
+# list-units`` shows exactly one terok-injected socket with a clear
+# "condition not met" reason whenever it's dormant.
 
 ARG BASE_IMAGE={{ BASE_IMAGE }}
 FROM ${BASE_IMAGE}
@@ -94,27 +91,27 @@ RUN set -eux; \
     chmod 700 /home/dev/.ssh; \
     chmod 0777 /workspace
 
-# ── krun: sshd-on-vsock (dormant under crun) ────────────────────────
+# ── sshd-on-vsock: structurally off unless authorized_keys is populated ───
 #
 # Pubkey-only sshd hardened down to the single ``dev`` account, no
-# forwarding of any kind, trust file at the system-wide
-# ``authorized_keys.d/terok`` slot so the in-guest dev user cannot
-# edit the trust file from inside.
+# forwarding of any kind.  The trust file at
+# ``/etc/ssh/authorized_keys.d/terok`` ships **empty** — the live host
+# pubkey is bind-mounted in at task launch by terok, so the L0 image
+# never carries a per-installation secret.
 #
-# The trust file ships **empty** — the live host pubkey is
-# bind-mounted in at task launch by terok (so the L0 image never
-# carries a per-installation secret).  Under crun the vsock socket
-# never activates ⇒ sshd never reads it ⇒ the empty file is
-# harmless.  Under krun the socket binds vsock::22 ⇒ sshd reads the
-# bind-mounted file ⇒ the host can reach in via SSH-over-vsock.
+# The single switch is a stock ``ConditionFileNotEmpty=`` on our own
+# ``sshd-vsock.socket`` unit: if no host pubkey was bind-mounted, the
+# trust file is zero bytes, systemd skips the unit at boot, sshd is
+# unreachable.  No init script, no oneshot, no label parsing — the
+# activation prerequisite *is* sshd's auth prerequisite, expressed in
+# one stock systemd directive.
 #
-# Distro's stock TCP ``{{ ssh_service_name }}`` is **masked**: even
-# if a package's post-install enables it, systemd refuses to start
-# it.  Only the socket-activated path lives.
+# Stock {% if family == "deb" %}``ssh.service``/``ssh.socket``{% else %}``sshd.service``/``sshd.socket``{% endif %} are masked so even an
+# unrelated post-install hook can't bring a TCP listener up.
 RUN install -d -m 0755 /etc/ssh/sshd_config.d \
     && install -d -m 0755 /etc/ssh/authorized_keys.d \
     && printf '%s\n' \
-        '# terok krun guest hardening — dormant under crun, active under krun.' \
+        '# terok sshd hardening — vsock-only path, pubkey-only, single account.' \
         'PermitRootLogin no' \
         'PasswordAuthentication no' \
         'PermitEmptyPasswords no' \
@@ -127,17 +124,39 @@ RUN install -d -m 0755 /etc/ssh/sshd_config.d \
         'PermitTunnel no' \
         'GatewayPorts no' \
         'AuthorizedKeysFile /etc/ssh/authorized_keys.d/terok' \
-        > /etc/ssh/sshd_config.d/00-terok-krun.conf \
+        > /etc/ssh/sshd_config.d/00-terok.conf \
     && : > /etc/ssh/authorized_keys.d/terok \
     && chmod 0644 /etc/ssh/authorized_keys.d/terok \
-    && install -d -m 0755 /etc/systemd/system/{{ ssh_socket_name }}.d \
+    && install -d -m 0755 /usr/lib/systemd/system \
     && printf '%s\n' \
+        '[Unit]' \
+        'Description=Terok SSH-over-vsock listener' \
+        'Documentation=https://github.com/terok-ai/terok' \
+        'ConditionFileNotEmpty=/etc/ssh/authorized_keys.d/terok' \
+        '' \
         '[Socket]' \
-        'ListenStream=' \
         'ListenStream=vsock::22' \
-        > /etc/systemd/system/{{ ssh_socket_name }}.d/vsock.conf \
-    && systemctl enable {{ ssh_socket_name }} \
-    && systemctl mask {{ ssh_service_name }}
+        'Accept=yes' \
+        '' \
+        '[Install]' \
+        'WantedBy=sockets.target' \
+        > /usr/lib/systemd/system/sshd-vsock.socket \
+    && printf '%s\n' \
+        '[Unit]' \
+        'Description=Terok SSH-over-vsock per-connection daemon' \
+        'Documentation=https://github.com/terok-ai/terok' \
+        '' \
+        '[Service]' \
+        'ExecStart=-/usr/sbin/sshd -i -e' \
+        'StandardInput=socket' \
+        'StandardError=journal' \
+        > /usr/lib/systemd/system/sshd-vsock@.service \
+    && systemctl enable sshd-vsock.socket \
+{% if family == "deb" -%}
+    && systemctl mask ssh.service ssh.socket
+{%- else -%}
+    && systemctl mask sshd.service sshd.socket
+{%- endif %}
 
 WORKDIR /workspace
 
