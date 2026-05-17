@@ -32,17 +32,37 @@ set -euo pipefail
 # so a botched L0 with a non-empty placeholder can't accidentally
 # expose sshd under crun.
 #
+# Under krun the container is uid 0 inside the guest — libkrun ignores
+# the L0's ``USER dev`` directive (and ``--userns=keep-id``), so this
+# block runs as root and ``sudo`` would fail anyway under libkrun's
+# virtio-fs (the host-side virtio-fs server runs unprivileged on the
+# host and can't honour setuid exec).  See docs/runtimes.md.  Sshd
+# itself runs as root, listens on 22, and drops to the authenticated
+# user on connection — same model as any multi-user host.
+#
+# Operators can log in as ``dev`` (default, for AI agents that refuse
+# uid 0) or as ``root`` (escape hatch for tasks that need privileged
+# ops — sudo doesn't work, this is the workaround).  The two paths
+# share the same bind-mounted authorized_keys file; the root path is
+# wired in here (not baked into the L0) so a crun-mode image carries
+# nothing that would authorise a root ssh session.  ``-o`` overrides
+# the L0's restrictive ``PermitRootLogin no`` + ``AllowUsers dev``
+# baked defaults — first-wins, and ``-o`` is processed before the
+# config file.
+#
 # The supervisor loop restarts sshd if it crashes (panic, OOM, etc.);
 # ``setsid`` puts the loop in its own session so SIGHUP from the outer
-# init shell (which exits after ``exec bash`` below) can't take it
-# down.  ``/run/sshd`` is sshd's privsep chroot — package-created on
-# rpm but not always on deb, so we mkdir defensively.
+# init shell (which exits after ``exec bash`` below) can't take it down.
 if [[ "${TEROK_CONTAINER_RUNTIME:-}" == "krun" ]]; then
-  echo ">> starting sshd supervisor on TCP 22 (krun mode)"
-  sudo mkdir -p /run/sshd
-  sudo setsid bash -c '
+  echo ">> starting sshd supervisor on TCP 22 (krun mode — root + dev login)"
+  mkdir -p /run/sshd /root/.ssh
+  ln -sf /etc/ssh/authorized_keys.d/terok /root/.ssh/authorized_keys
+  chmod 700 /root/.ssh
+  setsid bash -c '
     while :; do
-      /usr/sbin/sshd -D -e
+      /usr/sbin/sshd -D -e \
+        -o "AllowUsers dev root" \
+        -o "PermitRootLogin without-password"
       echo "[sshd-supervisor] sshd exited (code $?); restarting in 1s" >&2
       sleep 1
     done
