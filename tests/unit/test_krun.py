@@ -19,8 +19,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from terok_executor.krun import (
-    L0GHostKeypair,
-    ensure_l0g_host_keypair,
+    KrunHostKeypair,
+    ensure_krun_host_keypair,
     make_krun_runtime,
 )
 
@@ -46,15 +46,15 @@ def _vault_backed(tmp_path: Path):
     return cfg
 
 
-class TestEnsureL0GHostKeypair:
-    """`ensure_l0g_host_keypair` mints via the vault and materialises to tmpfs."""
+class TestEnsureKrunHostKeypair:
+    """`ensure_krun_host_keypair` mints via the vault and materialises to tmpfs."""
 
     def test_creates_keypair_when_missing(self, tmp_path: Path, _vault_backed) -> None:
         """First call mints in the vault, writes 0600 OpenSSH PEM to tmpfs."""
         runtime_dir = tmp_path / "runtime"
-        result = ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        result = ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
-        assert isinstance(result, L0GHostKeypair)
+        assert isinstance(result, KrunHostKeypair)
         assert result.created is True
         assert result.private_path == runtime_dir / "krun_host.key"
         assert result.public_path == runtime_dir / "krun_host.key.pub"
@@ -83,7 +83,7 @@ class TestEnsureL0GHostKeypair:
         """
         monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
         with pytest.raises(SystemExit, match="requires .*XDG_RUNTIME_DIR"):
-            ensure_l0g_host_keypair(cfg=_vault_backed)  # no explicit runtime_dir
+            ensure_krun_host_keypair(cfg=_vault_backed)  # no explicit runtime_dir
 
     def test_tightens_existing_dir_to_0700(self, tmp_path: Path, _vault_backed) -> None:
         """A pre-existing runtime dir wider than 0700 is re-tightened.
@@ -94,7 +94,7 @@ class TestEnsureL0GHostKeypair:
         """
         runtime_dir = tmp_path / "runtime"
         runtime_dir.mkdir(mode=0o755)  # too wide
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
         assert (runtime_dir.stat().st_mode & 0o777) == 0o700
 
     def test_refuses_symlink_runtime_dir(self, tmp_path: Path, _vault_backed) -> None:
@@ -111,7 +111,7 @@ class TestEnsureL0GHostKeypair:
         link.symlink_to(real, target_is_directory=True)
 
         with pytest.raises(SystemExit, match="symlink"):
-            ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=link)
+            ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=link)
 
         # The real target was never written into.
         assert list(real.iterdir()) == []
@@ -133,7 +133,7 @@ class TestEnsureL0GHostKeypair:
             patch("terok_executor.krun.os.chmod"),  # chmod becomes a no-op
             pytest.raises(SystemExit, match="group/world-accessible"),
         ):
-            ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+            ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
     def test_private_write_is_atomic_no_symlink_clobber(
         self, tmp_path: Path, _vault_backed
@@ -152,7 +152,7 @@ class TestEnsureL0GHostKeypair:
         decoy.write_text("untouched")
         (runtime_dir / "krun_host.key").symlink_to(decoy)
 
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
         priv = runtime_dir / "krun_host.key"
         assert not priv.is_symlink()
@@ -167,7 +167,7 @@ class TestEnsureL0GHostKeypair:
         decoy.write_text("untouched")
         (runtime_dir / "krun_host.key.pub").symlink_to(decoy)
 
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
         pub = runtime_dir / "krun_host.key.pub"
         assert not pub.is_symlink()
@@ -184,8 +184,8 @@ class TestEnsureL0GHostKeypair:
         now" diagnostics from the first call alone.
         """
         runtime_dir = tmp_path / "runtime"
-        first = ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
-        second = ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        first = ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        second = ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
         assert first.public_line == second.public_line
         assert first.fingerprint == second.fingerprint
@@ -203,11 +203,11 @@ class TestEnsureL0GHostKeypair:
         propagate without manual intervention.
         """
         runtime_dir = tmp_path / "runtime"
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
         priv = runtime_dir / "krun_host.key"
         priv.write_bytes(b"-----BEGIN OPENSSH PRIVATE KEY-----\nGARBAGE\n")
 
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
 
         restored = priv.read_bytes()
         assert restored.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -215,7 +215,7 @@ class TestEnsureL0GHostKeypair:
         assert (priv.stat().st_mode & 0o777) == 0o600
 
     def test_pubkey_is_baked_in_authorized_keys_form(self, tmp_path: Path, _vault_backed) -> None:
-        """The .pub file is exactly what L0G ``build_l0g_image`` consumes.
+        """The .pub file is exactly what L0 (bind-mounted in at task launch) consumes.
 
         Loose round-trip: parse the public line via cryptography to
         confirm it's a valid OpenSSH public key — that's the contract
@@ -224,7 +224,7 @@ class TestEnsureL0GHostKeypair:
         from cryptography.hazmat.primitives import serialization
 
         runtime_dir = tmp_path / "runtime"
-        ensure_l0g_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
         line = (runtime_dir / "krun_host.key.pub").read_text().strip()
         key_part = " ".join(line.split()[:2])
         serialization.load_ssh_public_key(key_part.encode())  # no raise

@@ -5,11 +5,13 @@
 
 Two responsibilities, both intentionally outside terok:
 
-- [`ensure_l0g_host_keypair`][terok_executor.krun.ensure_l0g_host_keypair] —
-  mint or load the host SSH keypair the L0G guest image trusts, and
-  materialise the private half onto a tmpfs file ``ssh -i`` can read.
-  The vault is the system of record; the tmpfs cache is a derived
-  view rebuilt per process.
+- [`ensure_krun_host_keypair`][terok_executor.krun.ensure_krun_host_keypair]
+  — mint or load the SSH keypair the L0 guest's ``sshd``-on-vsock
+  trusts, and materialise both halves onto tmpfs files: the private
+  half so ``ssh -i`` can read it, and the public half so the
+  orchestrator can bind-mount it into the running guest at
+  ``/etc/ssh/authorized_keys.d/terok``.  The vault is the system of
+  record; the tmpfs cache is a derived view rebuilt per process.
 
 - [`make_krun_runtime`][terok_executor.krun.make_krun_runtime] — one-shot
   constructor for a production
@@ -19,7 +21,7 @@ Two responsibilities, both intentionally outside terok:
   invisible.
 
 Living in executor (rather than terok) keeps the rule honest: anything
-that owns ``build_l0g_image`` also owns the trust material that makes
+that owns the L0 build path also owns the trust material that makes
 the resulting guest reachable.  Selecting krun without provisioning
 the key is a contradiction, so the two operations belong together.
 """
@@ -42,21 +44,22 @@ from terok_sandbox import (
     podman_annotation_resolver,
 )
 
-# Names matching the L0G guest image's baked-in trust file.  Keep both
-# halves co-located so a future rename touches one place.
+# Names matching the L0 guest's ``/etc/ssh/authorized_keys.d/terok``
+# bind-mount target.  Keep both halves co-located so a future rename
+# touches one place.
 _HOST_KEYPAIR_BASENAME = "krun_host"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class L0GHostKeypair:
+class KrunHostKeypair:
     """Materialised view of the ``%host`` infrastructure keypair.
 
-    Returned by [`ensure_l0g_host_keypair`][terok_executor.krun.ensure_l0g_host_keypair].
+    Returned by [`ensure_krun_host_keypair`][terok_executor.krun.ensure_krun_host_keypair].
     Carries the tmpfs path to the OpenSSH-PEM private key (ready for
-    ``ssh -i``) and the matching public-key line (ready to bake into
-    ``authorized_keys.d/terok`` at L0G build time), so callers don't
-    have to redo the DER→PEM conversion or re-derive the public line
-    from raw blobs.
+    ``ssh -i``) and the matching public-key file (ready to bind-mount
+    into the krun guest at ``/etc/ssh/authorized_keys.d/terok``), so
+    callers don't have to redo the DER→PEM conversion or re-derive
+    the public line from raw blobs.
     """
 
     private_path: Path
@@ -75,11 +78,11 @@ class L0GHostKeypair:
     """``True`` when this call minted the key; ``False`` when it was loaded."""
 
 
-def ensure_l0g_host_keypair(
+def ensure_krun_host_keypair(
     *,
     cfg: SandboxConfig | None = None,
     runtime_dir: Path | None = None,
-) -> L0GHostKeypair:
+) -> KrunHostKeypair:
     """Load (or mint, first call) the ``%host`` keypair and materialise it to tmpfs.
 
     The vault is the system of record: the keypair lives in the sandbox
@@ -91,14 +94,16 @@ def ensure_l0g_host_keypair(
     *runtime_dir* (default:
     [`namespace_runtime_dir()`][terok_sandbox.namespace_runtime_dir]).
 
+    The orchestrator bind-mounts ``public_path`` into the running
+    krun guest at ``/etc/ssh/authorized_keys.d/terok`` so the
+    guest's sshd-on-vsock accepts our private key.  The L0 image
+    itself ships an empty placeholder at that path; the bind-mount
+    overlays it.
+
     Rotation = clear the ``%host`` scope in the vault, then re-run.
-    Typically called once per process from
-    [`make_krun_runtime`][terok_executor.krun.make_krun_runtime] (the
-    runtime handle is cached upstream), so the tmpfs cache lasts for
-    the process lifetime; an out-of-band rotation propagates the next
-    time terok-executor starts.  The public half
-    (``krun_host.key.pub``) must be baked into the L0G guest image at
-    build time so the guest accepts our auth.
+    Typically called per task launch under krun (idempotent — loads
+    on subsequent calls).  New tasks pick up the new key; in-flight
+    tasks keep what they had until they're stopped.
 
     Requires the vault to be unlocked — the krun runtime is gated on
     ``experimental: true`` upstream and assumes the operator has the
@@ -126,7 +131,7 @@ def ensure_l0g_host_keypair(
 
     _write_atomic(private, infra.private_pem, mode=0o600)
     _write_atomic(public, (infra.public_line + "\n").encode(), mode=0o644)
-    return L0GHostKeypair(
+    return KrunHostKeypair(
         private_path=private,
         public_path=public,
         public_line=infra.public_line,
@@ -146,7 +151,7 @@ def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
     gate stays on the orchestrator side (this factory is reachable
     only when the gate is open).
     """
-    kp = ensure_l0g_host_keypair(cfg=cfg)
+    kp = ensure_krun_host_keypair(cfg=cfg)
     transport = VsockSSHTransport(
         identity_file=kp.private_path,
         endpoint_resolver=podman_annotation_resolver(),
