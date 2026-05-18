@@ -318,3 +318,68 @@ class TestMakeKrunRuntime:
         assert isinstance(rt.transport, TcpSSHTransport)
         # The runtime composes a fresh PodmanRuntime for lifecycle verbs.
         assert isinstance(rt._podman, PodmanRuntime)
+
+
+class TestKrunLaunchArgs:
+    """`krun_launch_args` collects the four things that reach across the
+    orchestrator/runtime boundary into executor's domain — the host-pubkey
+    bind-mount, the init-script gate env var, the USER-directive override,
+    and the pasta DNS forwarder — so terok doesn't have to know the
+    in-container target path or any other in-guest detail."""
+
+    def test_emits_pubkey_bind_mount_with_shared_selinux_relabel(
+        self, tmp_path: Path, _vault_backed
+    ) -> None:
+        from terok_executor.krun import krun_launch_args
+
+        runtime_dir = tmp_path / "runtime"
+        with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=runtime_dir):
+            runtime_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+            args = krun_launch_args(cfg=_vault_backed)
+
+        v_idx = args.index("-v")
+        spec = args[v_idx + 1]
+        assert spec.endswith(":/etc/ssh/authorized_keys.d/terok:ro,z")
+        # The source is the materialised public key — pull it via the
+        # same helper terok would call and assert the prefix matches.
+        kp = ensure_krun_host_keypair(cfg=_vault_backed, runtime_dir=runtime_dir)
+        assert spec.startswith(f"{kp.public_path}:")
+        # Shared relabel, never private — the source is host-wide.
+        assert ",Z" not in spec and ":Z" not in spec
+
+    def test_emits_runtime_signal_env_var(self, tmp_path: Path, _vault_backed) -> None:
+        from terok_executor.krun import krun_launch_args
+
+        with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
+            tmp_path.chmod(0o700)
+            args = krun_launch_args(cfg=_vault_backed)
+
+        env_assignments = [args[i + 1] for i, t in enumerate(args) if t == "-e"]
+        assert "TEROK_CONTAINER_RUNTIME=krun" in env_assignments
+
+    def test_overrides_image_user_to_root(self, tmp_path: Path, _vault_backed) -> None:
+        from terok_executor.krun import krun_launch_args
+
+        with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
+            tmp_path.chmod(0o700)
+            args = krun_launch_args(cfg=_vault_backed)
+
+        user_idx = args.index("--user")
+        assert args[user_idx + 1] == "root"
+
+    def test_points_dns_at_pasta_link_local_forwarder(self, tmp_path: Path, _vault_backed) -> None:
+        """``--dns 169.254.1.1`` — pasta's forwarder, the one address that's
+        both reachable from inside the krun guest (TSI surfaces the connect
+        to a host-side socket inside the netns where pasta answers) and
+        permitted by terok-shield's nft policy (``PASTA_DNS`` in
+        ``terok_shield.nft.constants``).  Hardcoded by design — anything
+        else either gets dropped by shield or isn't routable from the guest.
+        """
+        from terok_executor.krun import krun_launch_args
+
+        with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
+            tmp_path.chmod(0o700)
+            args = krun_launch_args(cfg=_vault_backed)
+
+        dns_idx = args.index("--dns")
+        assert args[dns_idx + 1] == "169.254.1.1"

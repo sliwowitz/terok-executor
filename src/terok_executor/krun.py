@@ -49,6 +49,17 @@ from terok_sandbox import (
 # touches one place.
 _HOST_KEYPAIR_BASENAME = "krun_host"
 
+# Pasta's built-in link-local DNS forwarder.  Inside a krun guest this
+# is the only resolver address that's both (a) reachable — TSI surfaces
+# the connect to a host-side socket inside the podman netns where pasta
+# answers it — and (b) permitted by terok-shield's nft policy, which
+# allows udp/tcp :53 to exactly this address (see
+# ``terok_shield.nft.constants.PASTA_DNS``).  Hardcoded rather than
+# imported: shield isn't an executor dependency, and the address is a
+# pasta-defined constant that's effectively stable.  Slirp4netns hosts
+# (``10.0.2.3``) aren't supported for krun yet.
+_PASTA_DNS_FORWARDER = "169.254.1.1"
+
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class KrunHostKeypair:
@@ -156,6 +167,51 @@ def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
         endpoint_resolver=podman_port_resolver(),
     )
     return KrunRuntime(transport=transport, podman=PodmanRuntime())
+
+
+def krun_launch_args(*, cfg: SandboxConfig | None = None) -> list[str]:
+    """Extra ``podman run`` args terok must splice in for a krun launch.
+
+    Four things that all reach across the orchestrator/runtime boundary
+    into executor's domain — the L0 image, the host keypair, the
+    in-guest ``init-ssh-and-repo.sh``, and the DNS forwarder address —
+    so they live here together rather than being open-coded in terok's
+    ``_project_runtime_flags``:
+
+    - Bind-mount the live host pubkey over the L0's empty placeholder
+      at ``/etc/ssh/authorized_keys.d/terok``.  ``z`` is the shared
+      SELinux relabel (never ``Z`` — the host pubkey is host-wide and
+      concurrent containers share the source).
+    - Set ``TEROK_CONTAINER_RUNTIME=krun`` so the init script's krun
+      gate fires.
+    - Override the L0's ``USER dev`` directive with ``--user root`` so
+      the in-guest sshd can start, listen on TCP 22, and drop to the
+      authenticated user on connection.  ``USER dev`` is the right
+      default under crun (AI agents that refuse uid 0); under krun the
+      session uid comes from which ``ssh user@…`` the operator picks.
+    - ``--dns 169.254.1.1`` so the guest resolves through pasta's
+      forwarder rather than the unreachable host-loopback stub.  Same
+      address terok-shield's nft already permits :53 to, so this works
+      under both shield-up and shield-down — the only behavioural cost
+      under shield-up is losing dnsmasq's clearance prompts (queries
+      bypass it).  Documented limitation for the experimental krun
+      runtime; will be revisited when shield+krun gets first-class
+      support.
+
+    Doesn't include ``--runtime krun`` itself or krun's microVM-sizing
+    annotations — those are orchestrator-level decisions terok keeps.
+    """
+    kp = ensure_krun_host_keypair(cfg=cfg)
+    return [
+        "-v",
+        f"{kp.public_path}:/etc/ssh/authorized_keys.d/terok:ro,z",
+        "-e",
+        "TEROK_CONTAINER_RUNTIME=krun",
+        "--user",
+        "root",
+        "--dns",
+        _PASTA_DNS_FORWARDER,
+    ]
 
 
 # ── Private helpers ─────────────────────────────────────────────────────────

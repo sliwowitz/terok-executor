@@ -101,7 +101,12 @@ from .credentials.vault_config import ConfigPatchError
 
 # -- Doctor + paths ------------------------------------------------------------
 from .doctor import agent_doctor_checks
-from .krun import KrunHostKeypair, ensure_krun_host_keypair, make_krun_runtime
+from .krun import (
+    KrunHostKeypair,
+    ensure_krun_host_keypair,
+    krun_launch_args,
+    make_krun_runtime,
+)
 from .paths import mounts_dir
 
 # -- Provider (headless dispatch, instructions, agent config) ------------------
@@ -276,5 +281,6 @@ __all__ = [
     # Krun (KVM-microVM) provisioning + runtime factory
     "KrunHostKeypair",
     "ensure_krun_host_keypair",
+    "krun_launch_args",
     "make_krun_runtime",
 ]
