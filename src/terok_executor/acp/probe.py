@@ -1,39 +1,34 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Model-roster probe for in-container ACP agents.
+"""Discover the models an in-container ACP agent advertises.
 
 Each in-container agent ships an ACP wrapper script (``terok-{agent}-acp``)
-that exposes the agent over JSON-RPC on stdio.  To learn which models an
-agent currently advertises, we drive a minimal handshake:
+that exposes the agent over JSON-RPC on stdio.  To learn which models
+the wrapper currently advertises, drive a minimal handshake:
 
 1. ``initialize`` — version negotiation
-2. ``session/new`` — receive ``configOptions`` (the model list lives here)
+2. ``session/new`` — receive the ``models`` block
 3. close stdin — agent exits cleanly
 
-The handshake is cheap (a few round-trips) but non-trivial to repeat:
-the result is cached by [`AgentRosterCache`][terok_executor.acp.cache.AgentRosterCache]
-and reused for the lifetime of the authenticated session.
+The handshake is cheap but non-trivial to repeat; the result is cached
+by [`AgentRosterCache`][terok_executor.acp.cache.AgentRosterCache] and
+reused for the lifetime of the authenticated session.
 
-The probe is transport-agnostic on top of
-[`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] — it owns no FDs of its
-own; it spawns the agent in an executor thread and bridges the two ends
-of a pipe pair as asyncio [`StreamReader`][asyncio.StreamReader]/[`StreamWriter`][asyncio.StreamWriter]
-so the proxy loop can drive them naturally and cancel cleanly.
+The probe spawns the wrapper directly via the ACP SDK's
+`acp.spawn_agent_process`.  Argv is supplied by
+the caller (the roster), so the probe itself doesn't need to know about
+``podman``, ``krun``, or the sandbox runtime.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-from typing import TYPE_CHECKING, Any
+from typing import Any, NoReturn
 
-from .model_options import iter_model_choice_dicts
-
-if TYPE_CHECKING:
-    from terok_sandbox import Sandbox
+from acp import CLIENT_METHODS, PROTOCOL_VERSION, RequestError, spawn_agent_process
+from acp.schema import ClientCapabilities
 
 _logger = logging.getLogger(__name__)
 
@@ -42,15 +37,113 @@ DEFAULT_PROBE_TIMEOUT_SEC = 3.0
 
 Bounds first-call ``session/new`` latency: the daemon probes every
 configured agent in parallel, so the slowest probe dominates.  Three
-seconds is enough for a healthy wrapper to handshake and short
-enough that a fully-unauthed image doesn't make the user wait ten
-seconds for a model picker.  Override per-call with the ``timeout``
-parameter or globally via ``TEROK_ACP_PROBE_TIMEOUT_SECS``.
-"""
+seconds is enough for a healthy wrapper to handshake and short enough
+that a fully-unauthed image doesn't make the user wait ten seconds for
+a model picker.  Override per call with the ``timeout`` parameter."""
 
-ACP_PROTOCOL_VERSION = 1
-"""ACP protocol version this proxy implements (matches the schema we
-verified during design).  Bumped when ACP makes a breaking change."""
+
+async def probe_agent_models(
+    *,
+    agent_id: str,
+    wrapper_argv: list[str],
+    timeout: float = DEFAULT_PROBE_TIMEOUT_SEC,
+    cwd: str = "/workspace",
+) -> tuple[str, ...]:
+    """Drive the minimal ACP handshake against ``terok-{agent_id}-acp``.
+
+    Spawns the wrapper via `acp.spawn_agent_process`
+    (which owns the asyncio stdio bridging and the graceful subprocess
+    shutdown dance), sends ``initialize`` and ``session/new``, reads
+    the ``models`` block, and returns the bare model ids.
+
+    Raises [`ProbeError`][terok_executor.acp.probe.ProbeError] on
+    timeout, transport failure, or any handshake error.  Callers (the
+    roster cache) typically catch it, cache an empty roster, and skip
+    the agent until the container is restarted.
+    """
+    command, *args = wrapper_argv
+    try:
+        async with asyncio.timeout(timeout):
+            async with spawn_agent_process(_ProbeClient(), command, *args) as (client, _proc):
+                await client.initialize(
+                    protocol_version=PROTOCOL_VERSION,
+                    client_capabilities=ClientCapabilities(),
+                )
+                resp = await client.new_session(cwd=cwd, mcp_servers=[])
+    except TimeoutError as exc:
+        _logger.warning("ACP probe for agent %r timed out after %.1fs", agent_id, timeout)
+        raise ProbeError(f"probe timed out for agent {agent_id!r}") from exc
+    except Exception as exc:
+        raise ProbeError(f"probe failed for agent {agent_id!r}: {exc}") from exc
+
+    if resp.models is None:
+        return ()
+    return tuple(m.model_id for m in resp.models.available_models)
+
+
+class _ProbeClient:
+    """Minimal `acp.Client` impl for the probe handshake.
+
+    The probe never triggers backend → client traffic in a healthy
+    wrapper: ``initialize`` + ``session/new`` complete before any tool
+    call could ask for a permission or a file read.  Stray
+    ``session_update`` notifications a chatty wrapper might emit are
+    swallowed (they're informational); requests are fast-failed with
+    ``method_not_found`` so a misbehaving wrapper doesn't hang the
+    probe waiting for a response the proxy can't provide.
+    """
+
+    def on_connect(self, _conn: Any) -> None:
+        """Required by the `acp.Client` protocol; nothing to do here."""
+
+    async def session_update(self, *_: object, **__: object) -> None:
+        """Swallow progress notifications a chatty wrapper might emit."""
+        return None
+
+    async def request_permission(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe can't relay permission prompts."""
+        _not_supported_during_probe(CLIENT_METHODS["session_request_permission"])
+
+    async def read_text_file(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe can't relay fs reads."""
+        _not_supported_during_probe(CLIENT_METHODS["fs_read_text_file"])
+
+    async def write_text_file(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe can't relay fs writes."""
+        _not_supported_during_probe(CLIENT_METHODS["fs_write_text_file"])
+
+    async def create_terminal(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe can't open terminals."""
+        _not_supported_during_probe(CLIENT_METHODS["terminal_create"])
+
+    async def terminal_output(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe owns no terminals."""
+        _not_supported_during_probe(CLIENT_METHODS["terminal_output"])
+
+    async def release_terminal(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe owns no terminals."""
+        _not_supported_during_probe(CLIENT_METHODS["terminal_release"])
+
+    async def wait_for_terminal_exit(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe owns no terminals."""
+        _not_supported_during_probe(CLIENT_METHODS["terminal_wait_for_exit"])
+
+    async def kill_terminal(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe owns no terminals."""
+        _not_supported_during_probe(CLIENT_METHODS["terminal_kill"])
+
+    async def ext_method(self, _name: str, _payload: dict[str, Any]) -> NoReturn:
+        """Fast-fail — probe doesn't carry extension surfaces."""
+        _not_supported_during_probe("ext")
+
+    async def ext_notification(self, _name: str, _payload: dict[str, Any]) -> None:
+        """Swallow extension notifications during the probe."""
+        return None
+
+
+def _not_supported_during_probe(method: str) -> NoReturn:
+    """Fail-fast helper for [`_ProbeClient`][terok_executor.acp.probe._ProbeClient]."""
+    raise RequestError.method_not_found(method)
 
 
 class ProbeError(RuntimeError):
@@ -61,196 +154,3 @@ class ProbeError(RuntimeError):
     ``ProbeError`` as "this agent is currently unusable" rather than
     bubble it to the user.
     """
-
-
-async def probe_agent_models(
-    *,
-    agent_id: str,
-    container: Any,
-    sandbox: Sandbox,
-    timeout: float = DEFAULT_PROBE_TIMEOUT_SEC,
-    cwd: str = "/workspace",
-) -> tuple[str, ...]:
-    """Drive the minimal ACP handshake against ``terok-{agent_id}-acp``.
-
-    Spawns the in-container wrapper via
-    [`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] (running in an
-    executor thread because the primitive is sync), sends
-    ``initialize`` and ``session/new``, parses the response for the
-    ``category: "model"`` configOption, and returns the model ids.
-
-    Raises [`ProbeError`][terok_executor.acp.probe.ProbeError] on timeout, malformed JSON, or any
-    other handshake failure.  Callers (the roster cache) typically
-    catch it, cache an empty roster, and skip the agent until the
-    container is restarted.
-    """
-    wrapper_cmd = [f"terok-{agent_id}-acp"]
-    loop = asyncio.get_running_loop()
-
-    # Two pipes: probe → child (host_in_w → host_in_r → child stdin)
-    # and child → probe (host_out_w → host_out_r → child stdout).
-    # Host-side ends are wrapped as asyncio streams so the readline
-    # in ``_drive_handshake`` is cancellable (run_in_executor reads
-    # are not).  Child-side ends go to the synchronous ``exec_stdio``
-    # primitive which copies bytes via its own pump threads.
-    host_in_r, host_in_w = os.pipe()
-    host_out_r, host_out_w = os.pipe()
-
-    write_pipe = os.fdopen(host_in_w, "wb", buffering=0)
-    write_transport, write_protocol = await loop.connect_write_pipe(
-        asyncio.streams.FlowControlMixin,
-        write_pipe,
-    )
-    writer = asyncio.StreamWriter(write_transport, write_protocol, None, loop)
-
-    read_pipe = os.fdopen(host_out_r, "rb", buffering=0)
-    reader = asyncio.StreamReader()
-    # Capture the transport so the cleanup ``finally`` can close *it*
-    # — closing the FileIO ``read_pipe`` directly leaves asyncio's
-    # epoll registration on a dead fd, and when the next subprocess
-    # gets that fd number back from the kernel its events are silently
-    # routed to the dead transport.  Took several days of bind hangs
-    # to track down; do not "simplify" this back to ``read_pipe.close()``.
-    read_transport, _read_protocol = await loop.connect_read_pipe(
-        lambda: asyncio.StreamReaderProtocol(reader),
-        read_pipe,
-    )
-
-    child_in = os.fdopen(host_in_r, "rb", buffering=0)
-    child_out = os.fdopen(host_out_w, "wb", buffering=0)
-    runtime = sandbox.runtime
-    # ``timeout=timeout + 1`` so exec_stdio's own subprocess.wait
-    # terminates the wrapper if it hangs past our handshake budget.
-    # Without this the executor thread stays pinned to a wrapper
-    # that never exits on stdin EOF — and a default thread pool with
-    # 13 probes in parallel can starve a subsequent bind that
-    # legitimately needs a slot.  The +1 leaves the asyncio
-    # ``wait_for`` above a chance to fire first (so we still
-    # ``raise ProbeError`` rather than ``TimeoutExpired``), with
-    # exec_stdio as the safety net.
-    exec_future = loop.run_in_executor(
-        None,
-        lambda: runtime.exec_stdio(
-            container,
-            wrapper_cmd,
-            stdin=child_in,
-            stdout=child_out,
-            timeout=timeout + 1.0,
-        ),
-    )
-
-    try:
-        return await asyncio.wait_for(
-            _drive_handshake(reader, writer, cwd=cwd, agent_id=agent_id),
-            timeout=timeout,
-        )
-    except TimeoutError as exc:
-        _logger.warning("ACP probe for agent %r timed out after %.1fs", agent_id, timeout)
-        raise ProbeError(f"probe timed out for agent {agent_id!r}") from exc
-    finally:
-        try:
-            writer.close()
-        except Exception as exc:  # noqa: BLE001
-            _logger.debug("ACP probe writer close: %s", exc)
-        # Close the asyncio read transport — *not* the FileIO directly.
-        # Direct FileIO close leaks the epoll registration; see the
-        # connect_read_pipe call above for the full story.
-        try:
-            read_transport.close()
-        except Exception as exc:  # noqa: BLE001
-            _logger.debug("ACP probe read transport close: %s", exc)
-        # Bounded wait: the executor thread can be wedged in an
-        # unkillable syscall, but caller-visible latency must not.
-        try:
-            await asyncio.wait_for(exec_future, timeout=2.0)
-        except Exception as exc:  # noqa: BLE001
-            _logger.debug("ACP probe exec_future cleanup: %s", exc)
-
-
-async def _drive_handshake(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
-    *,
-    cwd: str,
-    agent_id: str,
-) -> tuple[str, ...]:
-    """Send ``initialize`` + ``session/new`` and parse the model list."""
-
-    async def _write_frame(payload: dict) -> None:
-        writer.write((json.dumps(payload) + "\n").encode("utf-8"))
-        await writer.drain()
-
-    async def _read_response(*, expected_id: int) -> dict[str, Any]:
-        # Skip notifications (no ``id``) so a chatty agent's progress
-        # events don't get mistaken for the reply.  Out-of-order
-        # response ids error out — queueing isn't worth it for a
-        # handshake this short-lived.
-        while True:
-            line = await reader.readline()
-            if not line:
-                raise ProbeError(f"agent {agent_id!r} closed stdout before handshake completed")
-            try:
-                frame = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ProbeError(f"agent {agent_id!r} sent malformed JSON during probe") from exc
-            if not isinstance(frame, dict):
-                raise ProbeError(f"agent {agent_id!r} sent a non-object JSON-RPC frame")
-            frame_id = frame.get("id")
-            if frame_id == expected_id:
-                return frame
-            if "method" in frame and frame_id is None:
-                continue
-            raise ProbeError(
-                f"agent {agent_id!r} sent unexpected probe frame id {frame_id!r}, "
-                f"expected {expected_id!r}"
-            )
-
-    # initialize ---------------------------------------------------------
-    # Probe ids are local to this short-lived handshake — no shared id
-    # space with the proxy, so plain integers are fine.
-    await _write_frame(
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": ACP_PROTOCOL_VERSION,
-                "clientCapabilities": {},
-            },
-        }
-    )
-    init_response = await _read_response(expected_id=1)
-    if "error" in init_response:
-        raise ProbeError(f"agent {agent_id!r} rejected initialize: {init_response['error']}")
-
-    # session/new --------------------------------------------------------
-    await _write_frame(
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/new",
-            "params": {"cwd": cwd, "mcpServers": []},
-        }
-    )
-    new_response = await _read_response(expected_id=2)
-    if "error" in new_response:
-        raise ProbeError(f"agent {agent_id!r} rejected session/new: {new_response['error']}")
-
-    return _extract_model_ids(new_response.get("result") or {})
-
-
-def _extract_model_ids(session_new_result: dict) -> tuple[str, ...]:
-    """Return the model ids from a ``session/new`` response.
-
-    Walks the ``configOptions[category=model]`` entry via the shared
-    [`iter_model_choice_dicts`][terok_executor.acp.model_options.iter_model_choice_dicts] iterator (so the schema-tolerance
-    logic lives in one place — see [`proxy`][terok_executor.acp.proxy]).  Unknown shapes
-    yield an empty tuple, which the caller caches to avoid hammering
-    a misbehaving agent on every session.
-    """
-    out: list[str] = []
-    for entry in iter_model_choice_dicts(session_new_result):
-        ident = entry.get("id") or entry.get("value")
-        if isinstance(ident, str):
-            out.append(ident)
-    return tuple(out)

@@ -24,13 +24,14 @@ import asyncio
 import logging
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING
 
 from terok_sandbox import SandboxConfig
 
 from terok_executor.container.build import AGENTS_LABEL
 
 from .cache import GLOBAL_CACHE, AgentRosterCache, CacheKey
+from .model_options import MODEL_NAMESPACE_SEP
 from .probe import ProbeError, probe_agent_models
 from .proxy import ACPProxy
 
@@ -200,7 +201,7 @@ class ACPRoster:
         out: list[str] = []
         for agent in agents_in_order:
             for model in self._cache.get(self._cache_key(agent)) or ():
-                out.append(f"{agent}:{model}")
+                out.append(f"{agent}{MODEL_NAMESPACE_SEP}{model}")
         return out
 
     async def warm(self, agent_id: str) -> tuple[str, ...]:
@@ -239,40 +240,16 @@ class ACPRoster:
         proxy = ACPProxy(roster=self)
         await proxy.run(reader, writer)
 
-    def exec_wrapper(self, agent_id: str, *, stdin: BinaryIO, stdout: BinaryIO) -> int:
-        """Run ``terok-{agent_id}-acp`` in the task container with bridged stdio.
-
-        Used by the *probe* path: a short single-shot handshake whose
-        wrapper subprocess is torn down immediately afterwards.  Sync
-        because [`exec_stdio`][terok_sandbox.ContainerRuntime.exec_stdio] is sync — callers
-        in async contexts wrap the call in ``loop.run_in_executor``.
-
-        The *bind* path uses [`wrapper_argv`][terok_executor.acp.roster.ACPRoster.wrapper_argv] and spawns the
-        wrapper directly via [`create_subprocess_exec`][asyncio.create_subprocess_exec]
-        instead — fewer hops between the proxy and the subprocess
-        (no kernel pipe pair, no pump threads), and the long-lived
-        connection-shaped lifecycle there fits asyncio's subprocess
-        transport more naturally than sandbox's run-then-tear-down
-        primitive.
-        """
-        runtime = self._sandbox.runtime
-        return runtime.exec_stdio(
-            runtime.container(self._container_name),
-            [f"terok-{agent_id}-acp"],
-            stdin=stdin,
-            stdout=stdout,
-        )
-
     def wrapper_argv(self, agent_id: str) -> list[str]:
         """Return the argv that runs ``terok-{agent_id}-acp`` in this container.
 
         Hands back something a caller can pass directly to
-        [`create_subprocess_exec`][asyncio.create_subprocess_exec] — the bind path uses
-        this so it can attach asyncio's own pipe transports to the
-        wrapper subprocess without going through sandbox's pump
-        threads.  Currently podman-specific; a krun runtime would
-        need a different shape (which is why this method lives on
-        the roster, not on the proxy).
+        [`create_subprocess_exec`][asyncio.create_subprocess_exec] — both
+        the bind path and the probe path use this so they can attach
+        asyncio's pipe transports to the wrapper subprocess.  Currently
+        podman-specific; a krun runtime would need a different shape
+        (which is why this method lives on the roster, not on the proxy
+        or probe).
         """
         return ["podman", "exec", "-i", self._container_name, f"terok-{agent_id}-acp"]
 
@@ -287,11 +264,9 @@ class ACPRoster:
 
     async def _probe(self, agent_id: str) -> tuple[str, ...]:
         """Drive a single probe in the current event loop."""
-        container = self._sandbox.runtime.container(self._container_name)
         return await probe_agent_models(
             agent_id=agent_id,
-            container=container,
-            sandbox=self._sandbox,
+            wrapper_argv=self.wrapper_argv(agent_id),
         )
 
     # ── Queries ──────────────────────────────────────────────────────

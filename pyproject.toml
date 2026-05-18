@@ -24,7 +24,7 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "pydantic>=2.9",
     "rich>=13.0",
-    "agent-client-protocol>=0.7",
+    "agent-client-protocol>=0.10",
 ]
 
 [project.urls]
