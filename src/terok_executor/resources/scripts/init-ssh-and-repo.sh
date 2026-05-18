@@ -27,37 +27,27 @@ set -euo pipefail
 # of init fails (DNS-inside-guest is a separate follow-up).
 #
 # The gate is ``TEROK_CONTAINER_RUNTIME=krun`` — set by terok's
-# ``_project_runtime_flags`` only when launching under krun.  An
-# explicit runtime signal rather than inferring from the bind-mount,
-# so a botched L0 with a non-empty placeholder can't accidentally
-# expose sshd under crun.
+# ``_project_runtime_flags`` only when launching under krun, alongside
+# the ``--user root`` override that gives this block the write access
+# it needs (the L0's ``USER dev`` is the right default under crun for
+# AI agents that refuse uid 0, but under krun sshd needs to start as
+# root and drop to the authenticated user on connection).
 #
-# Under krun the container is uid 0 inside the guest — libkrun ignores
-# the L0's ``USER dev`` directive (and ``--userns=keep-id``), so this
-# block runs as root and ``sudo`` would fail anyway under libkrun's
-# virtio-fs (the host-side virtio-fs server runs unprivileged on the
-# host and can't honour setuid exec).  See docs/runtimes.md.  Sshd
-# itself runs as root, listens on 22, and drops to the authenticated
-# user on connection — same model as any multi-user host.
-#
-# Operators can log in as ``dev`` (default, for AI agents that refuse
-# uid 0) or as ``root`` (escape hatch for tasks that need privileged
-# ops — sudo doesn't work, this is the workaround).  The two paths
-# share the same bind-mounted authorized_keys file; the root path is
-# wired in here (not baked into the L0) so a crun-mode image carries
-# nothing that would authorise a root ssh session.  ``-o`` overrides
-# the L0's restrictive ``PermitRootLogin no`` + ``AllowUsers dev``
-# baked defaults — first-wins, and ``-o`` is processed before the
-# config file.
+# Sshd runs as root, listens on 22, and authenticates against
+# ``/etc/ssh/authorized_keys.d/terok`` (set globally as
+# ``AuthorizedKeysFile`` in the baked sshd_config.d/00-terok.conf, so
+# both ``dev`` and ``root`` SSH logins look the same file up — no
+# per-home wiring needed).  The bind-mounted host pubkey overlays
+# that file at task launch.  ``-o`` overrides relax the baked
+# ``PermitRootLogin no`` + ``AllowUsers dev`` for this sshd instance
+# only — first-wins, ``-o`` is processed before the config file.
 #
 # The supervisor loop restarts sshd if it crashes (panic, OOM, etc.);
 # ``setsid`` puts the loop in its own session so SIGHUP from the outer
 # init shell (which exits after ``exec bash`` below) can't take it down.
 if [[ "${TEROK_CONTAINER_RUNTIME:-}" == "krun" ]]; then
   echo ">> starting sshd supervisor on TCP 22 (krun mode — root + dev login)"
-  mkdir -p /run/sshd /root/.ssh
-  ln -sf /etc/ssh/authorized_keys.d/terok /root/.ssh/authorized_keys
-  chmod 700 /root/.ssh
+  mkdir -p /run/sshd
   setsid bash -c '
     while :; do
       /usr/sbin/sshd -D -e \

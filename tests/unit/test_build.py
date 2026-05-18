@@ -655,24 +655,15 @@ class TestTemplateRendering:
         at the next failed ``terok login``:
 
         - ``TEROK_CONTAINER_RUNTIME`` — the explicit gate (set by terok
-          only under krun; absent under crun ⇒ no sshd ⇒ none of the
-          krun-specific behaviour below activates)
+          only under krun; absent under crun ⇒ no sshd)
         - ``/usr/sbin/sshd`` — the actual binary invocation
         - ``setsid`` — the supervisor loop runs in a detached session so
           the outer init shell exiting can't take it down
-        - **no** ``sudo`` inside the krun gate block — the container PID 1
-          is already root under krun (libkrun ignores the L0's ``USER dev``
-          directive) and ``sudo`` would fail anyway under libkrun's
-          virtio-fs (the host-side server can't honour setuid exec)
         - ``AllowUsers dev root`` + ``PermitRootLogin without-password``
           override flags — sshd is started with these as ``-o`` args
           (first-wins) so both the dev (default for agents that refuse
-          uid 0) and root (escape hatch for tasks that need privileged
-          ops) login paths work
-        - ``/root/.ssh/authorized_keys`` symlink — root-login plumbing
-          is created here at runtime (not baked into the L0) so a
-          crun-mode image carries nothing that would authorise a root
-          ssh session
+          uid 0) and root login paths work; the baked sshd_config keeps
+          the restrictive defaults the override relaxes
         """
         script_path = (
             Path(__file__).resolve().parent.parent.parent
@@ -686,20 +677,14 @@ class TestTemplateRendering:
         assert "TEROK_CONTAINER_RUNTIME" in text
         assert "/usr/sbin/sshd" in text
         assert "setsid" in text
-        # Extract just the krun-gate block so unrelated future sudo uses
-        # elsewhere in the script don't false-positive this guard.
+        # Extract just the krun-gate block so unrelated checks elsewhere
+        # in the script don't false-positive these assertions.
         block_start = text.find('"${TEROK_CONTAINER_RUNTIME:-}" == "krun"')
         assert block_start >= 0, "krun gate disappeared"
         block_end = text.find("\nfi\n", block_start)
         block = text[block_start:block_end]
-        assert "sudo" not in block, (
-            "sudo crept back into the krun sshd block — won't work on libkrun's virtiofs"
-        )
-        # Both login paths and their wiring belong to the krun branch and
-        # nowhere else (so the crun image's L0 stays root-login-free).
         assert "AllowUsers dev root" in block
         assert "PermitRootLogin without-password" in block
-        assert "/root/.ssh/authorized_keys" in block
 
     def test_l0_hardens_sshd_to_pubkey_only_dev_only_no_forwarding(self) -> None:
         """The sshd config drop-in collapses the surface to a single
