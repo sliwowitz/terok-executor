@@ -153,8 +153,8 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.gpu_enabled is True
 
-    def test_memory_limit_propagates(self, tmp_path: Path) -> None:
-        """Memory limit flows through to RunSpec.memory_limit."""
+    def test_memory_propagates(self, tmp_path: Path) -> None:
+        """Memory limit flows through to RunSpec.memory."""
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
@@ -162,10 +162,10 @@ class TestAgentRunner:
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, memory="4g")
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.memory_limit == "4g"
+        assert spec.memory == "4g"
 
-    def test_cpu_limit_propagates(self, tmp_path: Path) -> None:
-        """CPU limit flows through to RunSpec.cpu_limit."""
+    def test_cpus_propagates(self, tmp_path: Path) -> None:
+        """CPU limit flows through to RunSpec.cpus."""
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
@@ -173,7 +173,7 @@ class TestAgentRunner:
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, cpus="2.0")
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.cpu_limit == "2.0"
+        assert spec.cpus == "2.0"
 
     def test_resource_limits_default_none(self, tmp_path: Path) -> None:
         """Resource limits default to None when not specified."""
@@ -184,8 +184,8 @@ class TestAgentRunner:
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.memory_limit is None
-        assert spec.cpu_limit is None
+        assert spec.memory is None
+        assert spec.cpus is None
 
     def test_run_interactive_command(self, tmp_path: Path) -> None:
         """Interactive mode includes init-ssh-and-repo.sh in command."""
@@ -401,11 +401,47 @@ class TestLaunchPrepared:
         assert spec.command == ("bash",)
         assert spec.task_dir == tmp_path
         assert spec.gpu_enabled is True
-        assert spec.memory_limit == "4g"
-        assert spec.cpu_limit == "2.0"
+        assert spec.memory == "4g"
+        assert spec.cpus == "2.0"
         assert spec.unrestricted is False
         assert spec.sealed is True
         assert spec.extra_args == ("-p", "127.0.0.1:8080:8080")
+
+    def test_annotations_propagate_to_runspec(self, tmp_path: Path) -> None:
+        """``annotations`` kwarg lands on RunSpec.annotations (typed channel
+        the sandbox validates) — distinct from the freeform *extra_args*."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+            annotations={"dossier.meta_path": "/var/lib/terok/tasks/t1.json"},
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.annotations["dossier.meta_path"] == "/var/lib/terok/tasks/t1.json"
+
+    def test_annotations_default_empty(self, tmp_path: Path) -> None:
+        """Omitting *annotations* leaves RunSpec.annotations empty."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert dict(spec.annotations) == {}
 
     def test_sealed_defaults_false(self, tmp_path: Path) -> None:
         """Sealed isolation is opt-in — the default must be shared-mode."""

@@ -32,6 +32,7 @@ from .build import BuildError, build_base_images
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Mapping
 
     from terok_sandbox import ContainerRuntime, LifecycleHooks, Sandbox
 
@@ -323,6 +324,7 @@ class AgentRunner:
         hooks: LifecycleHooks | None = None,
         extra_args: list[str] | None = None,
         hostname: str | None = None,
+        annotations: Mapping[str, str] | None = None,
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
 
@@ -353,6 +355,11 @@ class AgentRunner:
             extra_args: Additional raw ``podman run`` flags (e.g. port publishing).
             hostname: Override the in-container hostname (podman ``--hostname``).
                 When ``None`` (default), podman assigns the short container ID.
+            annotations: OCI annotations forwarded as ``--annotation k=v``;
+                validated against
+                [`SAFE_ANNOTATION_KEYS`][terok_sandbox.sandbox.SAFE_ANNOTATION_KEYS].
+                Typed channel for orchestrator metadata the shield reads,
+                distinct from the freeform *extra_args*.
 
         Returns:
             The container name (same as *name*).
@@ -371,12 +378,13 @@ class AgentRunner:
             command=tuple(command),
             task_dir=task_dir,
             gpu_enabled=gpu,
-            memory_limit=memory,
-            cpu_limit=cpus,
+            memory=memory,
+            cpus=cpus,
             extra_args=tuple(extra_args or ()),
             unrestricted=unrestricted,
             sealed=sealed,
             hostname=hostname,
+            annotations=annotations or {},
         )
 
         try:
