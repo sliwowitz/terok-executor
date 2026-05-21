@@ -195,6 +195,9 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
 def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show vault status."""
     from terok_sandbox import (
+        SandboxConfig as _SandboxConfig,
+        get_ssh_signer_port,
+        get_token_broker_port,
         get_vault_status,
         is_vault_systemd_available,
         sanitize_tty,
@@ -203,7 +206,12 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
 
     from terok_executor.paths import mounts_dir
 
-    status = get_vault_status(cfg=cfg)
+    # Keep a concrete cfg in hand so the socket-mode branch can surface
+    # the SSH-signer socket path alongside the broker socket without a
+    # second sandbox round-trip; ``get_vault_status`` does its own
+    # resolution internally and is unaffected.
+    working_cfg = cfg or _SandboxConfig()
+    status = get_vault_status(cfg=working_cfg)
     state = "running" if status.running else "stopped"
     # Path fields land in a terminal that interprets ANSI/control chars.
     # The values originate from the vault daemon's config / live state —
@@ -211,9 +219,46 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     # manipulated systemd unit could plant control sequences that would
     # otherwise spoof prompts or rewrite the screen.  Sanitise at the
     # render boundary; matches what ``terok-sandbox vault status`` does.
-    print(f"Mode:        {sanitize_tty(status.mode)}")
+    #
+    # Two orthogonal facts about the vault, each on its own line:
+    # ``Activation:`` is the lifecycle channel (``systemd`` / ``daemon`` /
+    # ``none``) — how the vault is *managed*.  ``Transport:`` is the wire
+    # protocol containers use (``tcp`` / ``socket``) — how clients *reach*
+    # it.  The historical single-line ``Mode:`` overloaded both axes onto
+    # one label, which read as "transport" for almost every user and made
+    # the TCP-mode rendering misleading (no port surfaced, only the
+    # fast-path Unix probe — see commentary on the ``Socket:`` line
+    # below).
+    print(f"Activation:  {sanitize_tty(status.mode)}")
+    # Tight allow-list — keeps an unexpected value (or a ``MagicMock`` in
+    # tests that haven't bothered to set ``transport``) from leaking a
+    # raw repr into operator-facing output.
+    transport = status.transport if status.transport in ("tcp", "socket") else None
+    print(f"Transport:   {transport or '(not configured)'}")
     print(f"Status:      {state}")
-    print(f"Socket:      {sanitize_tty(str(status.socket_path))}")
+    # TCP mode: surface the actual listeners that container traffic
+    # rides.  In TCP mode the daemon still binds ``vault.sock`` as a
+    # local fast-path probe target (host-side ``ensure_reachable``
+    # tries it before the TCP probe), but no container or external
+    # client ever reaches that socket — flag it so the line doesn't
+    # imply otherwise.
+    if transport == "tcp":
+        broker_port = get_token_broker_port(cfg=working_cfg)
+        signer_port = get_ssh_signer_port(cfg=working_cfg)
+        if broker_port is not None:
+            print(f"TCP broker:  127.0.0.1:{broker_port}")
+        if signer_port is not None:
+            print(f"TCP signer:  127.0.0.1:{signer_port}")
+        socket_annotation = "  (fast-path probe only)"
+    else:
+        socket_annotation = ""
+    print(f"Socket:      {sanitize_tty(str(status.socket_path))}{socket_annotation}")
+    # Socket-mode: the SSH signer rides a sibling Unix socket that
+    # containers connect to directly via the per-task bind mount.
+    # Surface it so the rendering is symmetric with the broker
+    # ``Socket:`` line (both transports, both signer endpoints visible).
+    if transport == "socket":
+        print(f"SSH signer:  {sanitize_tty(str(working_cfg.ssh_signer_socket_path))}")
     print(f"DB:          {sanitize_tty(str(status.db_path))}")
     print(
         f"Routes:      {sanitize_tty(str(status.routes_path))}"

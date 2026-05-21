@@ -567,6 +567,131 @@ class TestVaultCommandHandlers:
         assert "plaintext" not in captured.err
         assert "plaintext" not in captured.out
 
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_ssh_signer_port", return_value=18702)
+    @patch("terok_sandbox.get_token_broker_port", return_value=18701)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_tcp_mode_surfaces_ports_and_annotates_socket(
+        self, mock_status, _broker, _signer, _sd, _scan, capsys
+    ) -> None:
+        """TCP-mode status surfaces ``TCP broker:`` / ``TCP signer:`` and tags the Unix socket.
+
+        In TCP mode every container reaches the vault via the TCP listeners;
+        the daemon still binds ``vault.sock`` as a local fast-path probe
+        target but no client traffic touches it.  The renderer must
+        therefore show both ports and disambiguate the socket line, or
+        operators reading the output will conclude TCP mode "doesn't have"
+        ports just because the headline ``Socket:`` line is the only
+        endpoint visible.
+        """
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            transport="tcp",
+            socket_path="/run/user/1000/terok/sandbox/vault.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="systemd-creds",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "Activation:  systemd" in out
+        assert "Transport:   tcp" in out
+        assert "TCP broker:  127.0.0.1:18701" in out
+        assert "TCP signer:  127.0.0.1:18702" in out
+        assert "(fast-path probe only)" in out
+        # And the renamed label fully replaced the legacy one.
+        assert "Mode:        systemd" not in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_socket_mode_surfaces_signer_socket(
+        self, mock_status, _sd, _scan, capsys, tmp_path
+    ) -> None:
+        """Socket-mode status surfaces the SSH signer socket alongside the broker socket.
+
+        Containers in socket mode reach the SSH signer via its own Unix
+        socket (bind-mounted into ``/run/terok/ssh-agent.sock``); the
+        broker socket is a sibling endpoint, not a replacement.  Both
+        endpoints land in the rendered output so operators can match
+        what they see here against the per-container env vars.
+        """
+        from terok_sandbox import SandboxConfig
+
+        cfg = SandboxConfig(
+            state_dir=tmp_path / "state",
+            runtime_dir=tmp_path / "run",
+            vault_dir=tmp_path / "vault",
+            services_mode="socket",
+        )
+        mock_status.return_value = MagicMock(
+            mode="systemd",
+            running=True,
+            transport="socket",
+            socket_path=cfg.vault_socket_path,
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=3,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source="keyring",
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status(cfg=cfg)
+        out = capsys.readouterr().out
+        assert "Transport:   socket" in out
+        assert f"SSH signer:  {cfg.ssh_signer_socket_path}" in out
+        # Socket-mode rendering must NOT carry the TCP-only embellishments.
+        assert "TCP broker:" not in out
+        assert "TCP signer:" not in out
+        assert "(fast-path probe only)" not in out
+
+    @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
+    @patch("terok_sandbox.is_vault_systemd_available", return_value=False)
+    @patch("terok_sandbox.get_vault_status")
+    def test_status_falls_back_to_not_configured_when_transport_unknown(
+        self, mock_status, _sd, _scan, capsys
+    ) -> None:
+        """``status.transport is None`` (vault not running) → ``Transport: (not configured)``.
+
+        Also guards against renderer regression on any unexpected ``transport``
+        value: the allow-list in the renderer keeps a stray repr from
+        leaking onto operator-facing output.
+        """
+        mock_status.return_value = MagicMock(
+            mode="none",
+            running=False,
+            transport=None,
+            socket_path="/run/proxy.sock",
+            db_path="/data/creds.db",
+            routes_path="/data/routes.json",
+            routes_configured=0,
+            credentials_stored=(),
+            ssh_keys_stored=0,
+            passphrase_source=None,
+            locked=False,
+            plaintext_passphrase_path=None,
+        )
+        from terok_executor.credentials.vault_commands import _handle_status
+
+        _handle_status()
+        out = capsys.readouterr().out
+        assert "Transport:   (not configured)" in out
+        assert "TCP broker:" not in out
+        assert "SSH signer:" not in out
+
     @patch("terok_sandbox.install_vault_systemd")
     @patch("terok_executor.credentials.vault_commands._ensure_routes")
     @patch("terok_sandbox.is_vault_systemd_available", return_value=True)
