@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
 from terok_executor.provider.providers import AgentProvider, OpenCodeProviderConfig
@@ -255,16 +255,6 @@ class RawVault(StrictModel):
             "layer skips host-level denies for these providers."
         ),
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_legacy_socket_path(_cls, data: object) -> object:
-        if isinstance(data, dict) and "socket_path" in data:
-            raise ValueError(
-                "'socket_path' is no longer configurable — "
-                "remove it; the env builder resolves the vault socket path centrally"
-            )
-        return data
 
     def to_dataclass(self, *, provider: str) -> VaultRoute:
         """Project to a runtime [`VaultRoute`][terok_executor.roster.types.VaultRoute]."""

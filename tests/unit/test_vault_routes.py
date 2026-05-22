@@ -75,13 +75,6 @@ class TestVaultRoutesParsed:
             assert route.oauth_phantom_env == {}, f"{name} should have no oauth_phantom_env"
             assert route.socket_env == "", f"{name} should have no socket_env"
 
-    def test_rejects_legacy_socket_path_field(self) -> None:
-        """socket_path was removed — declaring it must fail loudly so stale
-        agent manifests don't silently drift out of sync."""
-        base = {"route_prefix": "test", "upstream": "https://example.com"}
-        with pytest.raises(ValidationError, match="socket_path.*no longer"):
-            _vault_route("test", {"vault": {**base, "socket_path": "/tmp/s.sock"}})
-
     def test_opencode_agents_have_routes(self) -> None:
         """Blablador and KISSKI have vault routes."""
         reg = get_roster()

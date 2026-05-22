@@ -787,17 +787,6 @@ class TestStrictValidation:
         with pytest.raises(ValidationError, match="section"):
             RawAgentYaml.model_validate({"help": {"section": "elsewhere"}})
 
-    def test_legacy_socket_path_rejected_with_helpful_message(self) -> None:
-        data = {
-            "vault": {
-                "route_prefix": "x",
-                "upstream": "https://x",
-                "socket_path": "/tmp/legacy.sock",
-            }
-        }
-        with pytest.raises(ValidationError, match="socket_path.*no longer"):
-            RawAgentYaml.model_validate(data)
-
     def test_install_depends_on_accepts_string_shorthand(self) -> None:
         spec = RawAgentYaml.model_validate({"install": {"depends_on": "claude"}})
         assert spec.install is not None
