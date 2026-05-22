@@ -25,8 +25,12 @@ except PackageNotFoundError:
     pass  # editable install or running from source without metadata
 
 # -- terok-sandbox protocol types (re-exported for convenience) ----------------
-from terok_sandbox import ConfigScope, ConfigStack
-from terok_sandbox.doctor import CheckVerdict, DoctorCheck
+from terok_executor.integrations.sandbox import (
+    CheckVerdict,
+    ConfigScope,
+    ConfigStack,
+    DoctorCheck,
+)
 
 # -- Commands + CLI surface ----------------------------------------------------
 from ._tree import COMMANDS

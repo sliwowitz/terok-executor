@@ -52,7 +52,7 @@ def test_setup_needed_verdicts_all_exit_three(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The three "setup needed" verdicts collapse to exit 3 with a fix hint."""
-    with patch("terok_sandbox.needs_setup", return_value=verdict):
+    with patch("terok_executor.integrations.sandbox.needs_setup", return_value=verdict):
         with pytest.raises(SystemExit) as excinfo:
             _setup_verdict_or_exit(skip=False)
     assert excinfo.value.code == expected_code
@@ -67,7 +67,10 @@ def test_downgrade_exits_four_with_named_packages(
 ) -> None:
     """STALE_AFTER_DOWNGRADE refuses with exit 4, names the offending packages."""
     with (
-        patch("terok_sandbox.needs_setup", return_value=SetupVerdict.STALE_AFTER_DOWNGRADE),
+        patch(
+            "terok_executor.integrations.sandbox.needs_setup",
+            return_value=SetupVerdict.STALE_AFTER_DOWNGRADE,
+        ),
         patch(
             "terok_executor.commands._name_downgraded_packages",
             return_value=["terok-sandbox 0.0.97 → 0.0.95"],
@@ -88,7 +91,10 @@ def test_downgrade_falls_back_to_generic_when_diff_unavailable(
 ) -> None:
     """When the stamp can't be re-read for diffing, surface a generic refusal — never crash."""
     with (
-        patch("terok_sandbox.needs_setup", return_value=SetupVerdict.STALE_AFTER_DOWNGRADE),
+        patch(
+            "terok_executor.integrations.sandbox.needs_setup",
+            return_value=SetupVerdict.STALE_AFTER_DOWNGRADE,
+        ),
         patch("terok_executor.commands._name_downgraded_packages", return_value=[]),
     ):
         with pytest.raises(SystemExit) as excinfo:
@@ -99,7 +105,7 @@ def test_downgrade_falls_back_to_generic_when_diff_unavailable(
 
 def test_ok_verdict_returns_silently() -> None:
     """OK is the happy path — no print, no exit, control flows back to preflight."""
-    with patch("terok_sandbox.needs_setup", return_value=SetupVerdict.OK):
+    with patch("terok_executor.integrations.sandbox.needs_setup", return_value=SetupVerdict.OK):
         # No SystemExit raised; helper returns None.
         assert _setup_verdict_or_exit(skip=False) is None
 
@@ -114,7 +120,7 @@ def test_skip_bypasses_gate_without_calling_needs_setup() -> None:
     even call ``needs_setup`` when skipping — pinning that no I/O
     happens on the bypass path.
     """
-    with patch("terok_sandbox.needs_setup") as mock_needs_setup:
+    with patch("terok_executor.integrations.sandbox.needs_setup") as mock_needs_setup:
         assert _setup_verdict_or_exit(skip=True) is None
         mock_needs_setup.assert_not_called()
 

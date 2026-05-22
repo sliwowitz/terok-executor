@@ -255,7 +255,7 @@ class TestAgentRunner:
     def test_lazy_sandbox_init(self) -> None:
         runner = AgentRunner()
         # Access sandbox property — should create a default Sandbox
-        with patch("terok_sandbox.Sandbox") as mock_cls:
+        with patch("terok_executor.integrations.sandbox.Sandbox") as mock_cls:
             mock_cls.return_value = _mock_sandbox()
             s = runner.sandbox
             assert s is not None
@@ -738,7 +738,7 @@ class TestGateIntegration:
         sandbox.gate_url.return_value = "http://tok123@host:9418/repo"
         runner = AgentRunner(sandbox=sandbox)
 
-        with patch("terok_sandbox.GitGate") as mock_gate_cls:
+        with patch("terok_executor.integrations.sandbox.GitGate") as mock_gate_cls:
             mock_gate = Mock()
             mock_gate_cls.return_value = mock_gate
             url = runner._setup_gate("git@github.com:user/repo.git", "task1")
@@ -810,8 +810,8 @@ class TestVaultEnv:
 
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
-            patch("terok_sandbox.is_vault_socket_active", return_value=False),
-            patch("terok_sandbox.is_vault_running", return_value=False),
+            patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False),
+            patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False),
         ):
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
 

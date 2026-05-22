@@ -195,8 +195,7 @@ def resolve_vault_location() -> VaultLocation:
     mode.  Exposed as a public helper so the env builder can use the same
     values it later writes to config files.
     """
-    from terok_sandbox import SandboxConfig, get_token_broker_port
-
+    from terok_executor.integrations.sandbox import SandboxConfig, get_token_broker_port
     from terok_executor.vault_addr import (
         CONTAINER_VAULT_SOCKET,
         LOOPBACK_BRIDGE_SOCKET,

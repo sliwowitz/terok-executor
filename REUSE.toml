@@ -15,6 +15,7 @@ path = [
   "**/*.conf",
   "**/*.mjs",
   ".gitignore",
+  ".importlinter",
   "MANIFEST.in",
   "Makefile",
   "**/py.typed",

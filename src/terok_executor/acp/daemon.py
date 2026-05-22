@@ -25,7 +25,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from terok_sandbox import Sandbox, SandboxConfig
+from terok_executor.integrations.sandbox import Sandbox, SandboxConfig
 
 from .roster import ACPRoster
 

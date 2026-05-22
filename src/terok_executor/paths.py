@@ -10,7 +10,7 @@ detection code.
 
 from pathlib import Path
 
-from terok_sandbox.paths import namespace_state_dir
+from terok_executor.integrations.sandbox import namespace_state_dir
 
 _SUBDIR = "executor"
 

@@ -21,14 +21,14 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_sandbox.commands import ArgDef, CommandDef
+from terok_executor.integrations.sandbox import ArgDef, CommandDef
 
 from .container.build import DEFAULT_BASE_IMAGE
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
 
 # ── Handlers ──
@@ -59,7 +59,7 @@ def _setup_verdict_or_exit(*, skip: bool) -> None:
 
     import sys
 
-    from terok_sandbox import (
+    from terok_executor.integrations.sandbox import (
         SetupVerdict,
         installed_versions,
         needs_setup,
@@ -484,7 +484,7 @@ def _handle_build(
 
 def _handle_list() -> None:
     """List running terok-executor containers."""
-    from terok_sandbox import PodmanRuntime
+    from terok_executor.integrations.sandbox import PodmanRuntime
 
     states = PodmanRuntime().container_states("terok-executor")
     if not states:
@@ -516,7 +516,8 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
     import sys
 
     from ruamel.yaml import YAML
-    from terok_sandbox import SandboxConfig as _SandboxConfig
+
+    from terok_executor.integrations.sandbox import SandboxConfig as _SandboxConfig
 
     if cfg is None:
         cfg = _SandboxConfig()
@@ -539,7 +540,7 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_stop(*, name: str) -> None:
     """Stop a running container (best-effort)."""
-    from terok_sandbox import PodmanRuntime
+    from terok_executor.integrations.sandbox import PodmanRuntime
 
     runtime = PodmanRuntime()
     container = runtime.container(name)
@@ -603,7 +604,7 @@ def _handle_uninstall(
     if not keep_images:
         _remove_images(base)
     if not no_sandbox:
-        from terok_sandbox.commands import _handle_sandbox_uninstall
+        from terok_executor.integrations.sandbox import _handle_sandbox_uninstall
 
         _handle_sandbox_uninstall(cfg=cfg, root=root)
 

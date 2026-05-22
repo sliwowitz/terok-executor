@@ -27,9 +27,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
-from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER
 
 from terok_executor._util import podman_userns_args
+from terok_executor.integrations.sandbox import (
+    CODEX_SHARED_OAUTH_MARKER,
+    PHANTOM_CREDENTIALS_MARKER,
+)
 
 # Two consoles so colored success messages flow to stdout while
 # colored errors / warnings flow to stderr.  Rich auto-disables colors
@@ -260,7 +263,7 @@ def store_api_key(
     This is the non-interactive fast path for automated workflows and CI.
     The key is stored as ``{"type": "api_key", "key": "<value>"}``.
     """
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
     cfg = SandboxConfig()
     db = cfg.open_credential_db(prompt_on_tty=True)
@@ -468,7 +471,7 @@ def _capture_credentials(
         )
     else:
         try:
-            from terok_sandbox import SandboxConfig
+            from terok_executor.integrations.sandbox import SandboxConfig
 
             cfg = SandboxConfig()
             db = cfg.open_credential_db(prompt_on_tty=True)

@@ -21,7 +21,7 @@ def inject_agent_config(container_name: str, config_dir: Path) -> None:
     The container must be in the *created* or *stopped* state.  Delegates
     to [`terok_sandbox.Sandbox.copy_to`][terok_sandbox.Sandbox.copy_to].
     """
-    from terok_sandbox import Sandbox
+    from terok_executor.integrations.sandbox import Sandbox
 
     Sandbox().copy_to(container_name, config_dir, "/home/dev/.terok")
 
@@ -33,7 +33,7 @@ def inject_prompt(container_name: str, prompt_text: str) -> None:
     via ``podman cp``.  Works on stopped containers (unlike ``podman exec``),
     which is the expected state during headless follow-ups.
     """
-    from terok_sandbox import Sandbox
+    from terok_executor.integrations.sandbox import Sandbox
 
     with tempfile.TemporaryDirectory() as td:
         prompt_file = Path(td) / "prompt.txt"

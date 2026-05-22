@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
 _logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def seed_workspace_from_clone_cache(
 def _resolve_cache_dir(scope: str, cfg: SandboxConfig | None) -> Path | None:
     """Derive the clone cache directory from config and scope."""
     if cfg is None:
-        from terok_sandbox import SandboxConfig as _SC
+        from terok_executor.integrations.sandbox import SandboxConfig as _SC
 
         cfg = _SC()
     cache_dir = cfg.clone_cache_base_path / scope

@@ -17,7 +17,7 @@ Three views over one underlying ``SANDBOX_TREE`` instance:
 
 from __future__ import annotations
 
-from terok_sandbox.commands import CommandDef, CommandTree
+from terok_executor.integrations.sandbox import CommandDef, CommandTree
 
 from .commands import COMMANDS as OWN_COMMANDS
 from .credentials.vault_commands import SANDBOX_TREE, VAULT_COMMANDS

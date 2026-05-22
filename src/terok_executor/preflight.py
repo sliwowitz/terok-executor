@@ -169,7 +169,7 @@ def _offer_credentials(
 
 def _note_shield_bypass() -> None:
     """Surface the bypass override when set — regular shield state is in sandbox-services."""
-    from terok_sandbox import check_environment
+    from terok_executor.integrations.sandbox import check_environment
 
     if check_environment().health == "bypass":
         print("\n  Note: shield is in bypass mode — containers have unrestricted network")
@@ -224,7 +224,7 @@ def check_sandbox_services() -> CheckResult:
     instead of being told to "run terok-executor setup" — which
     wouldn't fix the underlying gap.
     """
-    from terok_sandbox import (
+    from terok_executor.integrations.sandbox import (
         SandboxConfig,
         check_environment,
         get_server_status,
@@ -286,7 +286,7 @@ def check_images(base_image: str) -> CheckResult:
 
 def check_credentials(provider: str) -> CheckResult:
     """Check whether credentials are stored for *provider*."""
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
     try:
         db = SandboxConfig().open_credential_db()
@@ -303,7 +303,7 @@ def check_credentials(provider: str) -> CheckResult:
 
 def check_ssh_key(scope: str = "standalone") -> CheckResult:
     """Check whether a gate-signing SSH key exists for *scope*."""
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
     try:
         db = SandboxConfig().open_credential_db()
@@ -320,7 +320,7 @@ def check_ssh_key(scope: str = "standalone") -> CheckResult:
 
 def check_shield() -> CheckResult:
     """Check whether shield OCI hooks are installed (informational)."""
-    from terok_sandbox import check_environment
+    from terok_executor.integrations.sandbox import check_environment
 
     ec = check_environment()
     if ec.health == "ok":
@@ -377,7 +377,7 @@ def _fix_images(base_image: str, family: str | None = None) -> bool:
 
 def _fix_ssh_key(scope: str = "standalone") -> bool:
     """Generate a gate-signing SSH key for *scope* in the credential DB."""
-    from terok_sandbox import SandboxConfig, SSHManager
+    from terok_executor.integrations.sandbox import SandboxConfig, SSHManager
 
     try:
         with SSHManager.open_for_config(scope=scope, cfg=SandboxConfig()) as mgr:

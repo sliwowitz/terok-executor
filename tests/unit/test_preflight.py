@@ -46,10 +46,10 @@ def test_podman_missing(_which: MagicMock) -> None:
 # ── Sandbox services aggregate ───────────────────────────────────────
 
 
-@patch("terok_sandbox.get_server_status")
-@patch("terok_sandbox.check_environment")
-@patch("terok_sandbox.is_vault_running", return_value=True)
-@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
+@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok(
     _sock: MagicMock,
     _run: MagicMock,
@@ -62,11 +62,11 @@ def test_sandbox_services_ok(
     assert check_sandbox_services().ok is True
 
 
-@patch("terok_sandbox.is_systemd_available", return_value=True)
-@patch("terok_sandbox.get_server_status")
-@patch("terok_sandbox.check_environment")
-@patch("terok_sandbox.is_vault_running", return_value=False)
-@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=True)
+@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False)
+@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_lists_missing(
     _sock: MagicMock,
     _run: MagicMock,
@@ -91,11 +91,11 @@ def test_sandbox_services_lists_missing(
         assert expected in r.message
 
 
-@patch("terok_sandbox.is_systemd_available", return_value=True)
-@patch("terok_sandbox.get_server_status")
-@patch("terok_sandbox.check_environment")
-@patch("terok_sandbox.is_vault_running", return_value=True)
-@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=True)
+@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
+@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok_without_git_marks_gate_unavailable(
     _sock: MagicMock,
     _run: MagicMock,
@@ -113,11 +113,11 @@ def test_sandbox_services_ok_without_git_marks_gate_unavailable(
     assert "no git" in r.message
 
 
-@patch("terok_sandbox.is_systemd_available", return_value=False)
-@patch("terok_sandbox.get_server_status")
-@patch("terok_sandbox.check_environment")
-@patch("terok_sandbox.is_vault_running", return_value=True)
-@patch("terok_sandbox.is_vault_socket_active", return_value=False)
+@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=False)
+@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
+@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok_without_systemd_marks_gate_unavailable(
     _sock: MagicMock,
     _run: MagicMock,
@@ -155,7 +155,7 @@ def test_git_missing_returns_consequence(_which: MagicMock) -> None:
 # ── check_credentials ────────────────────────────────────────────────
 
 
-@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
 def test_credentials_found(mock_db_cls: MagicMock) -> None:
     """Credentials stored → ok."""
     db = mock_db_cls.return_value
@@ -164,7 +164,7 @@ def test_credentials_found(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
 def test_credentials_missing(mock_db_cls: MagicMock) -> None:
     """No credentials → fail."""
     db = mock_db_cls.return_value
@@ -175,7 +175,10 @@ def test_credentials_missing(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.config.SandboxConfig.open_credential_db", side_effect=Exception("db error"))
+@patch(
+    "terok_executor.integrations.sandbox.SandboxConfig.open_credential_db",
+    side_effect=Exception("db error"),
+)
 def test_credentials_db_unavailable(_cls: MagicMock) -> None:
     """DB open fails → fail with message."""
     r = check_credentials("claude")
@@ -186,7 +189,7 @@ def test_credentials_db_unavailable(_cls: MagicMock) -> None:
 # ── check_ssh_key ────────────────────────────────────────────────────
 
 
-@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
 def test_ssh_key_present(mock_db_cls: MagicMock) -> None:
     """Existing key in scope → ok."""
     db = mock_db_cls.return_value
@@ -196,7 +199,7 @@ def test_ssh_key_present(mock_db_cls: MagicMock) -> None:
     db.close.assert_called_once()
 
 
-@patch("terok_sandbox.config.SandboxConfig.open_credential_db")
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
 def test_ssh_key_absent(mock_db_cls: MagicMock) -> None:
     """Empty scope → fail."""
     db = mock_db_cls.return_value
@@ -225,14 +228,14 @@ def test_images_missing(mock_run: MagicMock) -> None:
 # ── check_shield ─────────────────────────────────────────────────────
 
 
-@patch("terok_sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.check_environment")
 def test_shield_ok(mock_env: MagicMock) -> None:
     """Shield active → ok."""
     mock_env.return_value = MagicMock(health="ok")
     assert check_shield().ok is True
 
 
-@patch("terok_sandbox.check_environment")
+@patch("terok_executor.integrations.sandbox.check_environment")
 def test_shield_missing(mock_env: MagicMock) -> None:
     """Shield not installed → fail (informational)."""
     mock_env.return_value = MagicMock(health="setup-needed")
@@ -417,7 +420,9 @@ class TestFixSshKey:
         fake_ctx = MagicMock()
         fake_ctx.__enter__.return_value = fake_mgr
         fake_ctx.__exit__.return_value = False
-        with patch("terok_sandbox.SSHManager.open_for_config", return_value=fake_ctx) as m_open:
+        with patch(
+            "terok_executor.integrations.sandbox.SSHManager.open_for_config", return_value=fake_ctx
+        ) as m_open:
             assert _fix_ssh_key("proj") is True
         # Sandbox seam called via the new ``open_for_config(cfg=)`` shape — not the
         # removed ``open(db_path=…)``, which was the leaky tier-knob variant.
@@ -441,7 +446,9 @@ class TestFixSshKey:
         fake_ctx = MagicMock()
         fake_ctx.__enter__.return_value = fake_mgr
         fake_ctx.__exit__.return_value = False
-        with patch("terok_sandbox.SSHManager.open_for_config", return_value=fake_ctx):
+        with patch(
+            "terok_executor.integrations.sandbox.SSHManager.open_for_config", return_value=fake_ctx
+        ):
             assert _fix_ssh_key("proj") is False
         # Operator-actionable diagnostic lands on stderr, not stdout.
         captured = capsys.readouterr()

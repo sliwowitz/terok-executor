@@ -17,8 +17,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from terok_sandbox import yaml_update_section
-from terok_sandbox.paths import namespace_config_dir, read_config_section
+from terok_executor.integrations.sandbox import (
+    namespace_config_dir,
+    read_config_section,
+    yaml_update_section,
+)
 
 __all__ = [
     "get_global_image_agents",

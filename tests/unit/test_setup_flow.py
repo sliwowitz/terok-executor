@@ -39,9 +39,10 @@ def setup_spies():
     The ``ensure_vault_routes`` + aggregator interaction has its own
     ``TestEnsureSandboxReady`` coverage below.
     """
+    integ = "terok_executor.integrations.sandbox"
     with (
         patch("terok_executor.sandbox.ensure_sandbox_ready") as sandbox_setup,
-        patch("terok_sandbox.commands._handle_sandbox_uninstall") as sandbox_uninstall,
+        patch(f"{integ}._handle_sandbox_uninstall") as sandbox_uninstall,
         patch("terok_executor.commands._build_images_with_banner") as build_images,
         patch("terok_executor.commands._remove_images") as remove_images,
     ):
@@ -127,7 +128,7 @@ def compose_spies():
     """Patch the two targets ``ensure_sandbox_ready`` composes: routes + aggregator."""
     with (
         patch("terok_executor.roster.loader.ensure_vault_routes") as routes,
-        patch("terok_sandbox.commands._handle_sandbox_setup") as aggregator,
+        patch("terok_executor.integrations.sandbox._handle_sandbox_setup") as aggregator,
     ):
         yield routes, aggregator
 

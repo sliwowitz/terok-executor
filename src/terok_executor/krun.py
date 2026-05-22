@@ -34,7 +34,7 @@ import stat
 import tempfile
 from pathlib import Path
 
-from terok_sandbox import (
+from terok_executor.integrations.sandbox import (
     KrunRuntime,
     PodmanRuntime,
     SandboxConfig,

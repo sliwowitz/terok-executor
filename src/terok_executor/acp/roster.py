@@ -26,9 +26,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_sandbox import SandboxConfig
-
 from terok_executor.container.build import AGENTS_LABEL
+from terok_executor.integrations.sandbox import SandboxConfig
 
 from .cache import GLOBAL_CACHE, AgentRosterCache, CacheKey
 from .model_options import MODEL_NAMESPACE_SEP
@@ -36,7 +35,7 @@ from .probe import ProbeError, probe_agent_models
 from .proxy import ACPProxy
 
 if TYPE_CHECKING:
-    from terok_sandbox import Sandbox
+    from terok_executor.integrations.sandbox import Sandbox
 
 _logger = logging.getLogger(__name__)
 

@@ -1,0 +1,24 @@
+[importlinter]
+root_packages =
+    terok_executor
+include_external_packages = True
+
+# ── Cross-package boundaries ─────────────────────────────────────
+#
+# ``protected`` contract: "module X may ONLY be imported by modules
+# Y, Z".  Every sibling-wheel import in terok_executor funnels
+# through a single adapter under
+# ``terok_executor.integrations.sandbox``.  A fresh ``from
+# terok_sandbox`` anywhere else is a CI failure: route it through
+# the adapter instead (and extend the adapter's re-export surface
+# if the symbol is new).
+#
+# Internal layering within terok_executor is the responsibility of
+# ``tach.toml``; this file owns the cross-wheel boundaries only.
+
+[importlinter:contract:sandbox-boundary]
+name = terok_sandbox access restricted to the in-package sandbox adapter
+type = protected
+protected_modules = terok_sandbox
+allowed_importers =
+    terok_executor.integrations.sandbox

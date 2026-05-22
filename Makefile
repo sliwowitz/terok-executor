@@ -1,4 +1,4 @@
-.PHONY: all lint format test test-unit ruff-report bandit-report sonar-inputs tach security docstrings complexity deadcode reuse typecheck check install install-dev docs docs-build clean spdx
+.PHONY: all lint format test test-unit ruff-report bandit-report sonar-inputs tach lint-imports security docstrings complexity deadcode reuse typecheck check install install-dev docs docs-build clean spdx
 
 REPORTS_DIR ?= reports
 COVERAGE_XML ?= $(REPORTS_DIR)/coverage.xml
@@ -45,6 +45,10 @@ sonar-inputs: test-unit ruff-report bandit-report
 tach:
 	poetry run tach check
 
+# Check cross-package import boundaries (.importlinter)
+lint-imports:
+	poetry run lint-imports
+
 # Run SAST security scan
 security: bandit-report
 	poetry run bandit -r src/terok_executor/ -ll
@@ -80,7 +84,7 @@ endif
 	poetry run reuse annotate --template compact --copyright "$(NAME)" --license Apache-2.0 $(FILES)
 
 # Run all checks (equivalent to CI)
-check: lint test-unit tach typecheck security docstrings deadcode reuse
+check: lint test-unit tach lint-imports typecheck security docstrings deadcode reuse
 
 # Install runtime dependencies only
 install:

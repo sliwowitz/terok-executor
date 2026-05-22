@@ -23,7 +23,7 @@ every layer imports the same value.
 
 from __future__ import annotations
 
-from terok_sandbox import CONTAINER_RUNTIME_DIR
+from terok_executor.integrations.sandbox import CONTAINER_RUNTIME_DIR
 
 CONTAINER_VAULT_SOCKET = f"{CONTAINER_RUNTIME_DIR}/vault.sock"
 """Host vault socket as seen inside the container (socket mode only)."""

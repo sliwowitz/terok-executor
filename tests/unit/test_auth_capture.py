@@ -52,7 +52,7 @@ class TestCaptureCredentials:
         (tmp_path / ".credentials.json").write_text(json.dumps(cred))
 
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -72,7 +72,7 @@ class TestCaptureCredentials:
         (tmp_path / "config.json").write_text(json.dumps({"api_key": "blab-key"}))
 
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -107,7 +107,10 @@ class TestCaptureCredentials:
         cred = {"claudeAiOauth": {"accessToken": "sk-test"}}
         (tmp_path / ".credentials.json").write_text(json.dumps(cred))
 
-        with patch("terok_sandbox.SandboxConfig", side_effect=RuntimeError("DB broken")):
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            side_effect=RuntimeError("DB broken"),
+        ):
             _capture_credentials("claude", tmp_path, "default")
 
         err = capsys.readouterr().err
@@ -119,7 +122,7 @@ class TestCaptureCredentials:
         (tmp_path / "config.json").write_text(json.dumps({"api_key": "work-key"}))
 
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -325,7 +328,7 @@ class TestCaptureAppliesPostCaptureState:
 
         mounts = tmp_path / "mounts"
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -357,7 +360,7 @@ class TestCaptureAppliesPostCaptureState:
 
         mounts = tmp_path / "mounts"
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -396,7 +399,7 @@ class TestCaptureAppliesPostCaptureState:
         blocker.mkdir(parents=True)
 
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -435,7 +438,7 @@ class TestCaptureWritesCredentialsFile:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -454,7 +457,7 @@ class TestCaptureWritesCredentialsFile:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -488,7 +491,7 @@ class TestCaptureWritesCredentialsFile:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -668,7 +671,7 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -690,7 +693,7 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -709,7 +712,7 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -728,7 +731,7 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -749,7 +752,7 @@ class TestStoreApiKey:
     def test_stores_key(self, tmp_path: Path) -> None:
         """store_api_key writes to the DB without a container."""
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -764,7 +767,7 @@ class TestStoreApiKey:
     def test_custom_credential_set(self, tmp_path: Path) -> None:
         """store_api_key supports custom credential sets."""
         db_path = tmp_path / "proxy" / "credentials.db"
-        with patch("terok_sandbox.SandboxConfig") as mock_cfg_cls:
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE

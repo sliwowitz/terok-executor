@@ -17,7 +17,7 @@ class TestInjectAgentConfig:
     def test_copies_config_dir_into_container(self, tmp_path: Path) -> None:
         """Config dir is copied to /home/dev/.terok via podman cp."""
         mock_sandbox = MagicMock()
-        with patch("terok_sandbox.Sandbox", return_value=mock_sandbox):
+        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
             inject_agent_config("my-ctr", tmp_path)
 
         mock_sandbox.copy_to.assert_called_once_with("my-ctr", tmp_path, "/home/dev/.terok")
@@ -29,7 +29,7 @@ class TestInjectPrompt:
     def test_prompt_text_reaches_container(self) -> None:
         """Prompt text is written to a temp file then podman-cp'd."""
         mock_sandbox = MagicMock()
-        with patch("terok_sandbox.Sandbox", return_value=mock_sandbox):
+        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
             inject_prompt("sealed-ctr", "Fix the flaky test")
 
         mock_sandbox.copy_to.assert_called_once()
@@ -51,7 +51,7 @@ class TestInjectPrompt:
 
         mock_sandbox = MagicMock()
         mock_sandbox.copy_to.side_effect = capture_copy
-        with patch("terok_sandbox.Sandbox", return_value=mock_sandbox):
+        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
             inject_prompt("ctr", "Behebe den Fehler — Ünïcödé")
 
         assert written_content == "Behebe den Fehler — Ünïcödé"
@@ -66,7 +66,7 @@ class TestInjectPrompt:
 
         mock_sandbox = MagicMock()
         mock_sandbox.copy_to.side_effect = capture_copy
-        with patch("terok_sandbox.Sandbox", return_value=mock_sandbox):
+        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
             inject_prompt("ctr", "Line one\nLine two\nLine three")
 
         assert written_content == "Line one\nLine two\nLine three"

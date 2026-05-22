@@ -28,9 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from terok_sandbox import Sharing, VolumeSpec
-
 from terok_executor._util import detect_host_timezone
+from terok_executor.integrations.sandbox import Sharing, VolumeSpec
 
 _CONTAINER_RUNTIME_DIR = "/run/terok"
 """Container-side mount point — must match [`terok_sandbox.CONTAINER_RUNTIME_DIR`][terok_sandbox.CONTAINER_RUNTIME_DIR]."""
@@ -46,8 +45,7 @@ release.  Old containers on protocol N keep running; new containers get
 protocol N+1 and carry the matching host-side code."""
 
 if TYPE_CHECKING:
-    from terok_sandbox import CredentialDB, SandboxConfig
-
+    from terok_executor.integrations.sandbox import CredentialDB, SandboxConfig
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -448,7 +446,7 @@ def _inject_vault_tokens(
     empty dict.  When ``True`` (terok project mode), raises ``SystemExit``
     if the vault is unreachable.
     """
-    from terok_sandbox import (
+    from terok_executor.integrations.sandbox import (
         SandboxConfig,
         get_ssh_signer_port,
         get_token_broker_port,

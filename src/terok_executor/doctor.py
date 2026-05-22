@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from terok_sandbox.doctor import CheckVerdict, DoctorCheck
+from terok_executor.integrations.sandbox import CheckVerdict, DoctorCheck
 
 from .vault_addr import (
     CONTAINER_VAULT_SOCKET,

@@ -24,7 +24,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from terok_sandbox import SandboxConfigView
+
+from terok_executor.integrations.sandbox import SandboxConfigView
 
 # ── Owned sub-section ─────────────────────────────────────────────────
 

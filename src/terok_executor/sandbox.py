@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
 
 def ensure_sandbox_ready(
@@ -42,9 +42,7 @@ def ensure_sandbox_ready(
     even starts, and a stage-shaped failure beats an unframed
     traceback.
     """
-    from terok_sandbox import stage_line
-    from terok_sandbox.commands import _handle_sandbox_setup
-
+    from terok_executor.integrations.sandbox import _handle_sandbox_setup, stage_line
     from terok_executor.roster.loader import ensure_vault_routes
 
     if not no_vault:

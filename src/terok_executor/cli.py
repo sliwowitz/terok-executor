@@ -27,7 +27,7 @@ import argparse
 import os
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
-from terok_sandbox.commands import CommandTree
+from terok_executor.integrations.sandbox import CommandTree
 
 from ._tree import COMMANDS
 

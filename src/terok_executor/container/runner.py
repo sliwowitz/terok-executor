@@ -24,9 +24,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_sandbox import SandboxConfig, Sharing, VolumeSpec
-
 from terok_executor._util import detect_host_timezone
+from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
 
 from .build import BuildError, build_base_images
 
@@ -34,8 +33,7 @@ if TYPE_CHECKING:
     import subprocess
     from collections.abc import Mapping
 
-    from terok_sandbox import ContainerRuntime, LifecycleHooks, Sandbox
-
+    from terok_executor.integrations.sandbox import ContainerRuntime, LifecycleHooks, Sandbox
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -96,7 +94,7 @@ class AgentRunner:
         one backend instance.
         """
         if self._sandbox is None:
-            from terok_sandbox import Sandbox
+            from terok_executor.integrations.sandbox import Sandbox
 
             self._sandbox = Sandbox(config=self._cfg, runtime=self._runtime)
         return self._sandbox
@@ -377,7 +375,7 @@ class AgentRunner:
             BuildError: When GPU was requested but the host has no functioning
                 NVIDIA CDI.
         """
-        from terok_sandbox import GpuConfigError, RunSpec
+        from terok_executor.integrations.sandbox import GpuConfigError, RunSpec
 
         spec = RunSpec(
             container_name=name,
@@ -766,7 +764,7 @@ class AgentRunner:
         if follow and mode in ("headless", "tool"):
             self._stream_headless(cname, timeout=float(timeout + 60))
         elif mode == "interactive":
-            from terok_sandbox import READY_MARKER
+            from terok_executor.integrations.sandbox import READY_MARKER
 
             ready = self.sandbox.stream_logs(
                 cname,
@@ -782,7 +780,7 @@ class AgentRunner:
                 argv = self.runtime.container(cname).login_command(command=("bash", "-l"))
                 print(f"\nContainer ready. Login with:\n  {_shlex.join(argv)}")
         elif mode == "web" and port:
-            from terok_sandbox import READY_MARKER
+            from terok_executor.integrations.sandbox import READY_MARKER
 
             self.sandbox.stream_logs(cname, timeout=120.0)
             url = public_url or f"http://127.0.0.1:{port}"
@@ -816,7 +814,7 @@ class AgentRunner:
 
         The container will clone from this URL — shield blocks all other egress.
         """
-        from terok_sandbox import GitGate
+        from terok_executor.integrations.sandbox import GitGate
 
         cfg = self.sandbox.config
         gate_base = cfg.gate_base_path

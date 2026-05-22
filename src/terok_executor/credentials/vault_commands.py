@@ -16,11 +16,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_sandbox import CommandDef
-from terok_sandbox.commands import CommandTree
+from terok_executor.integrations.sandbox import CommandDef, CommandTree
 
 if TYPE_CHECKING:
-    from terok_sandbox import SandboxConfig
+    from terok_executor.integrations.sandbox import SandboxConfig
 
 
 def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
@@ -32,7 +31,7 @@ def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
 
 def _handle_start(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and start the vault daemon."""
-    from terok_sandbox import is_vault_running, start_vault
+    from terok_executor.integrations.sandbox import is_vault_running, start_vault
 
     if is_vault_running(cfg=cfg):
         print("Vault is already running.")
@@ -44,7 +43,7 @@ def _handle_start(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_stop(*, cfg: SandboxConfig | None = None) -> None:
     """Stop the vault daemon."""
-    from terok_sandbox import is_vault_running, stop_vault
+    from terok_executor.integrations.sandbox import is_vault_running, stop_vault
 
     if not is_vault_running(cfg=cfg):
         print("Vault is not running.")
@@ -63,7 +62,7 @@ def _is_injected_credentials_file(path: Path) -> bool:
 
     Any parse error or unexpected structure → ``False`` (treat as real leak).
     """
-    from terok_sandbox import PHANTOM_CREDENTIALS_MARKER
+    from terok_executor.integrations.sandbox import PHANTOM_CREDENTIALS_MARKER
 
     from .vendor_files import RawClaudeCredentialsFile, load_vendor_json
 
@@ -79,7 +78,7 @@ def _is_injected_credentials_file(path: Path) -> bool:
 
 def _is_injected_codex_auth_file(path: Path) -> bool:
     """Check whether *path* is a terok-injected shared Codex ``auth.json``."""
-    from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
+    from terok_executor.integrations.sandbox import CODEX_SHARED_OAUTH_MARKER
 
     from .vendor_files import RawCodexAuthFile, load_vendor_json
 
@@ -161,7 +160,7 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
     the caller had set up.  Defaults to a fresh config for direct
     callers that don't have one handy.
     """
-    from terok_sandbox import SandboxConfig as _SandboxConfig, VaultStatus
+    from terok_executor.integrations.sandbox import SandboxConfig as _SandboxConfig, VaultStatus
 
     if cfg is None:
         cfg = _SandboxConfig()
@@ -194,7 +193,7 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
 
 def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show vault status."""
-    from terok_sandbox import (
+    from terok_executor.integrations.sandbox import (
         SandboxConfig as _SandboxConfig,
         get_ssh_signer_port,
         get_token_broker_port,
@@ -203,7 +202,6 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
         sanitize_tty,
         systemd_creds_has_tpm2,
     )
-
     from terok_executor.paths import mounts_dir
 
     # Keep a concrete cfg in hand so the socket-mode branch can surface
@@ -318,7 +316,7 @@ def _print_plaintext_passphrase_warning(path: Path) -> None:
     ``None`` default lets the call site work against older
     ``VaultStatus`` builds that pre-date sandbox#282.
     """
-    from terok_sandbox import sanitize_tty
+    from terok_executor.integrations.sandbox import sanitize_tty
 
     use_color = sys.stderr.isatty()
     red = "\033[1;31m" if use_color else ""
@@ -334,7 +332,10 @@ def _print_plaintext_passphrase_warning(path: Path) -> None:
 
 def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and install systemd socket activation."""
-    from terok_sandbox import install_vault_systemd, is_vault_systemd_available
+    from terok_executor.integrations.sandbox import (
+        install_vault_systemd,
+        is_vault_systemd_available,
+    )
 
     if not is_vault_systemd_available():
         print(
@@ -349,7 +350,10 @@ def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_uninstall(*, cfg: SandboxConfig | None = None) -> None:
     """Remove vault systemd units."""
-    from terok_sandbox import is_vault_systemd_available, uninstall_vault_systemd
+    from terok_executor.integrations.sandbox import (
+        is_vault_systemd_available,
+        uninstall_vault_systemd,
+    )
 
     if not is_vault_systemd_available():
         print("Error: systemd user services are not available. Nothing to uninstall.")
@@ -408,7 +412,7 @@ def _build_sandbox_tree() -> CommandTree:
     top-level) shares the wrap with the deep ``terok executor sandbox
     vault`` path automatically.
     """
-    from terok_sandbox.commands import COMMANDS as SANDBOX_COMMANDS
+    from terok_executor.integrations.sandbox import COMMANDS as SANDBOX_COMMANDS
 
     return SANDBOX_COMMANDS.overlay(_VAULT_OVERRIDES).extend_at(
         ("vault",),
