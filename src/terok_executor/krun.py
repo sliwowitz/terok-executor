@@ -189,14 +189,8 @@ def krun_launch_args(*, cfg: SandboxConfig | None = None) -> list[str]:
       authenticated user on connection.  ``USER dev`` is the right
       default under crun (AI agents that refuse uid 0); under krun the
       session uid comes from which ``ssh user@…`` the operator picks.
-    - ``--dns 169.254.1.1`` so the guest resolves through pasta's
-      forwarder rather than the unreachable host-loopback stub.  Same
-      address terok-shield's nft already permits :53 to, so this works
-      under both shield-up and shield-down — the only behavioural cost
-      under shield-up is losing dnsmasq's clearance prompts (queries
-      bypass it).  Documented limitation for the experimental krun
-      runtime; will be revisited when shield+krun gets first-class
-      support.
+    - ``--dns 169.254.1.1`` — kept for shield-bypass; under shield-up
+      the bind-mounted resolv.conf overrides this anyway.
 
     Doesn't include ``--runtime krun`` itself or krun's microVM-sizing
     annotations — those are orchestrator-level decisions terok keeps.

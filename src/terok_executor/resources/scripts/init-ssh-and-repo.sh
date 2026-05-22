@@ -45,18 +45,52 @@ set -euo pipefail
 # The supervisor loop restarts sshd if it crashes (panic, OOM, etc.);
 # ``setsid`` puts the loop in its own session so SIGHUP from the outer
 # init shell (which exits after ``exec bash`` below) can't take it down.
-if [[ "${TEROK_CONTAINER_RUNTIME:-}" == "krun" ]]; then
+if [[ "${TEROK_CONTAINER_RUNTIME:-}" == "krun" && "$(id -u)" == "0" ]]; then
+  # sshd builds a clean session env via PAM — the daemon's inherited
+  # podman ``-e`` env is intentionally NOT propagated to user sessions.
+  # ``PermitUserEnvironment=yes`` makes sshd read ``~/.ssh/environment``
+  # (NAME=VALUE, one per line, literal values) right after auth, before
+  # any /etc/profile or /etc/bashrc — works regardless of distro or L1
+  # image vintage.
   echo ">> starting sshd supervisor on TCP 22 (krun mode — root + dev login)"
   mkdir -p /run/sshd
   setsid bash -c '
     while :; do
       /usr/sbin/sshd -D -e \
         -o "AllowUsers dev root" \
-        -o "PermitRootLogin without-password"
+        -o "PermitRootLogin without-password" \
+        -o "PermitUserEnvironment yes"
       echo "[sshd-supervisor] sshd exited (code $?); restarting in 1s" >&2
       sleep 1
     done
   ' </dev/null &
+
+  # Inverse-list filter: drop shell-internal / login-set vars (the PAM
+  # session sets them) and bash's own exported namespace; everything
+  # else is podman's ``-e`` payload, propagated automatically.  Newline
+  # values would corrupt the line-oriented file and are skipped.
+  install -d -m 0700 -o dev -g dev /home/dev/.ssh
+  {
+    while IFS= read -r name; do
+      case "$name" in
+        PATH|HOME|PWD|OLDPWD|USER|LOGNAME|SHELL|SHLVL|IFS|MAIL|HOSTNAME|TERM|LANG|LC_*|LS_COLORS) ;;
+        _|BASH*|FUNCNAME|EUID|UID|GROUPS|PPID|RANDOM|LINENO|SECONDS|HISTFILE|HISTSIZE|HISTCONTROL) ;;
+        *)
+          val="${!name-}"
+          [[ "$val" == *$'\n'* ]] && continue
+          printf '%s=%s\n' "$name" "$val"
+          ;;
+      esac
+    done < <(compgen -e)
+  } > /home/dev/.ssh/environment
+  chown dev:dev /home/dev/.ssh/environment
+  chmod 0600 /home/dev/.ssh/environment
+
+  # Drop to dev so git operations below produce dev-owned files (the
+  # operator's ssh login can't ``git pull`` against root-owned ``.git``).
+  # managed-settings.json is written by the post-drop block — /etc/claude-code
+  # is dev-owned per agents/claude.yaml, so dev's write lands cleanly.
+  exec runuser -u dev -- bash "$0" "$@"
 fi
 
 # Per-task permission mode: write managed settings for agents that need
@@ -78,28 +112,25 @@ fi
 # shellcheck source=ensure-bridges.sh
 source ensure-bridges.sh
 
-if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
+# Export SSH_AUTH_SOCK from socket existence rather than the
+# ensure-bridges.sh internal export (which only fires on a fresh
+# bridge start, not when the bridge is already alive).
+if [[ -S /tmp/ssh-agent.sock ]]; then
+  export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
   echo ">> bridges established (SSH_AUTH_SOCK=${SSH_AUTH_SOCK})"
+fi
 
-  # Generate minimal ~/.ssh/config — the SSH signer handles keys, so no
-  # IdentityFile is needed.  StrictHostKeyChecking=accept-new prevents
-  # interactive prompts on first connect while still pinning known hosts.
-  mkdir -p "$HOME/.ssh"
-  chmod 700 "$HOME/.ssh"
-  cat > "$HOME/.ssh/config" << 'SSHEOF'
+# ~/.ssh/config: ``StrictHostKeyChecking accept-new`` lets the first
+# real fetch accept-and-pin the host key without an interactive prompt.
+# Independent of SSH_AUTH_SOCK — even with no agent the operator still
+# needs the host-key autoaccept for git over ssh.
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+cat > "$HOME/.ssh/config" << 'SSHEOF'
 Host *
   StrictHostKeyChecking accept-new
 SSHEOF
-  chmod 644 "$HOME/.ssh/config"
-
-  # Warm GitHub known_hosts (uses the SSH signer for authentication)
-  if command -v ssh >/dev/null 2>&1; then
-    if [[ -n "${CODE_REPO:-}" && "${CODE_REPO}" == *"github.com"* ]]; then
-      echo '>> warm github known_hosts (best-effort)'
-      timeout 5 ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR git@github.com || true
-    fi
-  fi
-fi
+chmod 644 "$HOME/.ssh/config"
 
 # Reset current branch to its remote tracking counterpart.
 # Used when no specific branch is configured or the configured branch is missing.

@@ -72,8 +72,14 @@ glab() {
 # ── Proxy bridges ────────────────────────────────────────────────────────────
 
 # Ensure socat bridges are alive (idempotent; self-heals after container restart).
+# Skip under root: under krun the launch goes through ``bash -lc`` which sources
+# /etc/profile (and us) BEFORE init-ssh-and-repo.sh drops privileges, so
+# starting bridges here would leave them root-owned and unreachable from the
+# later dev session (UID-mismatched kill -0 / unowned ``/tmp/*.sock``).
+# init-ssh-and-repo.sh explicitly sources ensure-bridges.sh post-drop.
 # shellcheck source=ensure-bridges.sh
-command -v socat >/dev/null 2>&1 && . ensure-bridges.sh 2>/dev/null
+[[ "$(id -u)" -ne 0 ]] && command -v socat >/dev/null 2>&1 && \
+    . ensure-bridges.sh 2>/dev/null
 
 # Export SSH_AUTH_SOCK when the bridge socket exists; unset if it's gone.
 if [[ -S /tmp/ssh-agent.sock ]]; then

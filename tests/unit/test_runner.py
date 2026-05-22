@@ -443,6 +443,46 @@ class TestLaunchPrepared:
         spec = sandbox.run.call_args[0][0]
         assert dict(spec.annotations) == {}
 
+    def test_runtime_propagates_to_runspec(self, tmp_path: Path) -> None:
+        """``runtime="krun"`` lands on ``RunSpec.runtime`` — the typed channel
+        sandbox turns into both podman's ``--runtime`` flag and shield's
+        dnsmasq-bind selection.  Without this the orchestrator would still
+        have to smuggle ``--runtime krun`` through ``extra_args`` and shield
+        would silently fall back to the default-runtime dnsmasq bind."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+            runtime="krun",
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.runtime == "krun"
+
+    def test_runtime_defaults_to_none(self, tmp_path: Path) -> None:
+        """Omitting ``runtime`` leaves ``RunSpec.runtime`` ``None`` so podman
+        falls through to its built-in default."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.runtime is None
+
     def test_sealed_defaults_false(self, tmp_path: Path) -> None:
         """Sealed isolation is opt-in — the default must be shared-mode."""
         sandbox = _mock_sandbox()

@@ -325,6 +325,7 @@ class AgentRunner:
         extra_args: list[str] | None = None,
         hostname: str | None = None,
         annotations: Mapping[str, str] | None = None,
+        runtime: str | None = None,
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
 
@@ -360,6 +361,14 @@ class AgentRunner:
                 [`SAFE_ANNOTATION_KEYS`][terok_sandbox.sandbox.SAFE_ANNOTATION_KEYS].
                 Typed channel for orchestrator metadata the shield reads,
                 distinct from the freeform *extra_args*.
+            runtime: OCI runtime selector forwarded to
+                [`RunSpec.runtime`][terok_sandbox.sandbox.RunSpec.runtime].
+                ``None`` (default) leaves the choice to podman; ``"krun"``
+                selects the libkrun microVM backend and also drives
+                shield's dnsmasq bind selection.  Prefer this over
+                passing ``--runtime`` via *extra_args* — sandbox emits
+                the flag itself and shield reads the value to pick the
+                right firewall topology.
 
         Returns:
             The container name (same as *name*).
@@ -385,6 +394,7 @@ class AgentRunner:
             sealed=sealed,
             hostname=hostname,
             annotations=annotations or {},
+            runtime=runtime,
         )
 
         try:
