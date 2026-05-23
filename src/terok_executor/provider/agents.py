@@ -17,7 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from terok_executor._util import ensure_dir, ensure_dir_writable, yaml_load as _yaml_load
+from terok_util import ensure_dir, ensure_dir_writable
+
+from terok_executor._util import yaml_load as _yaml_load
 
 from .providers import AGENT_PROVIDERS
 from .wrappers import WrapperConfig, initial_prompt_block

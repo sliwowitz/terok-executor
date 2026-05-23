@@ -16,7 +16,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_executor.integrations.sandbox import CommandDef, CommandTree
+from terok_util import CommandDef, CommandTree
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import SandboxConfig
@@ -193,13 +193,14 @@ def _format_credentials(status: object, cfg: SandboxConfig | None = None) -> str
 
 def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     """Show vault status."""
+    from terok_util import sanitize_tty
+
     from terok_executor.integrations.sandbox import (
         SandboxConfig as _SandboxConfig,
         get_ssh_signer_port,
         get_token_broker_port,
         get_vault_status,
         is_vault_systemd_available,
-        sanitize_tty,
         systemd_creds_has_tpm2,
     )
     from terok_executor.paths import mounts_dir
@@ -316,7 +317,7 @@ def _print_plaintext_passphrase_warning(path: Path) -> None:
     ``None`` default lets the call site work against older
     ``VaultStatus`` builds that pre-date sandbox#282.
     """
-    from terok_executor.integrations.sandbox import sanitize_tty
+    from terok_util import sanitize_tty
 
     use_color = sys.stderr.isatty()
     red = "\033[1;31m" if use_color else ""
@@ -414,6 +415,11 @@ def _build_sandbox_tree() -> CommandTree:
     """
     from terok_executor.integrations.sandbox import COMMANDS as SANDBOX_COMMANDS
 
+    # Both ``SANDBOX_COMMANDS`` and the locally-built ``CommandDef`` /
+    # ``CommandTree`` now share the same ``terok_util.cli_types``
+    # identity (sandbox adopted terok-util in v0.0.124a16+), so the
+    # earlier ``cast`` + ``type: ignore`` bridge across two structurally-
+    # identical-but-nominally-distinct classes is no longer needed.
     return SANDBOX_COMMANDS.overlay(_VAULT_OVERRIDES).extend_at(
         ("vault",),
         (

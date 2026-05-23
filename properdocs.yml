@@ -43,6 +43,7 @@ plugins:
             - https://docs.python.org/3/objects.inv
             - https://docs.pydantic.dev/latest/objects.inv
             - https://raw.githubusercontent.com/terok-ai/docs-inventories/master/terok/objects.inv
+            - https://raw.githubusercontent.com/terok-ai/docs-inventories/master/terok-util/objects.inv
             - https://raw.githubusercontent.com/terok-ai/docs-inventories/master/terok-sandbox/objects.inv
             - https://raw.githubusercontent.com/terok-ai/docs-inventories/master/terok-shield/objects.inv
             - https://raw.githubusercontent.com/terok-ai/docs-inventories/master/terok-clearance/objects.inv

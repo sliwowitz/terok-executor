@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 import unittest.mock
 from pathlib import Path
 
@@ -30,11 +29,16 @@ class TestStateRoot:
         assert result == Path.home() / "agent-state"
 
     def test_root_fallback(self) -> None:
-        """Root user gets /var/lib/terok/executor."""
-        with (
-            unittest.mock.patch.dict(os.environ, {}, clear=True),
-            unittest.mock.patch("terok_sandbox.paths._is_root", return_value=True),
-        ):
+        """Root user gets /var/lib/terok/executor.
+
+        Relies on the autouse ``_isolate_user_paths`` fixture in
+        ``tests/unit/conftest.py`` to keep ``HOME`` / ``XDG_*`` /
+        ``TEROK_*_DIR`` pointing at the test's tmp dir (and so out of
+        the way) — clearing the whole environment here would defeat
+        that contract and leave the test reaching for the operator's
+        real ``$HOME``.
+        """
+        with unittest.mock.patch("terok_util.paths._is_root", return_value=True):
             assert paths.state_root() == Path("/var/lib/terok/executor")
 
     def test_default_ends_with_executor(self, monkeypatch: pytest.MonkeyPatch) -> None:

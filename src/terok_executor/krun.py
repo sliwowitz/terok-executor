@@ -34,13 +34,14 @@ import stat
 import tempfile
 from pathlib import Path
 
+from terok_util import namespace_runtime_dir
+
 from terok_executor.integrations.sandbox import (
     KrunRuntime,
     PodmanRuntime,
     SandboxConfig,
     TcpSSHTransport,
     ensure_infra_keypair,
-    namespace_runtime_dir,
     podman_port_resolver,
 )
 
@@ -103,7 +104,7 @@ def ensure_krun_host_keypair(
     generates the key on first call and reloads it thereafter), and
     writes the OpenSSH-PEM private + the public-key line into
     *runtime_dir* (default:
-    [`namespace_runtime_dir()`][terok_sandbox.namespace_runtime_dir]).
+    [`namespace_runtime_dir()`][terok_util.paths.namespace_runtime_dir]).
 
     The orchestrator bind-mounts ``public_path`` into the running
     krun guest at ``/etc/ssh/authorized_keys.d/terok`` so the
@@ -126,7 +127,7 @@ def ensure_krun_host_keypair(
             executor flows; terok injects its own enriched config when
             calling.
         runtime_dir: Override for the tmpfs cache directory.  ``None``
-            uses [`namespace_runtime_dir`][terok_sandbox.namespace_runtime_dir],
+            uses [`namespace_runtime_dir`][terok_util.paths.namespace_runtime_dir],
             with a hard refusal to fall back to persistent disk.
     """
     target_dir = _ensure_safe_runtime_dir(runtime_dir)

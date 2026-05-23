@@ -99,9 +99,9 @@ class TestAgentsSetCommand:
         cfg = tmp_path / "config.yml"
         monkeypatch.setenv("TEROK_CONFIG_FILE", str(cfg))
 
-        from terok_sandbox import paths as sandbox_paths
+        from terok_util.paths import _reset_config_caches_for_tests
 
-        sandbox_paths._config_section_cache.clear()
+        _reset_config_caches_for_tests()
         return cfg
 
     def test_set_writes_selection(self, override_config: Path) -> None:
@@ -211,9 +211,9 @@ class TestShowConfigAndOverrides:
         (``test_credential_encryption.py``).
         """
         from terok_sandbox import config as _cfg
-        from terok_sandbox.paths import _config_section_cache
+        from terok_util.paths import _reset_config_caches_for_tests
 
-        _config_section_cache.clear()
+        _reset_config_caches_for_tests()
         _cfg._credentials_section.cache_clear()
         _cfg._shield_section.cache_clear()
 

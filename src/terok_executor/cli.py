@@ -1,5 +1,4 @@
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
-# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
 """CLI entry point for terok-executor.
@@ -7,7 +6,7 @@
 Composes executor's own commands with sandbox's full tree (via
 [`SANDBOX_TREE`][terok_executor.credentials.vault_commands.SANDBOX_TREE])
 into a single
-[`CommandTree`][terok_sandbox.commands.CommandTree], exposed two ways:
+[`CommandTree`][terok_util.cli_types.CommandTree], exposed two ways:
 
 - *Deep path* — ``terok-executor sandbox <verb>`` reaches every
   sandbox verb verbatim, with executor's overlays applied where they
@@ -16,8 +15,8 @@ into a single
   ``CommandDef`` instance as ``terok-executor sandbox vault <verb>``,
   so wraps applied at one entry point apply at the other.
 
-[`CommandTree.wire`][terok_sandbox.commands.CommandTree.wire] /
-[`CommandTree.dispatch`][terok_sandbox.commands.CommandTree.dispatch]
+[`CommandTree.wire`][terok_util.cli_types.CommandTree.wire] /
+[`CommandTree.dispatch`][terok_util.cli_types.CommandTree.dispatch]
 do all the argparse plumbing.
 """
 
@@ -27,7 +26,7 @@ import argparse
 import os
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
-from terok_executor.integrations.sandbox import CommandTree
+from terok_util import CommandTree
 
 from ._tree import COMMANDS
 

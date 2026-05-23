@@ -26,9 +26,9 @@ from terok_executor.config import (
 
 @pytest.fixture
 def override_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point `TEROK_CONFIG_FILE` at a per-test path and clear sandbox's reader cache.
+    """Point `TEROK_CONFIG_FILE` at a per-test path and clear util's reader cache.
 
-    Sandbox's [`read_config_section`][terok_sandbox.paths.read_config_section]
+    [`read_config_section`][terok_util.paths.read_config_section]
     caches results across calls, so a stale cache from an earlier test
     would mask the freshly-written file.  Reset before the test so the
     reader sees an empty starting state.
@@ -36,9 +36,9 @@ def override_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     cfg = tmp_path / "config.yml"
     monkeypatch.setenv("TEROK_CONFIG_FILE", str(cfg))
 
-    from terok_sandbox import paths as sandbox_paths
+    from terok_util import paths as util_paths
 
-    sandbox_paths._config_section_cache.clear()
+    util_paths._config_section_cache.clear()
     return cfg
 
 
@@ -54,7 +54,7 @@ class TestWritableConfigPath:
     def test_falls_back_to_namespace_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No override → ``namespace_config_dir() / 'config.yml'``."""
         monkeypatch.delenv("TEROK_CONFIG_FILE", raising=False)
-        from terok_sandbox.paths import namespace_config_dir
+        from terok_util import namespace_config_dir
 
         assert writable_config_path() == namespace_config_dir() / "config.yml"
 
@@ -120,9 +120,9 @@ class TestGetGlobalImageAgents:
         """``set`` then ``get`` returns the value that was written."""
         set_global_image_agents("claude,vibe")
         # Reset cache so the freshly-written file is re-read.
-        from terok_sandbox import paths as sandbox_paths
+        from terok_util import paths as util_paths
 
-        sandbox_paths._config_section_cache.clear()
+        util_paths._config_section_cache.clear()
         assert get_global_image_agents() == "claude,vibe"
 
 

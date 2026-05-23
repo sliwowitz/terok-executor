@@ -7,10 +7,10 @@ The ``COMMANDS`` tree at the bottom is the authoritative registry;
 higher-level frontends (``terok``) import it to wire the same commands
 into their own CLI without duplicating argument definitions.
 
-[`CommandDef`][terok_sandbox.commands.CommandDef] /
-[`ArgDef`][terok_sandbox.commands.ArgDef] /
-[`CommandTree`][terok_sandbox.commands.CommandTree] are imported from
-terok-sandbox so the whole stack shares one vocabulary — adding new
+[`CommandDef`][terok_util.cli_types.CommandDef] /
+[`ArgDef`][terok_util.cli_types.ArgDef] /
+[`CommandTree`][terok_util.cli_types.CommandTree] are imported from
+terok-util so the whole stack shares one vocabulary — adding new
 verbs in sandbox flows into executor's tree automatically without an
 overlay update.
 """
@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_executor.integrations.sandbox import ArgDef, CommandDef
+from terok_util import ArgDef, CommandDef
 
 from .container.build import DEFAULT_BASE_IMAGE
 

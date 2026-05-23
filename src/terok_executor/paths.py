@@ -3,14 +3,14 @@
 
 """Resolves filesystem paths for executor state and bind-mount directories.
 
-Delegates to [`terok_sandbox.paths.namespace_state_dir`][terok_sandbox.paths.namespace_state_dir] for the
-shared XDG/FHS resolution logic — no vendored copy of the platform
-detection code.
+Delegates to [`terok_util.namespace_state_dir`][terok_util.paths.namespace_state_dir]
+for the shared XDG/FHS resolution logic — no vendored copy of the
+platform detection code.
 """
 
 from pathlib import Path
 
-from terok_executor.integrations.sandbox import namespace_state_dir
+from terok_util import namespace_state_dir
 
 _SUBDIR = "executor"
 
@@ -22,7 +22,7 @@ def state_root() -> Path:
     → ``platformdirs`` → ``$XDG_DATA_HOME/terok/executor``
     → ``~/.local/share/terok/executor``.
     """
-    return namespace_state_dir(_SUBDIR, "TEROK_EXECUTOR_STATE_DIR")
+    return namespace_state_dir(_SUBDIR, env_var="TEROK_EXECUTOR_STATE_DIR")
 
 
 def mounts_dir() -> Path:
@@ -37,4 +37,4 @@ def mounts_dir() -> Path:
     intentionally separated from the credentials store since they are
     container-exposed and subject to potential poisoning.
     """
-    return namespace_state_dir("sandbox-live", "TEROK_SANDBOX_LIVE_DIR") / "mounts"
+    return namespace_state_dir("sandbox-live", env_var="TEROK_SANDBOX_LIVE_DIR") / "mounts"

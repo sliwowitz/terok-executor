@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Composes executor's full [`CommandTree`][terok_sandbox.commands.CommandTree].
+"""Composes executor's full [`CommandTree`][terok_util.cli_types.CommandTree].
 
 Lives below the CLI surface so the package init can re-export the
 composed tree as ``terok_executor.COMMANDS`` (the cli module is at
@@ -17,7 +17,7 @@ Three views over one underlying ``SANDBOX_TREE`` instance:
 
 from __future__ import annotations
 
-from terok_executor.integrations.sandbox import CommandDef, CommandTree
+from terok_util import CommandDef, CommandTree
 
 from .commands import COMMANDS as OWN_COMMANDS
 from .credentials.vault_commands import SANDBOX_TREE, VAULT_COMMANDS

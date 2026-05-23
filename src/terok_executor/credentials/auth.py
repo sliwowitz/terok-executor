@@ -27,8 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
+from terok_util import podman_userns_args
 
-from terok_executor._util import podman_userns_args
 from terok_executor.integrations.sandbox import (
     CODEX_SHARED_OAUTH_MARKER,
     PHANTOM_CREDENTIALS_MARKER,

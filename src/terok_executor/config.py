@@ -17,11 +17,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from terok_executor.integrations.sandbox import (
-    namespace_config_dir,
-    read_config_section,
-    yaml_update_section,
-)
+from terok_util import namespace_config_dir, read_config_section
+
+from terok_executor.integrations.sandbox import yaml_update_section
 
 __all__ = [
     "get_global_image_agents",
@@ -66,7 +64,7 @@ def writable_config_path() -> Path:
     """Return the path the next config write should target.
 
     Honours ``TEROK_CONFIG_FILE`` when set; otherwise the user-scope
-    file under [`namespace_config_dir`][terok_sandbox.paths.namespace_config_dir].
+    file under [`namespace_config_dir`][terok_util.paths.namespace_config_dir].
     """
     env = os.getenv("TEROK_CONFIG_FILE")
     if env:

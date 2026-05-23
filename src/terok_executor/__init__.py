@@ -24,11 +24,13 @@ try:
 except PackageNotFoundError:
     pass  # editable install or running from source without metadata
 
+# -- terok-util shared types (re-exported for convenience) --------------------
+from terok_util import ConfigStack
+
 # -- terok-sandbox protocol types (re-exported for convenience) ----------------
 from terok_executor.integrations.sandbox import (
     CheckVerdict,
     ConfigScope,
-    ConfigStack,
     DoctorCheck,
 )
 
