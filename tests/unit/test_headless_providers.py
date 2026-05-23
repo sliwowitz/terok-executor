@@ -8,16 +8,12 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from terok_executor.provider.agents import _generate_claude_wrapper
-from terok_executor.provider.config import resolve_provider_value
-from terok_executor.provider.headless import (
-    apply_provider_config,
-    build_headless_command,
-)
 from terok_executor.provider.providers import (
     AGENT_PROVIDERS,
     PROVIDER_NAMES,
     collect_all_auto_approve_env,
     get_provider,
+    resolve_provider_value,
 )
 from terok_executor.provider.wrappers import (
     INITIAL_PROMPT_CONSUMED_PATH,
@@ -110,7 +106,7 @@ class TestBuildHeadlessCommand:
     def test_all_commands_start_with_init(self) -> None:
         """All provider commands start with init-ssh-and-repo.sh."""
         for _name, p in AGENT_PROVIDERS.items():
-            cmd = build_headless_command(p, timeout=1800)
+            cmd = p.build_headless_command(timeout=1800)
             assert cmd.startswith("init-ssh-and-repo.sh")
 
 
@@ -315,19 +311,19 @@ class TestApplyProviderConfig:
     def test_model_from_config(self) -> None:
         """Model value is read from config when no CLI override."""
         p = AGENT_PROVIDERS["claude"]
-        pcfg = apply_provider_config(p, {"model": "opus"})
+        pcfg = p.apply_config({"model": "opus"})
         assert pcfg.model == "opus"
 
     def test_timeout_default(self) -> None:
         """Missing timeout defaults to 1800."""
         p = AGENT_PROVIDERS["claude"]
-        pcfg = apply_provider_config(p, {})
+        pcfg = p.apply_config({})
         assert pcfg.timeout == 1800
 
     def test_max_turns_unsupported_injects_prompt(self) -> None:
         """Provider without max_turns_flag gets prompt injection + warning."""
         p = AGENT_PROVIDERS["codex"]
-        pcfg = apply_provider_config(p, {"max_turns": 30})
+        pcfg = p.apply_config({"max_turns": 30})
         assert pcfg.max_turns is None
         assert "30 steps" in pcfg.prompt_extra
 

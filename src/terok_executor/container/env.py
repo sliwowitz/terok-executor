@@ -113,7 +113,7 @@ class ContainerEnvSpec:
 
     vault_transport: Literal["direct", "socket"] = "direct"
     """Vault transport mode: ``"direct"`` (HTTP base URL) or ``"socket"``
-    (Unix socket path via [`socket_env`][terok_executor.VaultRoute.socket_env])."""
+    (Unix socket path via [`socket_env`][terok_executor.roster.VaultRoute.socket_env])."""
 
     vault_required: bool = False
     """When ``True``, raise ``SystemExit`` if the vault is
@@ -138,7 +138,7 @@ class ContainerEnvSpec:
     expose_credential_providers: frozenset[str] = frozenset()
     """Providers whose credential file should remain writable in-container.
 
-    By default every provider with a [`vault.credential_file`][terok_executor.VaultRoute.credential_file]
+    By default every provider with a [`vault.credential_file`][terok_executor.roster.VaultRoute.credential_file]
     gets the file mounted read-only on top of its shared config dir, so an
     in-container ``/login`` cannot taint the host copy
     ([terok-ai/terok#873](https://github.com/terok-ai/terok/issues/873)).

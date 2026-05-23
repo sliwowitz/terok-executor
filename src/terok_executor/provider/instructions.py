@@ -47,7 +47,7 @@ def resolve_instructions(
 
     Returns the final instructions text.
     """
-    from .config import resolve_provider_value
+    from .providers import resolve_provider_value
 
     val = config.get("instructions")
     default = bundled_default_instructions()

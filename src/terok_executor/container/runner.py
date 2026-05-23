@@ -620,8 +620,6 @@ class AgentRunner:
             sidecar_spec = self.roster.get_sidecar_spec(provider)
             image_tag = self._ensure_sidecar_image(sidecar_spec.tool_name)
         else:
-            from terok_executor.provider.headless import build_headless_command
-
             agent = self.roster.get_provider(provider)
             image_tag = self._ensure_images()
 
@@ -724,8 +722,8 @@ class AgentRunner:
                 tool_cmd += " " + " ".join(shlex.quote(a) for a in tool_args)
             command = ["bash", "-lc", tool_cmd]
         elif mode == "headless":
-            cmd_str = build_headless_command(
-                agent, timeout=timeout, model=model, max_turns=max_turns
+            cmd_str = agent.build_headless_command(
+                timeout=timeout, model=model, max_turns=max_turns
             )
             command = ["bash", "-lc", cmd_str]
         elif mode == "interactive":

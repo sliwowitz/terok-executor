@@ -10,9 +10,14 @@ lifecycle of one AI coding agent at a time.  Designed for standalone use
 The public surface is ``__all__`` below.  Key entry points:
 
 - [`AgentRunner`][terok_executor.AgentRunner] — launch agents in containers
-- [`authenticate`][terok_executor.authenticate] / [`store_api_key`][terok_executor.store_api_key] — credential flows
+- [`authenticate`][terok_executor.authenticate] — credential flow
 - [`build_base_images`][terok_executor.build_base_images] — image construction
 - [`get_roster`][terok_executor.get_roster] — YAML agent registry
+
+Implementation-detail types (raw config schema fragments, ACP error
+classes, internal result types, sidecar image / inject helpers) stay
+in their submodules; reach into ``terok_executor.<sub>`` when you
+need them.
 """
 
 __version__: str = "0.0.0"  # placeholder; replaced at build time
@@ -28,28 +33,15 @@ except PackageNotFoundError:
 from terok_util import ConfigStack
 
 # -- terok-sandbox protocol types (re-exported for convenience) ----------------
-from terok_executor.integrations.sandbox import (
-    CheckVerdict,
-    ConfigScope,
-    DoctorCheck,
-)
+from terok_executor.integrations.sandbox import ConfigScope
 
 # -- Commands + CLI surface ----------------------------------------------------
 from ._tree import COMMANDS
 
 # -- ACP host-proxy (per-task multi-agent aggregator) -------------------------
-from .acp import (
-    ACPEndpointStatus,
-    ACPRoster,
-    AgentBindError,
-    AgentRosterCache,
-    ProbeError,
-    acp_socket_is_live,
-    list_authenticated_agents,
-)
+from .acp import ACPEndpointStatus, acp_socket_is_live, list_authenticated_agents
 from .commands import (
     COMMANDS as AGENT_COMMANDS,
-    CommandDef,
     prompt_agents_selection,
     validate_agent_selection,
 )
@@ -59,7 +51,6 @@ from .config import (
     get_global_image_agents,
     get_global_image_base_image,
     set_global_image_agents,
-    writable_config_path,
 )
 
 # -- Config schema (executor-owned slice of the shared config.yml) -----------
@@ -69,7 +60,6 @@ from .config_schema import ExecutorConfigView, RawImageSection
 from .container.build import (
     AGENTS_LABEL,
     DEFAULT_BASE_IMAGE,
-    INSTALLED_ENV_PATH,
     BuildError,
     ImageSet,
     build_base_images,
@@ -80,30 +70,20 @@ from .container.build import (
     image_agents,
     l0_image_tag,
     l1_image_tag,
-    l1_sidecar_image_tag,
     render_l0,
     render_l1,
-    render_l1_sidecar,
     stage_scripts,
     stage_tmux_config,
     stage_toad_agents,
 )
 from .container.cache import seed_workspace_from_clone_cache
-from .container.env import ContainerEnvResult, ContainerEnvSpec, assemble_container_env
-from .container.inject import inject_agent_config, inject_prompt
+from .container.env import ContainerEnvSpec, assemble_container_env
+from .container.inject import inject_prompt
 from .container.runner import AgentRunner
 
 # -- Credentials (auth flows, extractors, vault commands) ----------------------
-from .credentials.auth import (
-    AUTH_PROVIDERS,
-    PHANTOM_CREDENTIALS_MARKER,
-    AuthProvider,
-    authenticate,
-    store_api_key,
-)
-from .credentials.extractors import extract_credential
+from .credentials.auth import AUTH_PROVIDERS, authenticate
 from .credentials.vault_commands import VAULT_COMMANDS, scan_leaked_credentials
-from .credentials.vault_config import ConfigPatchError
 
 # -- Doctor + paths ------------------------------------------------------------
 from .doctor import agent_doctor_checks
@@ -113,35 +93,22 @@ from .krun import (
     krun_launch_args,
     make_krun_runtime,
 )
-from .paths import mounts_dir
 
-# -- Provider (headless dispatch, instructions, agent config) ------------------
+# -- Provider (descriptor + headless behaviour, instructions, agent config) ----
 from .provider.agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
-from .provider.config import resolve_provider_value
-from .provider.headless import (
-    CLIOverrides,
-    apply_provider_config,
-    build_headless_command,
-)
 from .provider.instructions import bundled_default_instructions, resolve_instructions
 from .provider.providers import (
     AGENT_PROVIDERS,
     PROVIDER_NAMES,
     AgentProvider,
+    CLIOverrides,
     collect_all_auto_approve_env,
-    collect_opencode_provider_env,
     get_provider,
+    resolve_provider_value,
 )
 
 # -- Roster (agent catalog + config resolution) --------------------------------
-from .roster import (
-    AgentRoster,
-    SidecarSpec,
-    VaultRoute,
-    ensure_vault_routes,
-    get_roster,
-    parse_agent_selection,
-)
+from .roster import AgentRoster, ensure_vault_routes, get_roster, parse_agent_selection
 
 # -- Sandbox bootstrap composition ---------------------------------------------
 from .sandbox import ensure_sandbox_ready
@@ -151,7 +118,6 @@ from .storage import (
     SharedMountStorageInfo,
     TaskStorageInfo,
     get_shared_mounts_storage,
-    get_task_storage,
     get_tasks_storage,
 )
 
@@ -180,51 +146,39 @@ __all__ = [
     "__version__",
     # ACP host-proxy
     "ACPEndpointStatus",
-    "ACPRoster",
-    "AgentBindError",
-    "AgentRosterCache",
-    "ProbeError",
     "acp_socket_is_live",
     "list_authenticated_agents",
-    # Provider registry
+    # Provider registry + behaviour
     "AGENT_PROVIDERS",
-    "PROVIDER_NAMES",
     "AgentProvider",
-    "get_provider",
     "CLIOverrides",
-    "apply_provider_config",
-    "build_headless_command",
-    "collect_opencode_provider_env",
+    "PROVIDER_NAMES",
     "collect_all_auto_approve_env",
+    "get_provider",
+    "resolve_provider_value",
     # Agent config preparation
     "AgentConfigSpec",
-    "prepare_agent_config_dir",
     "parse_md_agent",
+    "prepare_agent_config_dir",
     # Auth
     "AUTH_PROVIDERS",
-    "AuthProvider",
-    "PHANTOM_CREDENTIALS_MARKER",
     "authenticate",
-    "store_api_key",
     # Instructions
     "bundled_default_instructions",
     "resolve_instructions",
     # Config stack
     "ConfigScope",
     "ConfigStack",
-    "resolve_provider_value",
     # Config schema (executor-owned slice of the shared config.yml)
     "ExecutorConfigView",
     "RawImageSection",
-    # Global config writers (executor-owned slices of config.yml)
+    # Global config writers
     "get_global_image_agents",
     "get_global_image_base_image",
     "set_global_image_agents",
-    "writable_config_path",
     # Build: image construction + resource staging
     "AGENTS_LABEL",
     "DEFAULT_BASE_IMAGE",
-    "INSTALLED_ENV_PATH",
     "BuildError",
     "ImageSet",
     "build_base_images",
@@ -235,53 +189,39 @@ __all__ = [
     "image_agents",
     "l0_image_tag",
     "l1_image_tag",
-    "l1_sidecar_image_tag",
     "render_l0",
     "render_l1",
-    "render_l1_sidecar",
     "stage_scripts",
     "stage_toad_agents",
     "stage_tmux_config",
-    # Vault
-    "VaultRoute",
+    # Vault routes + scan
     "ensure_vault_routes",
-    "extract_credential",
+    "scan_leaked_credentials",
     # Roster
     "AgentRoster",
-    "SidecarSpec",
     "get_roster",
     "parse_agent_selection",
     # Command registry
     "AGENT_COMMANDS",
     "COMMANDS",
     "VAULT_COMMANDS",
-    "CommandDef",
     "prompt_agents_selection",
     "validate_agent_selection",
-    "mounts_dir",
-    "scan_leaked_credentials",
-    "ConfigPatchError",
     # Doctor (container health checks)
-    "CheckVerdict",
-    "DoctorCheck",
     "agent_doctor_checks",
     # Storage queries
     "SharedMountStorageInfo",
     "TaskStorageInfo",
     "get_shared_mounts_storage",
-    "get_task_storage",
     "get_tasks_storage",
     # Runner facade
     "AgentRunner",
     # Container environment assembly
     "ContainerEnvSpec",
-    "ContainerEnvResult",
     "assemble_container_env",
-    # Clone cache
-    "seed_workspace_from_clone_cache",
-    # Sealed injection helpers
-    "inject_agent_config",
+    # Clone cache + injection helpers
     "inject_prompt",
+    "seed_workspace_from_clone_cache",
     # Sandbox bootstrap composition
     "ensure_sandbox_ready",
     # Krun (KVM-microVM) provisioning + runtime factory

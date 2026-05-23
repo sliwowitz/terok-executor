@@ -98,12 +98,11 @@ depends_on = [
 
 # ── provider/ — AI provider behavior ────────────────────────────────
 
-# Provider-aware config value extraction
-[[modules]]
-path = "terok_executor.provider.config"
-depends_on = []
-
-# Agent provider definitions + registry
+# Agent provider definitions + registry + headless command construction +
+# provider-aware config resolution.  Earlier iterations split these across
+# ``provider/config.py`` and ``provider/headless.py`` as free functions;
+# they're now methods on ``AgentProvider`` so the descriptor and its
+# behaviour live together.
 [[modules]]
 path = "terok_executor.provider.providers"
 depends_on = []
@@ -115,19 +114,11 @@ depends_on = [
     "terok_executor.provider.providers",
 ]
 
-# Headless command construction + config resolution
-[[modules]]
-path = "terok_executor.provider.headless"
-depends_on = [
-    "terok_executor.provider.config",
-    "terok_executor.provider.providers",
-]
-
 # Instruction resolution
 [[modules]]
 path = "terok_executor.provider.instructions"
 depends_on = [
-    "terok_executor.provider.config",
+    "terok_executor.provider.providers",
 ]
 
 # Agent config dir preparation + wrapper generation
@@ -178,7 +169,6 @@ depends_on = [
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
     "terok_executor.provider.agents",
-    "terok_executor.provider.headless",
     "terok_executor.provider.instructions",
     "terok_executor.roster.loader",
 ]
@@ -325,15 +315,11 @@ depends_on = [
     "terok_executor.container.env",
     "terok_executor.container.runner",
     "terok_executor.credentials.auth",
-    "terok_executor.credentials.extractors",
     "terok_executor.credentials.vault_commands",
-    "terok_executor.credentials.vault_config",
     "terok_executor.doctor",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
     "terok_executor.provider.agents",
-    "terok_executor.provider.config",
-    "terok_executor.provider.headless",
     "terok_executor.provider.instructions",
     "terok_executor.provider.providers",
     "terok_executor.roster",
