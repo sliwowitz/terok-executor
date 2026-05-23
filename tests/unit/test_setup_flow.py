@@ -176,55 +176,53 @@ class TestEnsureSandboxReady:
 
 
 class TestPreflightOrExit:
-    """The TTY-aware gatekeeper wrapping ``run_preflight``."""
+    """The TTY-aware gatekeeper wrapping ``Preflight.run``."""
 
     def test_no_preflight_short_circuits(self) -> None:
         """``--no-preflight`` returns True without running any check."""
-        with patch("terok_executor.preflight.run_preflight") as mock_rp:
+        with patch("terok_executor.preflight.Preflight.run") as mock_run:
             result = _preflight_or_exit(
                 "claude", base="ubuntu:24.04", family=None, assume_yes=False, skip_preflight=True
             )
         assert result is True
-        mock_rp.assert_not_called()
+        mock_run.assert_not_called()
 
     def test_non_tty_without_yes_refuses(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Non-TTY + no ``--yes`` → False, with a pointer to setup."""
         with (
             patch("sys.stdin") as mock_stdin,
-            patch("terok_executor.preflight.run_preflight") as mock_rp,
+            patch("terok_executor.preflight.Preflight.run") as mock_run,
         ):
             mock_stdin.isatty.return_value = False
             result = _preflight_or_exit(
                 "claude", base="ubuntu:24.04", family=None, assume_yes=False, skip_preflight=False
             )
         assert result is False
-        mock_rp.assert_not_called()
+        mock_run.assert_not_called()
         assert "terok-executor setup" in capsys.readouterr().err
 
     def test_non_tty_with_yes_runs_preflight(self) -> None:
         """Non-TTY is fine when ``--yes`` drives the prompts."""
         with (
             patch("sys.stdin") as mock_stdin,
-            patch("terok_executor.preflight.run_preflight", return_value=True) as mock_rp,
+            patch("terok_executor.preflight.Preflight.run", return_value=True) as mock_run,
         ):
             mock_stdin.isatty.return_value = False
             result = _preflight_or_exit(
                 "claude", base="ubuntu:24.04", family=None, assume_yes=True, skip_preflight=False
             )
         assert result is True
-        mock_rp.assert_called_once()
-        assert mock_rp.call_args.kwargs["assume_yes"] is True
+        mock_run.assert_called_once()
 
     def test_tty_runs_preflight(self) -> None:
         """TTY without ``--yes`` still runs preflight interactively."""
         with (
             patch("sys.stdin") as mock_stdin,
-            patch("terok_executor.preflight.run_preflight", return_value=True) as mock_rp,
+            patch("terok_executor.preflight.Preflight.run", return_value=True) as mock_run,
         ):
             mock_stdin.isatty.return_value = True
             result = _preflight_or_exit(
                 "claude", base="ubuntu:24.04", family=None, assume_yes=False, skip_preflight=False
             )
         assert result is True
-        mock_rp.assert_called_once()
-        assert mock_rp.call_args.kwargs["interactive"] is True
+        mock_run.assert_called_once()

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,47 @@ from pydantic import ValidationError
 from terok_executor.roster import VaultRoute, get_roster
 from terok_executor.roster.schema import RawAgentYaml
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+
+@contextmanager
+def _patch_vault_manager(**method_returns):
+    """Patch ``VaultManager`` so its instance methods return scripted values.
+
+    Each ``method_returns`` key is a method name on the mock instance
+    (e.g. ``is_daemon_running=True``).  Static-by-design attributes
+    (``token_broker_port``, ``ssh_signer_port``) become plain attribute
+    values rather than callables — they're exposed as properties on
+    the real class.
+    """
+    with patch("terok_executor.integrations.sandbox.VaultManager") as cls:
+        instance = cls.return_value
+        for name, value in method_returns.items():
+            if name in ("token_broker_port", "ssh_signer_port"):
+                # Properties on the real class — plain attribute on the mock.
+                setattr(instance, name, value)
+            else:
+                getattr(instance, name).return_value = value
+        yield instance
+
+
+def _fake_status(**overrides) -> MagicMock:
+    """Default ``VaultStatus`` payload with sensible defaults; overrides win."""
+    defaults: dict[str, object] = {
+        "mode": "daemon",
+        "running": True,
+        "transport": "socket",
+        "socket_path": "/run/proxy.sock",
+        "db_path": "/data/creds.db",
+        "routes_path": "/data/routes.json",
+        "routes_configured": 3,
+        "credentials_stored": (),
+        "ssh_keys_stored": 0,
+        "passphrase_source": None,
+        "locked": False,
+        "plaintext_passphrase_path": None,
+    }
+    defaults.update(overrides)
+    return MagicMock(**defaults)
 
 
 def _vault_route(name: str, data: dict) -> VaultRoute | None:
@@ -280,193 +322,110 @@ class TestScanLeakedCredentials:
 class TestVaultCommandHandlers:
     """Verify vault CLI command handlers."""
 
-    @patch("terok_executor.integrations.sandbox.start_vault")
     @patch("terok_executor.credentials.vault_commands._ensure_routes")
-    @patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False)
-    def test_start_generates_routes_and_starts(self, _running, _routes, _start, capsys) -> None:
+    def test_start_generates_routes_and_starts(self, _routes, capsys) -> None:
         """start generates routes then starts the daemon."""
         from terok_executor.credentials.vault_commands import _handle_start
 
-        _handle_start()
-        _routes.assert_called_once()
-        _start.assert_called_once()
+        with _patch_vault_manager(is_daemon_running=False) as vault:
+            _handle_start()
+            _routes.assert_called_once()
+            vault.start_daemon.assert_called_once_with()
         assert "started" in capsys.readouterr().out
 
-    @patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
-    def test_start_already_running_exits(self, _running) -> None:
+    def test_start_already_running_exits(self) -> None:
         """start exits if vault is already running."""
         from terok_executor.credentials.vault_commands import _handle_start
 
-        with pytest.raises(SystemExit):
+        with _patch_vault_manager(is_daemon_running=True), pytest.raises(SystemExit):
             _handle_start()
 
-    @patch("terok_executor.integrations.sandbox.stop_vault")
-    @patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
-    def test_stop_stops_daemon(self, _running, _stop, capsys) -> None:
-        """stop calls stop_vault when running."""
+    def test_stop_stops_daemon(self, capsys) -> None:
+        """stop calls stop_daemon when running."""
         from terok_executor.credentials.vault_commands import _handle_stop
 
-        _handle_stop()
-        _stop.assert_called_once()
+        with _patch_vault_manager(is_daemon_running=True) as vault:
+            _handle_stop()
+            vault.stop_daemon.assert_called_once_with()
         assert "stopped" in capsys.readouterr().out
 
-    @patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False)
-    def test_stop_not_running(self, _running, capsys) -> None:
+    def test_stop_not_running(self, capsys) -> None:
         """stop prints info when not running."""
         from terok_executor.credentials.vault_commands import _handle_stop
 
-        _handle_stop()
+        with _patch_vault_manager(is_daemon_running=False):
+            _handle_stop()
         assert "not running" in capsys.readouterr().out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_prints_info(self, mock_status, _sd, _scan, capsys) -> None:
+    def test_status_prints_info(self, _scan, capsys) -> None:
         """status prints formatted vault info."""
-        mock_status.return_value = MagicMock(
-            mode="daemon",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=("claude", "gh"),
-            ssh_keys_stored=0,
-            passphrase_source="keyring",
-            locked=False,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(credentials_stored=("claude", "gh"), passphrase_source="keyring")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "running" in out
         assert "claude" in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_surfaces_passphrase_source_and_ssh_key_count(
-        self, mock_status, _sd, _scan, capsys
-    ) -> None:
+    def test_status_surfaces_passphrase_source_and_ssh_key_count(self, _scan, capsys) -> None:
         """The fields enriched by sandbox#276 round-trip into ``vault status`` output."""
-        mock_status.return_value = MagicMock(
-            mode="daemon",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=7,
-            passphrase_source="systemd-creds",
-            locked=False,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(ssh_keys_stored=7, passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "SSH keys:    7" in out
         assert "resolved via systemd-creds" in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_announces_locked_vault(self, mock_status, _sd, _scan, capsys) -> None:
+    def test_status_announces_locked_vault(self, _scan, capsys) -> None:
         """A locked vault prints the explicit ``Locked: yes`` line and the unlock hint."""
-        mock_status.return_value = MagicMock(
-            mode="daemon",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source=None,
-            locked=True,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(locked=True)
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "Locked:      yes" in out
         assert "vault unlock" in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_marks_unlocked_explicitly(self, mock_status, _sd, _scan, capsys) -> None:
+    def test_status_marks_unlocked_explicitly(self, _scan, capsys) -> None:
         """A resolved vault prints ``Locked: no`` alongside the chain-tier source."""
-        mock_status.return_value = MagicMock(
-            mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source="systemd-creds",
-            locked=False,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="systemd", passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "Locked:      no" in out
         assert "resolved via systemd-creds" in out
 
     @patch("terok_executor.integrations.sandbox.systemd_creds_has_tpm2", return_value=True)
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_annotates_systemd_creds_with_tpm2_suffix(
-        self, mock_status, _sd, _scan, _tpm2, capsys
-    ) -> None:
+    def test_status_annotates_systemd_creds_with_tpm2_suffix(self, _scan, _tpm2, capsys) -> None:
         """``systemd-creds`` tier + a TPM2 device → ``(+TPM2)`` suffix on the Passphrase line."""
-        mock_status.return_value = MagicMock(
-            mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source="systemd-creds",
-            locked=False,
-            plaintext_passphrase_path=None,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="systemd", passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "resolved via systemd-creds (+TPM2)" in out
 
     @patch("terok_executor.integrations.sandbox.systemd_creds_has_tpm2", return_value=False)
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_omits_tpm2_suffix_when_unavailable(
-        self, mock_status, _sd, _scan, _tpm2, capsys
-    ) -> None:
+    def test_status_omits_tpm2_suffix_when_unavailable(self, _scan, _tpm2, capsys) -> None:
         """``systemd-creds`` tier + no TPM2 → bare ``resolved via systemd-creds`` line."""
-        mock_status.return_value = MagicMock(
-            mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source="systemd-creds",
-            locked=False,
-            plaintext_passphrase_path=None,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="systemd", passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "resolved via systemd-creds" in out
         assert "(+TPM2)" not in out
@@ -476,58 +435,32 @@ class TestVaultCommandHandlers:
         side_effect=RuntimeError("systemd-creds binary missing"),
     )
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_swallows_tpm2_probe_failure(
-        self, mock_status, _sd, _scan, _tpm2, capsys
-    ) -> None:
+    def test_status_swallows_tpm2_probe_failure(self, _scan, _tpm2, capsys) -> None:
         """A raised TPM2 probe must not break ``vault status`` — bare line, no exception."""
-        mock_status.return_value = MagicMock(
-            mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source="systemd-creds",
-            locked=False,
-            plaintext_passphrase_path=None,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="systemd", passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "resolved via systemd-creds" in out
         assert "(+TPM2)" not in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_surfaces_plaintext_passphrase_warning(
-        self, mock_status, _sd, _scan, capsys
-    ) -> None:
+    def test_status_surfaces_plaintext_passphrase_warning(self, _scan, capsys) -> None:
         """``plaintext_passphrase_path`` lights up a stderr WARNING (sandbox#282)."""
         from pathlib import Path
 
         plaintext_path = Path("/etc/terok/config.yml")
-        mock_status.return_value = MagicMock(
+        status = _fake_status(
             mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
             passphrase_source="systemd-creds",
-            locked=False,
             plaintext_passphrase_path=plaintext_path,
         )
-        from terok_executor.credentials.vault_commands import _handle_status
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         captured = capsys.readouterr()
         # Warning lives on stderr so structured stdout stays greppable.
         assert "WARNING" in captured.err
@@ -536,38 +469,19 @@ class TestVaultCommandHandlers:
         assert "WARNING" not in captured.out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_silent_when_no_plaintext_warning(self, mock_status, _sd, _scan, capsys) -> None:
+    def test_status_silent_when_no_plaintext_warning(self, _scan, capsys) -> None:
         """Default-None case is silent — no plaintext line at all."""
-        mock_status.return_value = MagicMock(
-            mode="systemd",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source="systemd-creds",
-            locked=False,
-            plaintext_passphrase_path=None,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="systemd", passphrase_source="systemd-creds")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         captured = capsys.readouterr()
         assert "plaintext" not in captured.err
         assert "plaintext" not in captured.out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_ssh_signer_port", return_value=18702)
-    @patch("terok_executor.integrations.sandbox.get_token_broker_port", return_value=18701)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_tcp_mode_surfaces_ports_and_annotates_socket(
-        self, mock_status, _broker, _signer, _sd, _scan, capsys
-    ) -> None:
+    def test_status_tcp_mode_surfaces_ports_and_annotates_socket(self, _scan, capsys) -> None:
         """TCP-mode status surfaces ``TCP broker:`` / ``TCP signer:`` and tags the Unix socket.
 
         In TCP mode every container reaches the vault via the TCP listeners;
@@ -578,23 +492,21 @@ class TestVaultCommandHandlers:
         ports just because the headline ``Socket:`` line is the only
         endpoint visible.
         """
-        mock_status.return_value = MagicMock(
+        status = _fake_status(
             mode="systemd",
-            running=True,
             transport="tcp",
             socket_path="/run/user/1000/terok/sandbox/vault.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
             passphrase_source="systemd-creds",
-            locked=False,
-            plaintext_passphrase_path=None,
         )
-        from terok_executor.credentials.vault_commands import _handle_status
+        with _patch_vault_manager(
+            get_status=status,
+            is_systemd_available=False,
+            token_broker_port=18701,
+            ssh_signer_port=18702,
+        ):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "Activation:  systemd" in out
         assert "Transport:   tcp" in out
@@ -605,11 +517,7 @@ class TestVaultCommandHandlers:
         assert "Mode:        systemd" not in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_socket_mode_surfaces_signer_socket(
-        self, mock_status, _sd, _scan, capsys, tmp_path
-    ) -> None:
+    def test_status_socket_mode_surfaces_signer_socket(self, _scan, capsys, tmp_path) -> None:
         """Socket-mode status surfaces the SSH signer socket alongside the broker socket.
 
         Containers in socket mode reach the SSH signer via its own Unix
@@ -626,23 +534,16 @@ class TestVaultCommandHandlers:
             vault_dir=tmp_path / "vault",
             services_mode="socket",
         )
-        mock_status.return_value = MagicMock(
+        status = _fake_status(
             mode="systemd",
-            running=True,
             transport="socket",
             socket_path=cfg.vault_socket_path,
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=(),
-            ssh_keys_stored=0,
             passphrase_source="keyring",
-            locked=False,
-            plaintext_passphrase_path=None,
         )
-        from terok_executor.credentials.vault_commands import _handle_status
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status(cfg=cfg)
+            _handle_status(cfg=cfg)
         out = capsys.readouterr().out
         assert "Transport:   socket" in out
         assert f"SSH signer:  {cfg.ssh_signer_socket_path}" in out
@@ -652,10 +553,8 @@ class TestVaultCommandHandlers:
         assert "(fast-path probe only)" not in out
 
     @patch("terok_executor.credentials.vault_commands.scan_leaked_credentials", return_value=[])
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
     def test_status_falls_back_to_not_configured_when_transport_unknown(
-        self, mock_status, _sd, _scan, capsys
+        self, _scan, capsys
     ) -> None:
         """``status.transport is None`` (vault not running) → ``Transport: (not configured)``.
 
@@ -663,64 +562,48 @@ class TestVaultCommandHandlers:
         value: the allow-list in the renderer keeps a stray repr from
         leaking onto operator-facing output.
         """
-        mock_status.return_value = MagicMock(
-            mode="none",
-            running=False,
-            transport=None,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=0,
-            credentials_stored=(),
-            ssh_keys_stored=0,
-            passphrase_source=None,
-            locked=False,
-            plaintext_passphrase_path=None,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(mode="none", running=False, transport=None, routes_configured=0)
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "Transport:   (not configured)" in out
         assert "TCP broker:" not in out
         assert "SSH signer:" not in out
 
-    @patch("terok_executor.integrations.sandbox.install_vault_systemd")
     @patch("terok_executor.credentials.vault_commands._ensure_routes")
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=True)
-    def test_install_generates_routes_and_installs(self, _sd, _routes, _install, capsys) -> None:
+    def test_install_generates_routes_and_installs(self, _routes, capsys) -> None:
         """install generates routes then installs systemd units."""
-        from terok_executor.credentials.vault_commands import _handle_install
+        with _patch_vault_manager(is_systemd_available=True) as vault:
+            from terok_executor.credentials.vault_commands import _handle_install
 
-        _handle_install()
+            _handle_install()
         _routes.assert_called_once()
-        _install.assert_called_once()
+        vault.install_systemd_units.assert_called_once_with()
         assert "installed" in capsys.readouterr().out
 
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    def test_install_no_systemd_exits(self, _sd) -> None:
+    def test_install_no_systemd_exits(self) -> None:
         """install exits when systemd unavailable."""
-        from terok_executor.credentials.vault_commands import _handle_install
+        with _patch_vault_manager(is_systemd_available=False), pytest.raises(SystemExit):
+            from terok_executor.credentials.vault_commands import _handle_install
 
-        with pytest.raises(SystemExit):
             _handle_install()
 
-    @patch("terok_executor.integrations.sandbox.uninstall_vault_systemd")
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=True)
-    def test_uninstall_removes_units(self, _sd, _uninstall, capsys) -> None:
+    def test_uninstall_removes_units(self, capsys) -> None:
         """uninstall removes systemd units."""
-        from terok_executor.credentials.vault_commands import _handle_uninstall
+        with _patch_vault_manager(is_systemd_available=True) as vault:
+            from terok_executor.credentials.vault_commands import _handle_uninstall
 
-        _handle_uninstall()
-        _uninstall.assert_called_once()
+            _handle_uninstall()
+        vault.uninstall_systemd_units.assert_called_once_with()
         assert "removed" in capsys.readouterr().out
 
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    def test_uninstall_no_systemd_exits(self, _sd) -> None:
+    def test_uninstall_no_systemd_exits(self) -> None:
         """uninstall exits when systemd unavailable."""
-        from terok_executor.credentials.vault_commands import _handle_uninstall
+        with _patch_vault_manager(is_systemd_available=False), pytest.raises(SystemExit):
+            from terok_executor.credentials.vault_commands import _handle_uninstall
 
-        with pytest.raises(SystemExit):
             _handle_uninstall()
 
     @patch(
@@ -738,25 +621,13 @@ class TestVaultCommandHandlers:
         "terok_executor.credentials.vault_commands.scan_leaked_credentials",
         return_value=[("claude", Path("/envs/_claude-config/.credentials.json"))],
     )
-    @patch("terok_executor.integrations.sandbox.is_vault_systemd_available", return_value=False)
-    @patch("terok_executor.integrations.sandbox.get_vault_status")
-    def test_status_shows_leak_warning(self, mock_status, _sd, _scan, capsys) -> None:
+    def test_status_shows_leak_warning(self, _scan, capsys) -> None:
         """status shows WARNING when leaked credentials detected."""
-        mock_status.return_value = MagicMock(
-            mode="daemon",
-            running=True,
-            socket_path="/run/proxy.sock",
-            db_path="/data/creds.db",
-            routes_path="/data/routes.json",
-            routes_configured=3,
-            credentials_stored=("claude",),
-            ssh_keys_stored=0,
-            passphrase_source="keyring",
-            locked=False,
-        )
-        from terok_executor.credentials.vault_commands import _handle_status
+        status = _fake_status(credentials_stored=("claude",), passphrase_source="keyring")
+        with _patch_vault_manager(get_status=status, is_systemd_available=False):
+            from terok_executor.credentials.vault_commands import _handle_status
 
-        _handle_status()
+            _handle_status()
         out = capsys.readouterr().out
         assert "WARNING" in out
         assert "claude" in out

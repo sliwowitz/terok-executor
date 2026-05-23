@@ -810,8 +810,14 @@ class TestVaultEnv:
 
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
-            patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False),
-            patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False),
+            patch(
+                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
+                return_value=False,
+            ),
+            patch(
+                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
+                return_value=False,
+            ),
         ):
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
 

@@ -13,123 +13,140 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from terok_executor.preflight import (
-    CheckResult,
-    check_credentials,
-    check_git,
-    check_images,
-    check_podman,
-    check_sandbox_services,
-    check_shield,
-    check_ssh_key,
-    run_preflight,
-)
+from terok_executor.preflight import CheckResult, Preflight
+
+
+def _pf(**overrides) -> Preflight:
+    """``Preflight`` with default ``provider="claude"`` plus any test overrides."""
+    return Preflight(provider="claude", **overrides)
+
 
 # ── Individual checks ────────────────────────────────────────────────
 
 
 @patch("terok_executor.preflight.subprocess.run")
 @patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
-def test_podman_ok(_which: MagicMock, _run: MagicMock) -> None:
+def test_podman_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Podman found and responds → ok."""
-    assert check_podman().ok is True
+    mock_run.return_value = MagicMock(returncode=0, stdout=b"5.0.0\n", stderr=b"")
+    assert _pf().check_podman().ok is True
 
 
 @patch("terok_executor.preflight.shutil.which", return_value=None)
 def test_podman_missing(_which: MagicMock) -> None:
     """Podman not on PATH → fail."""
-    r = check_podman()
+    r = _pf().check_podman()
     assert r.ok is False
     assert "not found" in r.message
+
+
+@patch("terok_executor.preflight.subprocess.run")
+@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+def test_podman_present_but_nonzero_exit(_which: MagicMock, mock_run: MagicMock) -> None:
+    """``podman version`` exits non-zero → fail with stderr detail.
+
+    Guards the CodeRabbit finding on PR #365: a binary that exists but
+    isn't responding (broken install, missing dependencies, half-set-up
+    rootless config) was previously misreported as healthy.
+    """
+    mock_run.return_value = MagicMock(returncode=125, stdout=b"", stderr=b"socket missing\n")
+    r = _pf().check_podman()
+    assert r.ok is False
+    assert "socket missing" in r.message
 
 
 # ── Sandbox services aggregate ───────────────────────────────────────
 
 
-@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.GateServerManager")
+@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
-@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok(
-    _sock: MagicMock,
-    _run: MagicMock,
     mock_env: MagicMock,
-    mock_status: MagicMock,
+    mock_vault_cls: MagicMock,
+    mock_gate_cls: MagicMock,
 ) -> None:
     """All three (shield, vault, gate) ready → ok."""
     mock_env.return_value = MagicMock(health="ok")
-    mock_status.return_value = MagicMock(mode="systemd")
-    assert check_sandbox_services().ok is True
+    vault = mock_vault_cls.return_value
+    vault.is_socket_active.return_value = False
+    vault.is_daemon_running.return_value = True
+    gate = mock_gate_cls.return_value
+    gate.get_status.return_value = MagicMock(mode="systemd")
+    assert _pf().check_sandbox_services().ok is True
 
 
-@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=True)
-@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.GateServerManager")
+@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=False)
-@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_lists_missing(
-    _sock: MagicMock,
-    _run: MagicMock,
     mock_env: MagicMock,
-    mock_status: MagicMock,
-    _systemd: MagicMock,
+    mock_vault_cls: MagicMock,
+    mock_gate_cls: MagicMock,
 ) -> None:
     """Missing items are all named in the same check's message.
 
-    Pins ``is_systemd_available`` so the gate-unavailable branching
-    in ``check_sandbox_services`` doesn't depend on whether the host
+    Pins ``GateServerManager.is_systemd_available`` so the
+    gate-unavailable branching doesn't depend on whether the host
     running the tests has a user systemd session — without this mock
     the gate would be reclassified as "unavailable: no systemd" on a
     non-systemd runner and drop out of the missing list.
     """
     mock_env.return_value = MagicMock(health="setup-needed")
-    mock_status.return_value = MagicMock(mode=None)
+    vault = mock_vault_cls.return_value
+    vault.is_socket_active.return_value = False
+    vault.is_daemon_running.return_value = False
+    gate = mock_gate_cls.return_value
+    gate.get_status.return_value = MagicMock(mode=None)
+    gate.is_systemd_available.return_value = True
     with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
-        r = check_sandbox_services()
+        r = _pf().check_sandbox_services()
     assert r.ok is False
     for expected in ("vault", "shield", "gate"):
         assert expected in r.message
 
 
-@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=True)
-@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.GateServerManager")
+@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
-@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok_without_git_marks_gate_unavailable(
-    _sock: MagicMock,
-    _run: MagicMock,
     mock_env: MagicMock,
-    mock_status: MagicMock,
-    _systemd: MagicMock,
+    mock_vault_cls: MagicMock,
+    mock_gate_cls: MagicMock,
 ) -> None:
     """Missing git on PATH → gate listed as unavailable (no remediation needed)."""
     mock_env.return_value = MagicMock(health="ok")
-    mock_status.return_value = MagicMock(mode="none")
+    vault = mock_vault_cls.return_value
+    vault.is_socket_active.return_value = False
+    vault.is_daemon_running.return_value = True
+    gate = mock_gate_cls.return_value
+    gate.get_status.return_value = MagicMock(mode="none")
+    gate.is_systemd_available.return_value = True
     with patch("terok_executor.preflight.shutil.which", return_value=None):
-        r = check_sandbox_services()
+        r = _pf().check_sandbox_services()
     assert r.ok is True
     assert "gate unavailable" in r.message
     assert "no git" in r.message
 
 
-@patch("terok_executor.integrations.sandbox.is_systemd_available", return_value=False)
-@patch("terok_executor.integrations.sandbox.get_server_status")
+@patch("terok_executor.integrations.sandbox.GateServerManager")
+@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-@patch("terok_executor.integrations.sandbox.is_vault_running", return_value=True)
-@patch("terok_executor.integrations.sandbox.is_vault_socket_active", return_value=False)
 def test_sandbox_services_ok_without_systemd_marks_gate_unavailable(
-    _sock: MagicMock,
-    _run: MagicMock,
     mock_env: MagicMock,
-    mock_status: MagicMock,
-    _systemd: MagicMock,
+    mock_vault_cls: MagicMock,
+    mock_gate_cls: MagicMock,
 ) -> None:
     """No user systemd → gate listed as unavailable (no daemon fallback yet)."""
     mock_env.return_value = MagicMock(health="ok")
-    mock_status.return_value = MagicMock(mode="none")
+    vault = mock_vault_cls.return_value
+    vault.is_socket_active.return_value = False
+    vault.is_daemon_running.return_value = True
+    gate = mock_gate_cls.return_value
+    gate.get_status.return_value = MagicMock(mode="none")
+    gate.is_systemd_available.return_value = False
     with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
-        r = check_sandbox_services()
+        r = _pf().check_sandbox_services()
     assert r.ok is True
     assert "gate unavailable" in r.message
     assert "systemd" in r.message
@@ -141,13 +158,13 @@ def test_sandbox_services_ok_without_systemd_marks_gate_unavailable(
 @patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git")
 def test_git_present(_which: MagicMock) -> None:
     """git on PATH → ok."""
-    assert check_git().ok is True
+    assert _pf().check_git().ok is True
 
 
 @patch("terok_executor.preflight.shutil.which", return_value=None)
 def test_git_missing_returns_consequence(_which: MagicMock) -> None:
     """git missing → fail, message names the consequence."""
-    r = check_git()
+    r = _pf().check_git()
     assert r.ok is False
     assert "gate disabled" in r.message
 
@@ -160,7 +177,7 @@ def test_credentials_found(mock_db_cls: MagicMock) -> None:
     """Credentials stored → ok."""
     db = mock_db_cls.return_value
     db.load_credential.return_value = {"type": "api_key", "value": "sk-test"}
-    assert check_credentials("claude").ok is True
+    assert _pf().check_credentials().ok is True
     db.close.assert_called_once()
 
 
@@ -169,7 +186,7 @@ def test_credentials_missing(mock_db_cls: MagicMock) -> None:
     """No credentials → fail."""
     db = mock_db_cls.return_value
     db.load_credential.return_value = None
-    r = check_credentials("claude")
+    r = _pf().check_credentials()
     assert r.ok is False
     assert "not found" in r.message
     db.close.assert_called_once()
@@ -181,7 +198,7 @@ def test_credentials_missing(mock_db_cls: MagicMock) -> None:
 )
 def test_credentials_db_unavailable(_cls: MagicMock) -> None:
     """DB open fails → fail with message."""
-    r = check_credentials("claude")
+    r = _pf().check_credentials()
     assert r.ok is False
     assert "unavailable" in r.message
 
@@ -194,7 +211,7 @@ def test_ssh_key_present(mock_db_cls: MagicMock) -> None:
     """Existing key in scope → ok."""
     db = mock_db_cls.return_value
     db.list_ssh_keys_for_scope.return_value = [MagicMock()]
-    r = check_ssh_key()
+    r = _pf().check_ssh_key()
     assert r.ok is True
     db.close.assert_called_once()
 
@@ -204,7 +221,7 @@ def test_ssh_key_absent(mock_db_cls: MagicMock) -> None:
     """Empty scope → fail."""
     db = mock_db_cls.return_value
     db.list_ssh_keys_for_scope.return_value = []
-    r = check_ssh_key()
+    r = _pf().check_ssh_key()
     assert r.ok is False
 
 
@@ -215,14 +232,14 @@ def test_ssh_key_absent(mock_db_cls: MagicMock) -> None:
 def test_images_exist(mock_run: MagicMock) -> None:
     """Image exists → ok."""
     mock_run.return_value = MagicMock(returncode=0)
-    assert check_images("ubuntu:24.04").ok is True
+    assert _pf(base_image="ubuntu:24.04").check_images().ok is True
 
 
 @patch("terok_executor.preflight.subprocess.run")
 def test_images_missing(mock_run: MagicMock) -> None:
     """Image doesn't exist → fail."""
     mock_run.return_value = MagicMock(returncode=1)
-    assert check_images("ubuntu:24.04").ok is False
+    assert _pf(base_image="ubuntu:24.04").check_images().ok is False
 
 
 # ── check_shield ─────────────────────────────────────────────────────
@@ -232,133 +249,110 @@ def test_images_missing(mock_run: MagicMock) -> None:
 def test_shield_ok(mock_env: MagicMock) -> None:
     """Shield active → ok."""
     mock_env.return_value = MagicMock(health="ok")
-    assert check_shield().ok is True
+    assert _pf().check_shield().ok is True
 
 
 @patch("terok_executor.integrations.sandbox.check_environment")
 def test_shield_missing(mock_env: MagicMock) -> None:
     """Shield not installed → fail (informational)."""
     mock_env.return_value = MagicMock(health="setup-needed")
-    r = check_shield()
+    r = _pf().check_shield()
     assert r.ok is False
     assert "unrestricted" in r.message
 
 
-# ── run_preflight orchestration ──────────────────────────────────────
+# ── Preflight.run orchestration ──────────────────────────────────────
 
 
 def _patch_all_ok():
     """Patch every individual check to report ok."""
     return [
-        patch(
-            "terok_executor.preflight.check_podman",
-            return_value=CheckResult("podman", True, "ok"),
-        ),
-        patch(
-            "terok_executor.preflight.check_sandbox_services",
+        patch.object(Preflight, "check_podman", return_value=CheckResult("podman", True, "ok")),
+        patch.object(
+            Preflight,
+            "check_sandbox_services",
             return_value=CheckResult("sandbox services", True, "ready"),
         ),
-        patch(
-            "terok_executor.preflight.check_images",
-            return_value=CheckResult("container images", True, "ready"),
+        patch.object(
+            Preflight, "check_images", return_value=CheckResult("container images", True, "ready")
         ),
-        patch(
-            "terok_executor.preflight.check_ssh_key",
-            return_value=CheckResult("ssh key", True, "present"),
+        patch.object(
+            Preflight, "check_ssh_key", return_value=CheckResult("ssh key", True, "present")
         ),
-        patch(
-            "terok_executor.preflight.check_credentials",
+        patch.object(
+            Preflight,
+            "check_credentials",
             return_value=CheckResult("claude credentials", True, "stored"),
         ),
-        patch(
-            "terok_executor.preflight.check_shield",
-            return_value=CheckResult("shield", True, "ok"),
-        ),
+        patch.object(Preflight, "check_shield", return_value=CheckResult("shield", True, "ok")),
     ]
 
 
-class TestRunPreflight:
+class TestPreflightRun:
     """Orchestration contract — mandatory vs optional, TTY vs --yes."""
 
     def test_all_ok(self) -> None:
         """Every check passes → returns True."""
-        with (
-            _patch_all_ok()[0],
-            _patch_all_ok()[1],
-            _patch_all_ok()[2],
-            _patch_all_ok()[3],
-            _patch_all_ok()[4],
-            _patch_all_ok()[5],
-        ):
-            assert run_preflight("claude", interactive=False) is True
+        patches = _patch_all_ok()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            assert _pf(interactive=False).run() is True
 
-    @patch(
-        "terok_executor.preflight.check_podman",
-        return_value=CheckResult("podman", False, "nope"),
-    )
+    @patch.object(Preflight, "check_podman", return_value=CheckResult("podman", False, "nope"))
     def test_podman_missing_bails_immediately(self, _pod: MagicMock) -> None:
         """Podman is a hard stop — no further checks run."""
-        assert run_preflight("claude", interactive=False) is False
+        assert _pf(interactive=False).run() is False
 
     def test_missing_credentials_do_not_block(self) -> None:
         """Missing credentials are optional — launch still reported as ready."""
         with (
-            patch(
-                "terok_executor.preflight.check_podman",
-                return_value=CheckResult("podman", True, "ok"),
-            ),
-            patch(
-                "terok_executor.preflight.check_sandbox_services",
+            patch.object(Preflight, "check_podman", return_value=CheckResult("podman", True, "ok")),
+            patch.object(
+                Preflight,
+                "check_sandbox_services",
                 return_value=CheckResult("sandbox services", True, "ready"),
             ),
-            patch(
-                "terok_executor.preflight.check_images",
+            patch.object(
+                Preflight,
+                "check_images",
                 return_value=CheckResult("container images", True, "ready"),
             ),
-            patch(
-                "terok_executor.preflight.check_ssh_key",
-                return_value=CheckResult("ssh key", True, "present"),
+            patch.object(
+                Preflight, "check_ssh_key", return_value=CheckResult("ssh key", True, "present")
             ),
-            patch(
-                "terok_executor.preflight.check_credentials",
+            patch.object(
+                Preflight,
+                "check_credentials",
                 return_value=CheckResult("claude credentials", False, "not found"),
             ),
-            patch(
-                "terok_executor.preflight.check_shield",
-                return_value=CheckResult("shield", True, "ok"),
-            ),
+            patch.object(Preflight, "check_shield", return_value=CheckResult("shield", True, "ok")),
         ):
-            assert run_preflight("claude", interactive=False) is True
+            assert _pf(interactive=False).run() is True
 
     def test_missing_sandbox_services_blocks(self) -> None:
         """Sandbox services are mandatory — missing → False in non-interactive."""
         with (
-            patch(
-                "terok_executor.preflight.check_podman",
-                return_value=CheckResult("podman", True, "ok"),
-            ),
-            patch(
-                "terok_executor.preflight.check_sandbox_services",
+            patch.object(Preflight, "check_podman", return_value=CheckResult("podman", True, "ok")),
+            patch.object(
+                Preflight,
+                "check_sandbox_services",
                 return_value=CheckResult("sandbox services", False, "missing"),
             ),
-            patch(
-                "terok_executor.preflight.check_images",
+            patch.object(
+                Preflight,
+                "check_images",
                 return_value=CheckResult("container images", True, "ready"),
             ),
-            patch(
-                "terok_executor.preflight.check_ssh_key",
-                return_value=CheckResult("ssh key", True, "ok"),
+            patch.object(
+                Preflight, "check_ssh_key", return_value=CheckResult("ssh key", True, "ok")
             ),
-            patch(
-                "terok_executor.preflight.check_credentials",
+            patch.object(
+                Preflight,
+                "check_credentials",
                 return_value=CheckResult("claude credentials", True, "ok"),
             ),
-            patch(
-                "terok_executor.preflight.check_shield",
-                return_value=CheckResult("shield", True, "ok"),
-            ),
+            patch.object(Preflight, "check_shield", return_value=CheckResult("shield", True, "ok")),
         ):
-            assert run_preflight("claude", interactive=False) is False
+            assert _pf(interactive=False).run() is False
 
     def test_assume_yes_accepts_fixes_without_input(self) -> None:
         """``--yes`` drives interactive remediation without calling input()."""
@@ -367,36 +361,28 @@ class TestRunPreflight:
             CheckResult("sandbox services", True, "ready"),
         ]
         with (
-            patch(
-                "terok_executor.preflight.check_podman",
-                return_value=CheckResult("podman", True, "ok"),
-            ),
-            patch(
-                "terok_executor.preflight.check_sandbox_services",
-                side_effect=check_results_seq,
-            ),
+            patch.object(Preflight, "check_podman", return_value=CheckResult("podman", True, "ok")),
+            patch.object(Preflight, "check_sandbox_services", side_effect=check_results_seq),
             patch(
                 "terok_executor.preflight._fix_sandbox_services", return_value=True
             ) as fix_services,
-            patch(
-                "terok_executor.preflight.check_images",
+            patch.object(
+                Preflight,
+                "check_images",
                 return_value=CheckResult("container images", True, "ready"),
             ),
-            patch(
-                "terok_executor.preflight.check_ssh_key",
-                return_value=CheckResult("ssh key", True, "ok"),
+            patch.object(
+                Preflight, "check_ssh_key", return_value=CheckResult("ssh key", True, "ok")
             ),
-            patch(
-                "terok_executor.preflight.check_credentials",
+            patch.object(
+                Preflight,
+                "check_credentials",
                 return_value=CheckResult("claude credentials", True, "ok"),
             ),
-            patch(
-                "terok_executor.preflight.check_shield",
-                return_value=CheckResult("shield", True, "ok"),
-            ),
+            patch.object(Preflight, "check_shield", return_value=CheckResult("shield", True, "ok")),
             patch("terok_executor.preflight.input") as mock_input,
         ):
-            result = run_preflight("claude", interactive=True, assume_yes=True)
+            result = _pf(interactive=True, assume_yes=True).run()
 
         assert result is True
         fix_services.assert_called_once()

@@ -446,16 +446,11 @@ def _inject_vault_tokens(
     empty dict.  When ``True`` (terok project mode), raises ``SystemExit``
     if the vault is unreachable.
     """
-    from terok_executor.integrations.sandbox import (
-        SandboxConfig,
-        get_ssh_signer_port,
-        get_token_broker_port,
-        is_vault_running,
-        is_vault_socket_active,
-    )
+    from terok_executor.integrations.sandbox import SandboxConfig, VaultManager
 
     cfg = SandboxConfig()
-    if not (is_vault_socket_active() or is_vault_running(cfg)):
+    vault = VaultManager(cfg)
+    if not (vault.is_socket_active() or vault.is_daemon_running()):
         if vault_required:
             raise SystemExit(
                 "Vault is not running.\n\n"
@@ -498,7 +493,7 @@ def _inject_vault_tokens(
             credential_types[name] = (cred.get("type") if cred else None) or "api_key"
             tokens[name] = db.create_token(scope, task_id, credential_set, name)
 
-        port = get_token_broker_port(cfg)
+        port = vault.token_broker_port
     except Exception:
         _logger.exception("Vault token injection failed")
         if vault_required:
@@ -564,7 +559,7 @@ def _inject_vault_tokens(
                 f"{_CONTAINER_RUNTIME_DIR}/{cfg.ssh_signer_socket_path.name}"
             )
         else:
-            env["TEROK_SSH_SIGNER_PORT"] = str(get_ssh_signer_port(cfg))
+            env["TEROK_SSH_SIGNER_PORT"] = str(vault.ssh_signer_port)
 
     _logger.debug("Vault: injected %d env vars for %s", len(env), routed)
     return env

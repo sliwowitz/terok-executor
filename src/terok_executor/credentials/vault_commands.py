@@ -31,24 +31,26 @@ def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
 
 def _handle_start(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and start the vault daemon."""
-    from terok_executor.integrations.sandbox import is_vault_running, start_vault
+    from terok_executor.integrations.sandbox import VaultManager
 
-    if is_vault_running(cfg=cfg):
+    vault = VaultManager(cfg)
+    if vault.is_daemon_running():
         print("Vault is already running.")
         sys.exit(1)
     _ensure_routes(cfg=cfg)
-    start_vault(cfg=cfg)
+    vault.start_daemon()
     print("Vault started.")
 
 
 def _handle_stop(*, cfg: SandboxConfig | None = None) -> None:
     """Stop the vault daemon."""
-    from terok_executor.integrations.sandbox import is_vault_running, stop_vault
+    from terok_executor.integrations.sandbox import VaultManager
 
-    if not is_vault_running(cfg=cfg):
+    vault = VaultManager(cfg)
+    if not vault.is_daemon_running():
         print("Vault is not running.")
         return
-    stop_vault(cfg=cfg)
+    vault.stop_daemon()
     print("Vault stopped.")
 
 
@@ -197,20 +199,18 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
 
     from terok_executor.integrations.sandbox import (
         SandboxConfig as _SandboxConfig,
-        get_ssh_signer_port,
-        get_token_broker_port,
-        get_vault_status,
-        is_vault_systemd_available,
+        VaultManager,
         systemd_creds_has_tpm2,
     )
     from terok_executor.paths import mounts_dir
 
     # Keep a concrete cfg in hand so the socket-mode branch can surface
     # the SSH-signer socket path alongside the broker socket without a
-    # second sandbox round-trip; ``get_vault_status`` does its own
+    # second sandbox round-trip; ``VaultManager.get_status`` does its own
     # resolution internally and is unaffected.
     working_cfg = cfg or _SandboxConfig()
-    status = get_vault_status(cfg=working_cfg)
+    vault = VaultManager(working_cfg)
+    status = vault.get_status()
     state = "running" if status.running else "stopped"
     # Path fields land in a terminal that interprets ANSI/control chars.
     # The values originate from the vault daemon's config / live state —
@@ -242,8 +242,8 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
     # client ever reaches that socket — flag it so the line doesn't
     # imply otherwise.
     if transport == "tcp":
-        broker_port = get_token_broker_port(cfg=working_cfg)
-        signer_port = get_ssh_signer_port(cfg=working_cfg)
+        broker_port = vault.token_broker_port
+        signer_port = vault.ssh_signer_port
         if broker_port is not None:
             print(f"TCP broker:  127.0.0.1:{broker_port}")
         if signer_port is not None:
@@ -292,7 +292,7 @@ def _handle_status(*, cfg: SandboxConfig | None = None) -> None:
         print(f"Credentials: {_format_credentials(status, cfg)}")
     else:
         print("Credentials: none stored")
-    if not status.running and status.mode == "none" and is_vault_systemd_available():
+    if not status.running and status.mode == "none" and vault.is_systemd_available():
         print("\nHint: run 'install' to set up systemd socket activation.")
 
     plaintext_path = getattr(status, "plaintext_passphrase_path", None)
@@ -333,33 +333,29 @@ def _print_plaintext_passphrase_warning(path: Path) -> None:
 
 def _handle_install(*, cfg: SandboxConfig | None = None) -> None:
     """Generate routes and install systemd socket activation."""
-    from terok_executor.integrations.sandbox import (
-        install_vault_systemd,
-        is_vault_systemd_available,
-    )
+    from terok_executor.integrations.sandbox import VaultManager
 
-    if not is_vault_systemd_available():
+    vault = VaultManager(cfg)
+    if not vault.is_systemd_available():
         print(
             "Error: systemd user services are not available on this host.\n"
             "Use 'start' to run the vault without systemd."
         )
         sys.exit(1)
     _ensure_routes(cfg=cfg)
-    install_vault_systemd(cfg=cfg)
+    vault.install_systemd_units()
     print("Vault installed via systemd socket activation.")
 
 
 def _handle_uninstall(*, cfg: SandboxConfig | None = None) -> None:
     """Remove vault systemd units."""
-    from terok_executor.integrations.sandbox import (
-        is_vault_systemd_available,
-        uninstall_vault_systemd,
-    )
+    from terok_executor.integrations.sandbox import VaultManager
 
-    if not is_vault_systemd_available():
+    vault = VaultManager(cfg)
+    if not vault.is_systemd_available():
         print("Error: systemd user services are not available. Nothing to uninstall.")
         sys.exit(1)
-    uninstall_vault_systemd(cfg=cfg)
+    vault.uninstall_systemd_units()
     print("Vault systemd units removed.")
 
 
