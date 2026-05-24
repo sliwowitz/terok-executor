@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# Pi (https://pi.dev/) — multi-provider coding agent CLI.  Unlike the
+# native CLIs, Pi has no vault route of its own: it consumes whichever
+# provider phantom tokens are already in the container env (set by
+# co-installed claude/codex/vibe/etc.) and routes API calls through the
+# vault.  ``pi-vault-routes.mjs`` (auto-discovered via the symlink in
+# ``pi-env.sh``) overrides every built-in provider's ``baseUrl`` so Pi
+# talks to the vault instead of going to ``api.anthropic.com`` /
+# ``api.openai.com`` direct.
+roster_version: 1
+
+kind: bridge
+label: Pi
+binary: pi
+
+git_identity:
+  name: Pi
+  email: noreply@earendil.works
+
+headless:
+  # ``pi --mode json "<prompt>"`` — prompt is positional, JSON event
+  # stream on stdout.  No permission gating in print/json modes (verified
+  # in packages/coding-agent/src/modes/print-mode.ts); tools run as
+  # called.  No ``--max-turns`` / ``--verbose`` analogues in Pi.
+  prompt_flag: ""
+  model_flag: "--model"
+  output_format_flags: ["--mode", "json"]
+
+auto_approve:
+  env: {}
+
+session:
+  supports_resume: true
+  resume_flag: "--session"
+  continue_flag: "--continue"
+  session_file: pi-session.txt
+
+capabilities:
+  log_format: plain
+
+mounts:
+  # ~/.pi/agent/ holds auth.json, settings.json, models.json, sessions/,
+  # themes/, prompts/, tools/, bin/.  Matching upstream's default keeps
+  # debugging predictable; the mount inside ``/home/dev/.pi`` covers the
+  # whole ``agent/`` subtree.
+  - host_dir: _pi-config
+    container_path: /home/dev/.pi
+    label: Pi config
+
+install:
+  run_as_root: |
+    RUN set -eux; \
+        install -m 0644 /tmp/terok-scripts/pi-env.sh \
+                /etc/profile.d/pi-env.sh; \
+        install -D -m 0644 /tmp/terok-scripts/pi-vault-routes.mjs \
+                /usr/local/share/terok/pi-extensions/vault-routes.mjs
+  run_as_dev: |
+    RUN npm install -g @earendil-works/pi-coding-agent
+
+help:
+  label: '  \033[36mpi\033[0m         - Pi coding agent (\033[2mhttps://pi.dev\033[0m)'

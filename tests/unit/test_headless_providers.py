@@ -60,6 +60,7 @@ class TestAgentProviderRegistry:
             "opencode",
             "kisski",
             "openrouter",
+            "pi",
         }
         assert set(AGENT_PROVIDERS.keys()) == expected
 
@@ -135,7 +136,7 @@ class TestGenerateAgentWrapper:
 
     def test_session_resume_uses_explicit_id(self) -> None:
         """Providers with session_file use --session/--resume with explicit ID."""
-        for name in ("vibe", "opencode", "blablador", "kisski", "openrouter"):
+        for name in ("vibe", "opencode", "blablador", "kisski", "openrouter", "pi"):
             p = AGENT_PROVIDERS[name]
             wrapper = _provider_wrapper(name)
             assert p.resume_flag in wrapper, f"{name} missing resume flag"

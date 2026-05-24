@@ -73,6 +73,7 @@ class TestLoadBundledAgents:
             "kisski",
             "opencode",
             "openrouter",
+            "pi",
             "sonar",
             "toad",
             "vibe",
@@ -280,6 +281,26 @@ class TestDeserializeProvider:
         assert p.session_file == "vibe-session.txt"
         assert p.model_flag == "--agent"
 
+    def test_pi_uses_json_mode_for_headless(self) -> None:
+        """Pi has no max-turns/verbose flags and emits its JSON event
+        stream via positional prompt + ``--mode json``."""
+        agents = _load_bundled_agents()
+        p = _agent_provider("pi", agents["pi"])
+
+        assert p.name == "pi"
+        assert p.binary == "pi"
+        assert p.prompt_flag == ""
+        assert p.output_format_flags == ("--mode", "json")
+        assert p.model_flag == "--model"
+        assert p.max_turns_flag is None
+        assert p.verbose_flag is None
+        assert p.supports_session_resume is True
+        assert p.resume_flag == "--session"
+        assert p.continue_flag == "--continue"
+        assert p.session_file == "pi-session.txt"
+        assert p.auto_approve_env == {}
+        assert p.log_format == "plain"
+
     def test_defaults_for_omitted_fields(self) -> None:
         """Omitted optional fields get sensible defaults."""
         p = _agent_provider("minimal", {"label": "Test", "binary": "test"})
@@ -388,6 +409,7 @@ class TestLoadRegistry:
             "kisski",
             "opencode",
             "openrouter",
+            "pi",
         }
         assert set(reg.agent_names) == expected_agents
 
