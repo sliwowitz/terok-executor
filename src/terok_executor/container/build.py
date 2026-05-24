@@ -166,7 +166,161 @@ class ImageSet:
     """L1 sidecar image tag, if built (e.g. ``terok-l1-sidecar:fedora-44``)."""
 
 
-# ── Public entry points ──
+# ── Public entry point ──
+
+
+@dataclass(frozen=True)
+class ImageBuilder:
+    """Build pipeline for terok agent container images.
+
+    Holds the ``(base_image, family)`` the L0/L1/L2 build stack is
+    anchored on.  Build operations are instance-bound; pure
+    family detection, image introspection, and resource staging stay
+    as static methods — they don't depend on the builder's state.
+
+    Two scopes of operations:
+
+    * **Instance methods** — apply ``self.base_image`` and ``self.family``
+      to a podman build (``build_base``, ``build_sidecar``,
+      ``ensure_default_l1``), tag computations (``l0_tag``,
+      ``l1_tag``, ``l1_sidecar_tag``), and Dockerfile rendering
+      (``render_l0``, ``render_l1``, ``render_l1_sidecar``).
+    * **Static methods** — pure helpers that operate on arbitrary
+      inputs: ``detect_family``, ``image_agents``, ``stage_scripts``,
+      ``stage_tmux_config``, ``stage_toad_agents``.
+    """
+
+    base_image: str = DEFAULT_BASE_IMAGE
+    """Base OS image the L0 layer FROMs (e.g. ``fedora:44``)."""
+
+    family: str | None = None
+    """Package family override (``"deb"`` / ``"rpm"``) — auto-detected when ``None``."""
+
+    # ── Build operations ───────────────────────────────
+
+    def build_base(
+        self,
+        *,
+        agents: str | tuple[str, ...] = "all",
+        rebuild: bool = False,
+        full_rebuild: bool = False,
+        build_dir: Path | None = None,
+        tag_as_default: bool = False,
+    ) -> ImageSet:
+        """Build L0 + L1 images for *agents*; returns the resulting tag pair.
+
+        See module-level ``build_base_images`` for the parameter contract.
+        """
+        return build_base_images(
+            self.base_image,
+            family=self.family,
+            agents=agents,
+            rebuild=rebuild,
+            full_rebuild=full_rebuild,
+            build_dir=build_dir,
+            tag_as_default=tag_as_default,
+        )
+
+    def build_sidecar(
+        self,
+        *,
+        tool_name: str = "coderabbit",
+        rebuild: bool = False,
+        full_rebuild: bool = False,
+        build_dir: Path | None = None,
+    ) -> str:
+        """Build the L1 sidecar image variant for *tool_name*; returns the tag."""
+        return build_sidecar_image(
+            self.base_image,
+            family=self.family,
+            tool_name=tool_name,
+            rebuild=rebuild,
+            full_rebuild=full_rebuild,
+            build_dir=build_dir,
+        )
+
+    def ensure_default_l1(self, agents: str | tuple[str, ...] = "all") -> str:
+        """Return the default-alias L1 tag, building the default L1 if absent."""
+        return ensure_default_l1(self.base_image, family=self.family, agents=agents)
+
+    # ── Tag computation (instance — anchored on self.base_image) ────
+
+    @property
+    def l0_tag(self) -> str:
+        """L0 image tag for ``self.base_image``."""
+        return l0_image_tag(self.base_image)
+
+    @property
+    def l1_sidecar_tag(self) -> str:
+        """L1 sidecar image tag for ``self.base_image``."""
+        return l1_sidecar_image_tag(self.base_image)
+
+    def l1_tag(self, agents: tuple[str, ...] | None = None) -> str:
+        """L1 image tag for *agents* under ``self.base_image`` (alias when ``None``)."""
+        return l1_image_tag(self.base_image, agents)
+
+    # ── Templates (instance — uses self.base_image + self.family) ───
+
+    def render_l0(self) -> str:
+        """Render the L0 Dockerfile for this base."""
+        return render_l0(self.base_image, family=self._family)
+
+    def render_l1(
+        self,
+        l0_tag: str,
+        *,
+        agents: tuple[str, ...] | str = "all",
+        cache_bust: str = "0",
+    ) -> str:
+        """Render the L1 CLI Dockerfile for *agents* on top of *l0_tag*."""
+        return render_l1(l0_tag, family=self._family, agents=agents, cache_bust=cache_bust)
+
+    def render_l1_sidecar(
+        self,
+        l0_tag: str,
+        *,
+        tool_name: str = "coderabbit",
+        cache_bust: str = "0",
+    ) -> str:
+        """Render the L1 sidecar Dockerfile for *tool_name* on top of *l0_tag*."""
+        return render_l1_sidecar(
+            l0_tag, family=self._family, tool_name=tool_name, cache_bust=cache_bust
+        )
+
+    @property
+    def _family(self) -> str:
+        """Resolved family — override when set, else detected from ``base_image``."""
+        return self.family or detect_family(self.base_image)
+
+    # ── Static utilities (no instance state) ────────────
+
+    @staticmethod
+    def detect_family(base_image: str, override: str | None = None) -> str:
+        """Resolve the package family (``"deb"`` / ``"rpm"``) for *base_image*."""
+        return detect_family(base_image, override)
+
+    @staticmethod
+    def image_agents(image: str) -> set[str]:
+        """Return roster agent names from an L1 image's ``ai.terok.agents`` label."""
+        return image_agents(image)
+
+    @staticmethod
+    def stage_scripts(dest: Path) -> None:
+        """Stage shell helper scripts (``hilfe``, ``terok-*``) into *dest*."""
+        stage_scripts(dest)
+
+    @staticmethod
+    def stage_tmux_config(dest: Path) -> None:
+        """Stage the tmux config into *dest*."""
+        stage_tmux_config(dest)
+
+    @staticmethod
+    def stage_toad_agents(dest: Path) -> None:
+        """Stage toad agent metadata into *dest*."""
+        stage_toad_agents(dest)
+
+
+# ── Underlying free functions (now private — call via ImageBuilder) ──
 
 
 def detect_family(base_image: str, override: str | None = None) -> str:

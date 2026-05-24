@@ -21,6 +21,7 @@ ecosystem set.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -83,11 +84,64 @@ class ExecutorConfigView(SandboxConfigView):
     terok's ``RawGlobalConfig`` inherits from this class and flips
     back to ``extra="forbid"``: the topmost layer knows every section,
     so a typo at the top level is caught there.
+
+    The class also exposes staticmethods for reading and writing the
+    ``image:`` section on disk: ``image_agents()``,
+    ``image_base_image()``, and ``set_image_agents(selection)``.  The
+    schema thus owns both the *shape* and the canonical *accessors*
+    for its owned section, rather than scattering one helper per
+    operation across a separate ``config`` module.
     """
 
     model_config = ConfigDict(extra="allow")
 
     image: RawImageSection = Field(default_factory=RawImageSection)
+
+    @staticmethod
+    def image_agents() -> str | None:
+        """Return the effective ``image.agents``, or ``None`` when unset.
+
+        ``None`` distinguishes "field absent" from ``"all"`` (the
+        explicit "every roster entry" selector).
+        """
+        from terok_util import read_config_section
+
+        return read_config_section("image").get("agents") or None
+
+    @staticmethod
+    def image_base_image() -> str | None:
+        """Return the explicit ``image.base_image``, or ``None`` when unset.
+
+        Callers apply the schema fallback themselves
+        ([`DEFAULT_BASE_IMAGE`][terok_executor.DEFAULT_BASE_IMAGE]) —
+        keeping that constant out of this module preserves the
+        foundation-layer boundary (schema sits below container/build).
+        """
+        from terok_util import read_config_section
+
+        return read_config_section("image").get("base_image") or None
+
+    @staticmethod
+    def set_image_agents(selection: str) -> Path:
+        """Write *selection* into ``image.agents`` and return the file path.
+
+        Caller validates *selection* up-front (typically via
+        [`validate_agent_selection`][terok_executor.validate_agent_selection]).
+
+        Invalidates terok-util's process-wide ``read_config_section``
+        cache before returning so the next ``image_agents()`` /
+        ``image_base_image()`` call observes the freshly-written value
+        rather than the in-memory snapshot taken before the write.
+        """
+        from terok_util import paths as _util_paths
+
+        from terok_executor.config import writable_config_path
+        from terok_executor.integrations.sandbox import yaml_update_section
+
+        path = writable_config_path()
+        yaml_update_section(path, "image", {"agents": selection})
+        _util_paths._config_section_cache.clear()
+        return path
 
 
 __all__ = [

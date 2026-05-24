@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
 
-from .build import BuildError, build_base_images
+from .build import BuildError, ImageBuilder
 
 if TYPE_CHECKING:
     import subprocess
@@ -792,14 +792,13 @@ class AgentRunner:
 
     def _ensure_images(self) -> str:
         """Ensure L0+L1 images exist, return L1 tag."""
-        images = build_base_images(self._base_image, family=self._family)
+        images = ImageBuilder(self._base_image, self._family).build_base()
         return images.l1
 
     def _ensure_sidecar_image(self, tool_name: str) -> str:
         """Ensure sidecar L1 exists for *tool_name*, return its tag."""
-        from .build import build_sidecar_image
 
-        return build_sidecar_image(self._base_image, family=self._family, tool_name=tool_name)
+        return ImageBuilder(self._base_image, self._family).build_sidecar(tool_name=tool_name)
 
     def _setup_gate(self, repo_url: str, task_id: str) -> str:
         """Mirror a repo via the sandbox gate and return the gate HTTP URL.

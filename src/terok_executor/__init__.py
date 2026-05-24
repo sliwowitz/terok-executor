@@ -46,14 +46,7 @@ from .commands import (
     validate_agent_selection,
 )
 
-# -- Global config writers (executor-owned slices of config.yml) ---------------
-from .config import (
-    get_global_image_agents,
-    get_global_image_base_image,
-    set_global_image_agents,
-)
-
-# -- Config schema (executor-owned slice of the shared config.yml) -----------
+# -- Config schema + read/write accessors for the executor-owned image: section --
 from .config_schema import ExecutorConfigView, RawImageSection
 
 # -- Container (build, env assembly, runner) -----------------------------------
@@ -61,20 +54,9 @@ from .container.build import (
     AGENTS_LABEL,
     DEFAULT_BASE_IMAGE,
     BuildError,
+    ImageBuilder,
     ImageSet,
-    build_base_images,
     build_project_image,
-    build_sidecar_image,
-    detect_family,
-    ensure_default_l1,
-    image_agents,
-    l0_image_tag,
-    l1_image_tag,
-    render_l0,
-    render_l1,
-    stage_scripts,
-    stage_tmux_config,
-    stage_toad_agents,
 )
 from .container.cache import seed_workspace_from_clone_cache
 from .container.env import ContainerEnvSpec, assemble_container_env
@@ -82,7 +64,7 @@ from .container.inject import inject_prompt
 from .container.runner import AgentRunner
 
 # -- Credentials (auth flows, extractors, vault commands) ----------------------
-from .credentials.auth import AUTH_PROVIDERS, authenticate
+from .credentials.auth import AUTH_PROVIDERS, Authenticator
 from .credentials.vault_commands import VAULT_COMMANDS, scan_leaked_credentials
 
 # -- Doctor + paths ------------------------------------------------------------
@@ -162,7 +144,7 @@ __all__ = [
     "prepare_agent_config_dir",
     # Auth
     "AUTH_PROVIDERS",
-    "authenticate",
+    "Authenticator",
     # Instructions
     "bundled_default_instructions",
     "resolve_instructions",
@@ -172,29 +154,14 @@ __all__ = [
     # Config schema (executor-owned slice of the shared config.yml)
     "ExecutorConfigView",
     "RawImageSection",
-    # Global config writers
-    "get_global_image_agents",
-    "get_global_image_base_image",
-    "set_global_image_agents",
     # Build: image construction + resource staging
     "AGENTS_LABEL",
     "DEFAULT_BASE_IMAGE",
     "BuildError",
+    "ImageBuilder",
     "ImageSet",
-    "build_base_images",
     "build_project_image",
-    "build_sidecar_image",
-    "detect_family",
-    "ensure_default_l1",
-    "image_agents",
-    "l0_image_tag",
-    "l1_image_tag",
-    "render_l0",
-    "render_l1",
-    "stage_scripts",
-    "stage_toad_agents",
-    "stage_tmux_config",
-    # Vault routes + scan
+    # Vault routes + roster bootstrap
     "ensure_vault_routes",
     "scan_leaked_credentials",
     # Roster

@@ -340,7 +340,7 @@ def _handle_auth(
     base_image: str | None = None,
 ) -> None:
     """Run auth flow for an agent."""
-    from .credentials.auth import AUTH_PROVIDERS, authenticate, store_api_key
+    from .credentials.auth import AUTH_PROVIDERS, Authenticator, store_api_key
 
     if api_key is not None:
         if not api_key.strip():
@@ -350,18 +350,17 @@ def _handle_auth(
             raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
         store_api_key(agent, api_key.strip())
     else:
-        from .config import get_global_image_base_image
-        from .container.build import ensure_default_l1
+        from .config_schema import ExecutorConfigView
+        from .container.build import ImageBuilder
         from .paths import mounts_dir
 
         # Lazy: if the user picks API key from the OAuth-or-API-key prompt,
         # ensure_default_l1 is never invoked and we don't pay for an L1 build.
-        base = base_image or get_global_image_base_image() or DEFAULT_BASE_IMAGE
-        authenticate(
+        base = base_image or ExecutorConfigView.image_base_image() or DEFAULT_BASE_IMAGE
+        Authenticator(agent).run(
             None,
-            agent,
             mounts_dir=mounts_dir(),
-            image=lambda: ensure_default_l1(base),
+            image=lambda: ImageBuilder(base).ensure_default_l1(),
         )
 
     # Write vault URLs to shared config files (e.g. Vibe config.toml, gh config.yml)
@@ -442,11 +441,11 @@ def validate_agent_selection(raw: str) -> None:
 
 def _handle_agents_set(*, selection: str | None = None) -> None:
     """Write the global ``image.agents`` default to ``config.yml``."""
-    from .config import set_global_image_agents
+    from .config_schema import ExecutorConfigView
 
     raw = selection if selection is not None else prompt_agents_selection()
     validate_agent_selection(raw)
-    path = set_global_image_agents(raw)
+    path = ExecutorConfigView.set_image_agents(raw)
     print(f"Wrote image.agents = {raw!r} to {path}")
 
 
@@ -460,15 +459,14 @@ def _handle_build(
     sidecar: bool = False,
 ) -> None:
     """Build L0+L1 container images (optionally include sidecar L1)."""
-    from .container.build import BuildError, build_base_images, build_sidecar_image
+    from .container.build import BuildError, ImageBuilder
     from .roster.loader import parse_agent_selection
 
     selection = parse_agent_selection(agents)
 
+    builder = ImageBuilder(base, family=family)
     try:
-        images = build_base_images(
-            base, family=family, agents=selection, rebuild=rebuild, full_rebuild=full_rebuild
-        )
+        images = builder.build_base(agents=selection, rebuild=rebuild, full_rebuild=full_rebuild)
     except (BuildError, ValueError) as e:
         # ValueError is raised by resolve_selection() for unknown agent names
         # — surface it as a clean CLI message rather than a traceback.
@@ -478,9 +476,7 @@ def _handle_build(
 
     if sidecar:
         try:
-            tag = build_sidecar_image(
-                base, family=family, rebuild=rebuild, full_rebuild=full_rebuild
-            )
+            tag = builder.build_sidecar(rebuild=rebuild, full_rebuild=full_rebuild)
         except BuildError as e:
             raise SystemExit(str(e)) from e
         print(f"L1 (sidecar): {tag}")
@@ -618,7 +614,7 @@ def _handle_uninstall(
 
 def _build_images_with_banner(base: str, family: str | None) -> None:
     """Invoke the image factory with a friendly first-run wrapper."""
-    from .container.build import BuildError, build_base_images
+    from .container.build import BuildError, ImageBuilder
 
     print()
     print("─ Building agent images ──────────────────────────────────────")
@@ -626,7 +622,7 @@ def _build_images_with_banner(base: str, family: str | None) -> None:
     print("Subsequent runs reuse the cached layers and start instantly.")
     print("──────────────────────────────────────────────────────────────")
     try:
-        images = build_base_images(base, family=family)
+        images = ImageBuilder(base, family=family).build_base()
     except BuildError as exc:
         raise SystemExit(f"Build failed: {exc}") from exc
     print("──────────────────────────────────────────────────────────────")
@@ -637,11 +633,18 @@ def _build_images_with_banner(base: str, family: str | None) -> None:
 
 def _remove_images(base: str) -> None:
     """Drop L0+L1 images for *base* from the local store (idempotent)."""
-    from .container.build import l0_image_tag, l1_image_tag
+    from .container.build import ImageBuilder
 
     try:
         subprocess.run(
-            ["podman", "image", "rm", "--force", l1_image_tag(base), l0_image_tag(base)],
+            [
+                "podman",
+                "image",
+                "rm",
+                "--force",
+                ImageBuilder(base).l1_tag(),
+                ImageBuilder(base).l0_tag,
+            ],
             capture_output=True,
             timeout=30,
             check=False,

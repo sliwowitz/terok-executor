@@ -131,6 +131,52 @@ AUTH_PROVIDERS: dict[str, AuthProvider] = {}
 # ── Public API ──
 
 
+@dataclass(frozen=True)
+class Authenticator:
+    """Vendor-credential acquisition for a single agent.
+
+    Wraps the ``authenticate`` flow behind a stable class so callers
+    that orchestrate a multi-step setup (terok project init, the
+    standalone ``terok-executor auth`` command, the TUI auth flow)
+    talk to one named surface bound to ``self.provider``.
+
+    The discovery counterparts
+    ([`list_authenticated_agents`][terok_executor.list_authenticated_agents],
+    [`scan_leaked_credentials`][terok_executor.scan_leaked_credentials])
+    stay as module-level fns in their owning submodules — folding them
+    in here would create a tach cycle through ``terok_executor.acp``
+    and ``terok_executor.credentials.vault_commands``, which already
+    depend on this module transitively.
+    """
+
+    provider: str
+    """Auth provider name (e.g. ``"claude"``)."""
+
+    def run(
+        self,
+        project_id: str | None,
+        *,
+        mounts_dir: Path,
+        image: str | Callable[[], str] | None = None,
+        expose_token: bool = False,
+        oauth_enabled: bool = True,
+    ) -> None:
+        """Run the auth flow for ``self.provider``; see module-level docs.
+
+        Mirrors the parameters of the underlying ``authenticate`` free
+        function — instance-bound ``self.provider`` replaces the old
+        positional ``provider`` arg.
+        """
+        authenticate(
+            project_id,
+            self.provider,
+            mounts_dir=mounts_dir,
+            image=image,
+            expose_token=expose_token,
+            oauth_enabled=oauth_enabled,
+        )
+
+
 def authenticate(
     project_id: str | None,
     provider: str,

@@ -3,11 +3,11 @@
 
 """Tests for the executor's global-config write helpers.
 
-[`set_global_image_agents`][terok_executor.set_global_image_agents] is
-the surface every "set the default agents" entry point routes through —
-``terok-executor agents set``, the terok wrapper's mirror, and the TUI
-modal.  Round-trip preservation and parent-dir auto-creation are the
-contracts the callers rely on.
+[`ExecutorConfigView.set_image_agents`][terok_executor.config_schema.ExecutorConfigView.set_image_agents]
+is the surface every "set the default agents" entry point routes through
+— ``terok-executor agents set``, the terok wrapper's mirror, and the
+TUI modal.  Round-trip preservation and parent-dir auto-creation are
+the contracts the callers rely on.
 """
 
 from __future__ import annotations
@@ -16,12 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_executor.config import (
-    get_global_image_agents,
-    get_global_image_base_image,
-    set_global_image_agents,
-    writable_config_path,
-)
+from terok_executor.config import writable_config_path
+from terok_executor.config_schema import ExecutorConfigView
 
 
 @pytest.fixture
@@ -59,13 +55,13 @@ class TestWritableConfigPath:
         assert writable_config_path() == namespace_config_dir() / "config.yml"
 
 
-class TestSetGlobalImageAgents:
+class TestSetImageAgents:
     """End-to-end write semantics: creates parent, preserves comments, round-trips."""
 
     def test_creates_file_when_missing(self, override_config: Path) -> None:
         """Missing target file is created, parent dirs included."""
         assert not override_config.exists()
-        path = set_global_image_agents("claude,vibe")
+        path = ExecutorConfigView.set_image_agents("claude,vibe")
         assert path == override_config
         assert override_config.read_text(encoding="utf-8").strip().startswith("image:")
 
@@ -73,7 +69,7 @@ class TestSetGlobalImageAgents:
         """Deeply-nested parent is created."""
         target = tmp_path / "deep" / "nested" / "config.yml"
         monkeypatch.setenv("TEROK_CONFIG_FILE", str(target))
-        set_global_image_agents("all")
+        ExecutorConfigView.set_image_agents("all")
         assert target.is_file()
 
     def test_updates_existing_image_section(self, override_config: Path) -> None:
@@ -81,7 +77,7 @@ class TestSetGlobalImageAgents:
         override_config.write_text(
             "image:\n  base_image: ubuntu:24.04\n  agents: claude\n", encoding="utf-8"
         )
-        set_global_image_agents("all,-vibe")
+        ExecutorConfigView.set_image_agents("all,-vibe")
         content = override_config.read_text(encoding="utf-8")
         assert "agents: all,-vibe" in content
         assert "base_image: ubuntu:24.04" in content
@@ -91,7 +87,7 @@ class TestSetGlobalImageAgents:
         override_config.write_text(
             "tui:\n  default_tmux: true\nimage:\n  agents: claude\n", encoding="utf-8"
         )
-        set_global_image_agents("vibe")
+        ExecutorConfigView.set_image_agents("vibe")
         content = override_config.read_text(encoding="utf-8")
         assert "default_tmux: true" in content
         assert "agents: vibe" in content
@@ -102,38 +98,38 @@ class TestSetGlobalImageAgents:
             "# Top comment\nimage:\n  # inline comment\n  agents: claude\n",
             encoding="utf-8",
         )
-        set_global_image_agents("vibe")
+        ExecutorConfigView.set_image_agents("vibe")
         content = override_config.read_text(encoding="utf-8")
         assert "# Top comment" in content
         assert "# inline comment" in content
         assert "agents: vibe" in content
 
 
-class TestGetGlobalImageAgents:
+class TestImageAgents:
     """The merged-stack reader resolves ``None`` for absent, value for present."""
 
     def test_returns_none_when_unset(self, override_config: Path) -> None:  # noqa: ARG002
         """No file → ``None``; distinguishes from explicit ``"all"``."""
-        assert get_global_image_agents() is None
+        assert ExecutorConfigView.image_agents() is None
 
     def test_round_trip_after_set(self, override_config: Path) -> None:  # noqa: ARG002
         """``set`` then ``get`` returns the value that was written."""
-        set_global_image_agents("claude,vibe")
+        ExecutorConfigView.set_image_agents("claude,vibe")
         # Reset cache so the freshly-written file is re-read.
         from terok_util import paths as util_paths
 
         util_paths._config_section_cache.clear()
-        assert get_global_image_agents() == "claude,vibe"
+        assert ExecutorConfigView.image_agents() == "claude,vibe"
 
 
-class TestGetGlobalImageBaseImage:
+class TestImageBaseImage:
     """The merged-stack reader resolves ``None`` for absent, value for present."""
 
     def test_returns_none_when_unset(self, override_config: Path) -> None:  # noqa: ARG002
         """No file → ``None``; callers apply the schema fallback themselves."""
-        assert get_global_image_base_image() is None
+        assert ExecutorConfigView.image_base_image() is None
 
     def test_returns_explicit_value(self, override_config: Path) -> None:
         """An explicit ``image.base_image`` is returned verbatim."""
         override_config.write_text("image:\n  base_image: ubuntu:24.04\n", encoding="utf-8")
-        assert get_global_image_base_image() == "ubuntu:24.04"
+        assert ExecutorConfigView.image_base_image() == "ubuntu:24.04"
