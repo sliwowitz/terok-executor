@@ -482,25 +482,6 @@ def get_provider(name: str | None, *, default_agent: str | None = None) -> Agent
     return resolve_provider(AGENT_PROVIDERS, name, default_agent=default_agent)
 
 
-def collect_all_auto_approve_env() -> dict[str, str]:
-    """Collect ``auto_approve_env`` from all providers into one dict.
-
-    Used by task runners to inject these env vars at the container level
-    (not just inside shell wrappers) so that ACP-spawned agents also
-    inherit unrestricted permissions.
-    """
-    merged: dict[str, str] = {}
-    for p in AGENT_PROVIDERS.values():
-        for key, value in p.auto_approve_env.items():
-            if key in merged and merged[key] != value:
-                raise ValueError(
-                    f"Conflicting auto_approve_env for {key!r}: "
-                    f"{merged[key]!r} vs {value!r} (provider {p.name!r})"
-                )
-            merged[key] = value
-    return merged
-
-
 def collect_opencode_provider_env() -> dict[str, str]:
     """Collect environment variables for all OpenCode-based providers.
 

@@ -344,9 +344,9 @@ class Preflight:
 
     def _provider_hints(self) -> None:
         """Print a hint about authenticating additional tools."""
-        from terok_executor.roster.loader import get_roster
+        from terok_executor.roster import AgentRoster
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         others = sorted(name for name in roster.all_names if name != self.provider)
         if others:
             print("\n  Hint: authenticate additional tools with: terok-executor auth <name>")

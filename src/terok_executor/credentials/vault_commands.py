@@ -24,9 +24,9 @@ if TYPE_CHECKING:
 
 def _ensure_routes(cfg: SandboxConfig | None = None) -> Path:
     """Generate routes.json from the YAML agent roster."""
-    from terok_executor.roster.loader import ensure_vault_routes
+    from terok_executor.roster import AgentRoster
 
-    return ensure_vault_routes(cfg=cfg)
+    return AgentRoster.shared().ensure_vault_routes(cfg=cfg)
 
 
 def _handle_start(*, cfg: SandboxConfig | None = None) -> None:
@@ -114,9 +114,9 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     """
     import stat
 
-    from terok_executor.roster.loader import get_roster
+    from terok_executor.roster import AgentRoster
 
-    roster = get_roster()
+    roster = AgentRoster.shared()
     base_resolved = mounts_base.resolve(strict=False)
     leaked: list[tuple[str, Path]] = []
     for name, route in roster.vault_routes.items():

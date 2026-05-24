@@ -18,7 +18,7 @@ from terok_executor.container.env import (
     _shared_config_mounts,
     assemble_container_env,
 )
-from terok_executor.roster import get_roster
+from terok_executor.roster import AgentRoster
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
@@ -72,7 +72,7 @@ def _make_vault_db_with_ssh_keys(tmp_path: Path, scope: str = "myproj"):
 @pytest.fixture
 def roster():
     """Return the live agent roster (loaded from bundled YAML)."""
-    return get_roster()
+    return AgentRoster.shared()
 
 
 @pytest.fixture

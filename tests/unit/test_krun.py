@@ -19,9 +19,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from terok_executor.krun import (
+    KrunHost,
     KrunHostKeypair,
     ensure_krun_host_keypair,
-    make_krun_runtime,
 )
 
 
@@ -299,8 +299,8 @@ class TestWriteAtomic:
         assert leftovers == [], f"stranded tmp files: {leftovers}"
 
 
-class TestMakeKrunRuntime:
-    """`make_krun_runtime` wires the vault key into a TcpSSHTransport-backed runtime."""
+class TestKrunHostRuntime:
+    """`KrunHost.runtime()` wires the vault key into a TcpSSHTransport-backed runtime."""
 
     def test_returns_krun_runtime_with_tcp_transport(self, tmp_path: Path, _vault_backed) -> None:
         """Production factory: KrunRuntime + TcpSSHTransport, identity from %host."""
@@ -312,7 +312,7 @@ class TestMakeKrunRuntime:
         runtime_dir = tmp_path / "runtime"
         with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=runtime_dir):
             runtime_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
-            rt = make_krun_runtime(cfg=_vault_backed)
+            rt = KrunHost(cfg=_vault_backed).runtime()
 
         assert isinstance(rt, KrunRuntime)
         assert isinstance(rt.transport, TcpSSHTransport)
@@ -320,8 +320,8 @@ class TestMakeKrunRuntime:
         assert isinstance(rt._podman, PodmanRuntime)
 
 
-class TestKrunLaunchArgs:
-    """`krun_launch_args` collects the four things that reach across the
+class TestKrunHostLaunchArgs:
+    """`KrunHost.launch_args()` collects the four things that reach across the
     orchestrator/runtime boundary into executor's domain — the host-pubkey
     bind-mount, the init-script gate env var, the USER-directive override,
     and the pasta DNS forwarder — so terok doesn't have to know the
@@ -330,12 +330,10 @@ class TestKrunLaunchArgs:
     def test_emits_pubkey_bind_mount_with_shared_selinux_relabel(
         self, tmp_path: Path, _vault_backed
     ) -> None:
-        from terok_executor.krun import krun_launch_args
-
         runtime_dir = tmp_path / "runtime"
         with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=runtime_dir):
             runtime_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
-            args = krun_launch_args(cfg=_vault_backed)
+            args = KrunHost(cfg=_vault_backed).launch_args()
 
         v_idx = args.index("-v")
         spec = args[v_idx + 1]
@@ -348,21 +346,17 @@ class TestKrunLaunchArgs:
         assert ",Z" not in spec and ":Z" not in spec
 
     def test_emits_runtime_signal_env_var(self, tmp_path: Path, _vault_backed) -> None:
-        from terok_executor.krun import krun_launch_args
-
         with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
             tmp_path.chmod(0o700)
-            args = krun_launch_args(cfg=_vault_backed)
+            args = KrunHost(cfg=_vault_backed).launch_args()
 
         env_assignments = [args[i + 1] for i, t in enumerate(args) if t == "-e"]
         assert "TEROK_CONTAINER_RUNTIME=krun" in env_assignments
 
     def test_overrides_image_user_to_root(self, tmp_path: Path, _vault_backed) -> None:
-        from terok_executor.krun import krun_launch_args
-
         with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
             tmp_path.chmod(0o700)
-            args = krun_launch_args(cfg=_vault_backed)
+            args = KrunHost(cfg=_vault_backed).launch_args()
 
         user_idx = args.index("--user")
         assert args[user_idx + 1] == "root"
@@ -375,11 +369,23 @@ class TestKrunLaunchArgs:
         ``terok_shield.nft.constants``).  Hardcoded by design — anything
         else either gets dropped by shield or isn't routable from the guest.
         """
-        from terok_executor.krun import krun_launch_args
-
         with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
             tmp_path.chmod(0o700)
-            args = krun_launch_args(cfg=_vault_backed)
+            args = KrunHost(cfg=_vault_backed).launch_args()
 
         dns_idx = args.index("--dns")
         assert args[dns_idx + 1] == "169.254.1.1"
+
+    def test_keypair_loaded_once_across_runtime_and_launch_args(
+        self, tmp_path: Path, _vault_backed
+    ) -> None:
+        """``runtime()`` + ``launch_args()`` on the same host open the vault once."""
+        with patch("terok_executor.krun._ensure_safe_runtime_dir", return_value=tmp_path):
+            tmp_path.chmod(0o700)
+            host = KrunHost(cfg=_vault_backed)
+            with patch(
+                "terok_executor.krun.ensure_krun_host_keypair", wraps=ensure_krun_host_keypair
+            ) as spy:
+                host.runtime()
+                host.launch_args()
+        assert spy.call_count == 1

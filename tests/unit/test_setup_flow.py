@@ -127,7 +127,7 @@ class TestHandleUninstall:
 def compose_spies():
     """Patch the two targets ``ensure_sandbox_ready`` composes: routes + aggregator."""
     with (
-        patch("terok_executor.roster.loader.ensure_vault_routes") as routes,
+        patch("terok_executor.roster.loader.AgentRoster.ensure_vault_routes") as routes,
         patch("terok_executor.integrations.sandbox._handle_sandbox_setup") as aggregator,
     ):
         yield routes, aggregator
@@ -144,7 +144,9 @@ class TestEnsureSandboxReady:
     def test_generates_routes_before_sandbox_setup(self, compose_spies) -> None:
         routes, aggregator = compose_spies
         order: list[str] = []
-        routes.side_effect = lambda cfg: order.append("routes")
+        # ``ensure_vault_routes`` is now a bound method, so the patched mock
+        # receives ``self`` as first positional — accept-and-discard.
+        routes.side_effect = lambda *_a, **_k: order.append("routes")
         aggregator.side_effect = lambda **_: order.append("sandbox")
         ensure_sandbox_ready()
         assert order == ["routes", "sandbox"]

@@ -54,7 +54,7 @@ classifiers = [
 packages = [
   { include = "terok_executor", from = "src" },
 ]
-version = "0.0.149a23"
+version = "0.0.149a24"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=4.0"

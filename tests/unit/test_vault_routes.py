@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from terok_executor.roster import VaultRoute, get_roster
+from terok_executor.roster import AgentRoster, VaultRoute
 from terok_executor.roster.schema import RawAgentYaml
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
@@ -72,7 +72,7 @@ class TestVaultRoutesParsed:
 
     def test_claude_route_exists(self) -> None:
         """Claude has a vault route with Anthropic upstream and OAuth support."""
-        reg = get_roster()
+        reg = AgentRoster.shared()
         route = reg.vault_routes.get("claude")
         assert route is not None
         assert route.route_prefix == "claude"
@@ -86,7 +86,7 @@ class TestVaultRoutesParsed:
 
     def test_codex_route_exists(self) -> None:
         """Codex has a vault route with OpenAI + ChatGPT upstreams."""
-        route = get_roster().vault_routes.get("codex")
+        route = AgentRoster.shared().vault_routes.get("codex")
         assert route is not None
         assert route.upstream == "https://api.openai.com"
         assert route.path_upstreams == {"/backend-api/": "https://chatgpt.com"}
@@ -96,14 +96,14 @@ class TestVaultRoutesParsed:
 
     def test_gh_route_exists(self) -> None:
         """GitHub CLI has a vault route with token-style auth."""
-        route = get_roster().vault_routes.get("gh")
+        route = AgentRoster.shared().vault_routes.get("gh")
         assert route is not None
         assert route.auth_prefix == "token "
         assert route.upstream == "https://api.github.com"
 
     def test_glab_route_exists(self) -> None:
         """GitLab CLI has a vault route with PRIVATE-TOKEN header."""
-        route = get_roster().vault_routes.get("glab")
+        route = AgentRoster.shared().vault_routes.get("glab")
         assert route is not None
         assert route.auth_header == "PRIVATE-TOKEN"
         assert route.auth_prefix == ""
@@ -112,14 +112,14 @@ class TestVaultRoutesParsed:
     def test_api_key_only_providers_have_no_oauth_phantom_env(self) -> None:
         """Providers without OAuth support have empty oauth_phantom_env."""
         for name in ("vibe", "blablador", "kisski"):
-            route = get_roster().vault_routes.get(name)
+            route = AgentRoster.shared().vault_routes.get(name)
             assert route is not None, f"{name} missing vault route"
             assert route.oauth_phantom_env == {}, f"{name} should have no oauth_phantom_env"
             assert route.socket_env == "", f"{name} should have no socket_env"
 
     def test_opencode_agents_have_routes(self) -> None:
         """Blablador and KISSKI have vault routes."""
-        reg = get_roster()
+        reg = AgentRoster.shared()
         for name in ("blablador", "kisski"):
             route = reg.vault_routes.get(name)
             assert route is not None, f"{name} missing vault route"
@@ -127,11 +127,11 @@ class TestVaultRoutesParsed:
 
     def test_copilot_has_no_route(self) -> None:
         """Copilot has no vault section (tier-3, no base URL support)."""
-        assert get_roster().vault_routes.get("copilot") is None
+        assert AgentRoster.shared().vault_routes.get("copilot") is None
 
     def test_claude_has_oauth_refresh(self) -> None:
         """Claude has oauth_refresh config for proactive token refresh."""
-        route = get_roster().vault_routes.get("claude")
+        route = AgentRoster.shared().vault_routes.get("claude")
         assert route is not None
         assert route.oauth_refresh is not None
         assert "token_url" in route.oauth_refresh
@@ -139,7 +139,7 @@ class TestVaultRoutesParsed:
 
     def test_codex_has_oauth_refresh(self) -> None:
         """Codex has an oauth_refresh block so vault can rotate tokens in the background."""
-        route = get_roster().vault_routes.get("codex")
+        route = AgentRoster.shared().vault_routes.get("codex")
         assert route is not None
         assert route.oauth_refresh is not None
         assert route.oauth_refresh["token_url"] == "https://auth.openai.com/oauth/token"
@@ -151,18 +151,18 @@ class TestSharedDomain:
 
     def test_default_is_false(self) -> None:
         """API-only upstreams (claude, codex, gh, …) leave the flag unset."""
-        roster = get_roster()
+        roster = AgentRoster.shared()
         for name in ("claude", "codex", "gh", "vibe", "blablador", "kisski", "openrouter"):
             route = roster.vault_routes[name]
             assert route.shared_domain is False, f"{name} should not be shared_domain"
 
     def test_glab_is_shared_domain(self) -> None:
         """gitlab.com hosts both API and ``git push`` traffic."""
-        assert get_roster().vault_routes["glab"].shared_domain is True
+        assert AgentRoster.shared().vault_routes["glab"].shared_domain is True
 
     def test_sonar_is_shared_domain(self) -> None:
         """sonarcloud.io hosts API + project pages + docs + badges."""
-        assert get_roster().vault_routes["sonar"].shared_domain is True
+        assert AgentRoster.shared().vault_routes["sonar"].shared_domain is True
 
     def test_unknown_provider_defaults_to_false(self) -> None:
         """Hand-rolled vault sections without the field default to False."""
@@ -194,7 +194,7 @@ class TestGenerateRoutesJson:
 
     def test_generates_valid_json(self) -> None:
         """generate_routes_json() produces parseable JSON with expected keys."""
-        routes_json = get_roster().generate_routes_json()
+        routes_json = AgentRoster.shared().generate_routes_json()
         routes = json.loads(routes_json)
         assert "claude" in routes
         assert routes["claude"]["upstream"] == "https://api.anthropic.com"
@@ -205,24 +205,24 @@ class TestGenerateRoutesJson:
 
     def test_all_routes_have_upstream(self) -> None:
         """Every route in the JSON has an upstream field."""
-        routes = json.loads(get_roster().generate_routes_json())
+        routes = json.loads(AgentRoster.shared().generate_routes_json())
         for prefix, cfg in routes.items():
             assert "upstream" in cfg, f"Route '{prefix}' missing upstream"
 
     def test_glab_keyed_by_provider_name(self) -> None:
         """GitLab route is keyed by provider name 'glab'."""
-        routes = json.loads(get_roster().generate_routes_json())
+        routes = json.loads(AgentRoster.shared().generate_routes_json())
         assert "glab" in routes
 
     def test_claude_routes_json_includes_oauth_refresh(self) -> None:
         """Claude's routes.json entry includes oauth_refresh config."""
-        routes = json.loads(get_roster().generate_routes_json())
+        routes = json.loads(AgentRoster.shared().generate_routes_json())
         assert "oauth_refresh" in routes["claude"]
         assert routes["claude"]["oauth_refresh"]["client_id"]
 
     def test_gh_routes_json_omits_oauth_refresh(self) -> None:
         """Providers without oauth_refresh omit it from routes.json."""
-        routes = json.loads(get_roster().generate_routes_json())
+        routes = json.loads(AgentRoster.shared().generate_routes_json())
         assert "oauth_refresh" not in routes["gh"]
 
 
@@ -237,10 +237,10 @@ class TestScanLeakedCredentials:
 
     def test_detects_nonempty_credential_file(self, tmp_path) -> None:
         """Returns (provider, path) when a credential file is present and non-empty."""
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers.get("claude")
         route = roster.vault_routes.get("claude")
         assert auth is not None and route is not None
@@ -256,10 +256,10 @@ class TestScanLeakedCredentials:
 
     def test_skips_empty_files(self, tmp_path) -> None:
         """Empty credential files are not flagged."""
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
         route = roster.vault_routes["claude"]
 
@@ -281,7 +281,7 @@ class TestScanLeakedCredentials:
         mock_route.credential_file = ""
         mock_roster.vault_routes = {"fake-provider": mock_route}
         mock_roster.auth_providers = {"fake-provider": MagicMock(host_dir_name="_fake")}
-        monkeypatch.setattr("terok_executor.roster.loader.get_roster", lambda: mock_roster)
+        monkeypatch.setattr("terok_executor.roster.loader._shared_roster", lambda: mock_roster)
 
         assert scan_leaked_credentials(tmp_path) == []
 
@@ -289,10 +289,10 @@ class TestScanLeakedCredentials:
         """The clean handler removes detected credential files."""
         from unittest.mock import patch
 
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import _handle_clean
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
         route = roster.vault_routes["claude"]
 
@@ -706,11 +706,11 @@ class TestScanSkipsInjectedFile:
 
     def test_skips_injected_credentials(self, tmp_path: Path) -> None:
         """Injected phantom credentials are NOT flagged as leaked."""
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.auth import PHANTOM_CREDENTIALS_MARKER
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
         route = roster.vault_routes["claude"]
 
@@ -729,10 +729,10 @@ class TestScanSkipsInjectedFile:
 
     def test_still_detects_real_credentials(self, tmp_path: Path) -> None:
         """Real OAuth tokens are still flagged even when file structure matches."""
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
         route = roster.vault_routes["claude"]
 
@@ -749,10 +749,10 @@ class TestScanSkipsInjectedFile:
         """Injected shared Codex auth.json is NOT flagged as leaked."""
         from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
 
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
         route = roster.vault_routes["codex"]
 
@@ -773,10 +773,10 @@ class TestScanSkipsInjectedFile:
         """Marker tokens do not hide a live top-level OPENAI_API_KEY."""
         from terok_sandbox import CODEX_SHARED_OAUTH_MARKER
 
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
         route = roster.vault_routes["codex"]
 
@@ -796,10 +796,10 @@ class TestScanSkipsInjectedFile:
 
     def test_malformed_codex_auth_json_is_suspicious_not_crashing(self, tmp_path: Path) -> None:
         """Non-object auth.json roots are treated as leaks, not parser crashes."""
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
         route = roster.vault_routes["codex"]
 
@@ -817,11 +817,11 @@ class TestCleanSkipsInjectedFile:
         """Clean removes real leaks but preserves injected phantom credentials."""
         from unittest.mock import patch
 
-        from terok_executor import get_roster
+        from terok_executor import AgentRoster
         from terok_executor.credentials.auth import PHANTOM_CREDENTIALS_MARKER
         from terok_executor.credentials.vault_commands import _handle_clean
 
-        roster = get_roster()
+        roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
         route = roster.vault_routes["claude"]
 
@@ -978,16 +978,14 @@ class TestToVaultRoute:
 
 
 class TestEnsureVaultRoutes:
-    """Verify ensure_vault_routes writes routes.json to disk."""
+    """Verify AgentRoster.ensure_vault_routes writes routes.json to disk."""
 
     def test_writes_routes_json(self, tmp_path):
         """ensure_vault_routes() creates a valid routes.json file."""
         mock_cfg = MagicMock()
         mock_cfg.routes_path = tmp_path / "proxy" / "routes.json"
 
-        from terok_executor.roster import ensure_vault_routes
-
-        path = ensure_vault_routes(cfg=mock_cfg)
+        path = AgentRoster.shared().ensure_vault_routes(cfg=mock_cfg)
 
         assert path == mock_cfg.routes_path
         assert path.is_file()
@@ -1004,9 +1002,7 @@ class TestEnsureVaultRoutes:
         mock_cfg.routes_path = tmp_path / "proxy" / "routes.json"
         monkeypatch.setattr(terok_sandbox, "SandboxConfig", lambda: mock_cfg)
 
-        from terok_executor.roster import ensure_vault_routes
-
-        path = ensure_vault_routes()
+        path = AgentRoster.shared().ensure_vault_routes()
         assert path.is_file()
 
 

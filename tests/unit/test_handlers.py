@@ -85,7 +85,9 @@ def test_handle_agents_set_writes_through_config_view() -> None:
     from pathlib import Path
 
     with (
-        mock.patch("terok_executor.commands.validate_agent_selection", return_value=None),
+        mock.patch(
+            "terok_executor.roster.loader.AgentRoster.validate_selection", return_value=None
+        ),
         mock.patch(
             "terok_executor.config_schema.ExecutorConfigView.set_image_agents",
             return_value=Path("/tmp/cfg.yml"),

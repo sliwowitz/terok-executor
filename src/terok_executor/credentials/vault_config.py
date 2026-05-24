@@ -72,9 +72,9 @@ def write_vault_config(provider_name: str) -> None:
     to redirect API traffic through the vault.  The patch spec is declared
     in the agent YAML — no provider-specific code needed.
     """
-    from terok_executor.roster.loader import get_roster
+    from terok_executor.roster import AgentRoster
 
-    roster = get_roster()
+    roster = AgentRoster.shared()
     route = roster.vault_routes.get(provider_name)
     if not route or not route.shared_config_patch:
         return

@@ -11,11 +11,11 @@ the canonical assembly function so that logic lives in one place.
 Usage::
 
     from terok_executor.container.env import ContainerEnvSpec, assemble_container_env
-    from terok_executor import get_roster
+    from terok_executor import AgentRoster
 
     result = assemble_container_env(
         ContainerEnvSpec(task_id="abc", provider_name="claude", workspace_host_path=ws),
-        get_roster(),
+        AgentRoster.shared(),
     )
     # result.env, result.volumes, result.task_dir
 """

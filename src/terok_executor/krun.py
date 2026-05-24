@@ -3,27 +3,23 @@
 
 """Krun (KVM-microVM) host-side provisioning: identity + runtime factory.
 
-Two responsibilities, both intentionally outside terok:
+[`KrunHost`][terok_executor.krun.KrunHost] is the host-side companion to
+sandbox's [`KrunRuntime`][terok_sandbox.KrunRuntime].  One instance per
+launch bundles the three things the orchestrator needs:
 
-- [`ensure_krun_host_keypair`][terok_executor.krun.ensure_krun_host_keypair]
-  — mint or load the SSH keypair the L0 guest's ``sshd`` trusts, and
-  materialise both halves onto tmpfs files: the private half so
-  ``ssh -i`` can read it, and the public half so the orchestrator can
-  bind-mount it into the running guest at
-  ``/etc/ssh/authorized_keys.d/terok``.  The vault is the system of
-  record; the tmpfs cache is a derived view rebuilt per process.
-
-- [`make_krun_runtime`][terok_executor.krun.make_krun_runtime] — one-shot
-  constructor for a production
-  [`KrunRuntime`][terok_sandbox.KrunRuntime] backed by the TCP-over-passt
-  SSH transport, with the keypair already wired in.  terok flips its
-  runtime selector to ``krun`` and calls this; everything else is
-  invisible.
+- the vault-backed ``%host`` keypair materialised to tmpfs (cached, so
+  the vault DB is opened once even when ``runtime`` and ``launch_args``
+  are both called);
+- a production [`KrunRuntime`][terok_sandbox.KrunRuntime] with the
+  TCP-over-passt SSH transport wired in;
+- the extra ``podman run`` arguments terok must splice in (pubkey
+  bind-mount, runtime-signal env var, ``--user root`` override, and the
+  pasta DNS forwarder).
 
 Living in executor (rather than terok) keeps the rule honest: anything
-that owns the L0 build path also owns the trust material that makes
-the resulting guest reachable.  Selecting krun without provisioning
-the key is a contradiction, so the two operations belong together.
+that owns the L0 build path also owns the trust material that makes the
+resulting guest reachable.  Selecting krun without provisioning the key
+is a contradiction, so the two operations belong together.
 """
 
 from __future__ import annotations
@@ -90,6 +86,106 @@ class KrunHostKeypair:
     """``True`` when this call minted the key; ``False`` when it was loaded."""
 
 
+class KrunHost:
+    """Host-side krun launch context — vault keypair + runtime + launch args.
+
+    One instance per launch.  The first access to
+    [`keypair`][terok_executor.krun.KrunHost.keypair] opens the vault DB
+    and materialises the ``%host`` private/public keypair to tmpfs;
+    every subsequent access on the same instance reuses the cached
+    result, so calling both [`runtime`][terok_executor.krun.KrunHost.runtime]
+    and [`launch_args`][terok_executor.krun.KrunHost.launch_args] pays
+    that cost only once.
+
+    Requires the vault to be unlocked — the krun runtime is gated on
+    ``experimental: true`` upstream and assumes the operator has the
+    vault open for the session.  A ``NoPassphraseError`` from the
+    underlying vault open propagates unchanged so the orchestrator can
+    render its own remediation hint.
+
+    Args:
+        cfg: Sandbox config used to open the credential DB.  ``None``
+            means use the zero-arg default — appropriate for standalone
+            executor flows; terok injects its own enriched config when
+            calling.
+    """
+
+    __slots__ = ("_cfg", "_keypair")
+
+    def __init__(self, *, cfg: SandboxConfig | None = None):
+        """Bind a krun launch to *cfg*; the keypair is loaded on first access."""
+        self._cfg = cfg
+        self._keypair: KrunHostKeypair | None = None
+
+    @property
+    def keypair(self) -> KrunHostKeypair:
+        """Vault-backed ``%host`` keypair materialised to tmpfs (cached).
+
+        First access opens the vault DB and writes the OpenSSH-PEM
+        private + public-key line to a tmpfs cache directory; subsequent
+        accesses on the same instance return the same object without
+        reopening the vault.
+        """
+        if self._keypair is None:
+            self._keypair = ensure_krun_host_keypair(cfg=self._cfg)
+        return self._keypair
+
+    def runtime(self) -> KrunRuntime:
+        """Construct a production [`KrunRuntime`][terok_sandbox.KrunRuntime] in one call.
+
+        Wires together the three production pieces — the cached host
+        keypair, the TCP-over-passt SSH transport, and a fresh
+        [`PodmanRuntime`][terok_sandbox.PodmanRuntime] for lifecycle.
+        The experimental-flag gate stays on the orchestrator side (this
+        factory is reachable only when the gate is open).
+        """
+        kp = self.keypair
+        transport = TcpSSHTransport(
+            identity_file=kp.private_path,
+            endpoint_resolver=podman_port_resolver(),
+        )
+        return KrunRuntime(transport=transport, podman=PodmanRuntime())
+
+    def launch_args(self) -> list[str]:
+        """Extra ``podman run`` args terok must splice in for a krun launch.
+
+        Four things that all reach across the orchestrator/runtime
+        boundary into executor's domain — the L0 image, the host
+        keypair, the in-guest ``init-ssh-and-repo.sh``, and the DNS
+        forwarder address — so they live here together rather than
+        being open-coded in terok's ``_project_runtime_flags``:
+
+        - Bind-mount the live host pubkey over the L0's empty
+          placeholder at ``/etc/ssh/authorized_keys.d/terok``.  ``z`` is
+          the shared SELinux relabel (never ``Z`` — the host pubkey is
+          host-wide and concurrent containers share the source).
+        - Set ``TEROK_CONTAINER_RUNTIME=krun`` so the init script's krun
+          gate fires.
+        - Override the L0's ``USER dev`` directive with ``--user root``
+          so the in-guest sshd can start, listen on TCP 22, and drop to
+          the authenticated user on connection.  ``USER dev`` is the
+          right default under crun (AI agents that refuse uid 0); under
+          krun the session uid comes from which ``ssh user@…`` the
+          operator picks.
+        - ``--dns 169.254.1.1`` — kept for shield-bypass; under
+          shield-up the bind-mounted resolv.conf overrides this anyway.
+
+        Doesn't include ``--runtime krun`` itself or krun's microVM-sizing
+        annotations — those are orchestrator-level decisions terok keeps.
+        """
+        kp = self.keypair
+        return [
+            "-v",
+            f"{kp.public_path}:/etc/ssh/authorized_keys.d/terok:ro,z",
+            "-e",
+            "TEROK_CONTAINER_RUNTIME=krun",
+            "--user",
+            "root",
+            "--dns",
+            _PASTA_DNS_FORWARDER,
+        ]
+
+
 def ensure_krun_host_keypair(
     *,
     cfg: SandboxConfig | None = None,
@@ -149,64 +245,6 @@ def ensure_krun_host_keypair(
         fingerprint=infra.fingerprint,
         created=infra.created,
     )
-
-
-def make_krun_runtime(*, cfg: SandboxConfig | None = None) -> KrunRuntime:
-    """Construct a production [`KrunRuntime`][terok_sandbox.KrunRuntime] in one call.
-
-    Wires together the three production pieces — the vault-backed host
-    keypair, the TCP-over-passt SSH transport, and a fresh
-    [`PodmanRuntime`][terok_sandbox.PodmanRuntime] for lifecycle —
-    so the orchestrator's runtime selector reduces to a single call:
-    ``_runtime = make_krun_runtime(cfg=...)``.  The experimental-flag
-    gate stays on the orchestrator side (this factory is reachable
-    only when the gate is open).
-    """
-    kp = ensure_krun_host_keypair(cfg=cfg)
-    transport = TcpSSHTransport(
-        identity_file=kp.private_path,
-        endpoint_resolver=podman_port_resolver(),
-    )
-    return KrunRuntime(transport=transport, podman=PodmanRuntime())
-
-
-def krun_launch_args(*, cfg: SandboxConfig | None = None) -> list[str]:
-    """Extra ``podman run`` args terok must splice in for a krun launch.
-
-    Four things that all reach across the orchestrator/runtime boundary
-    into executor's domain — the L0 image, the host keypair, the
-    in-guest ``init-ssh-and-repo.sh``, and the DNS forwarder address —
-    so they live here together rather than being open-coded in terok's
-    ``_project_runtime_flags``:
-
-    - Bind-mount the live host pubkey over the L0's empty placeholder
-      at ``/etc/ssh/authorized_keys.d/terok``.  ``z`` is the shared
-      SELinux relabel (never ``Z`` — the host pubkey is host-wide and
-      concurrent containers share the source).
-    - Set ``TEROK_CONTAINER_RUNTIME=krun`` so the init script's krun
-      gate fires.
-    - Override the L0's ``USER dev`` directive with ``--user root`` so
-      the in-guest sshd can start, listen on TCP 22, and drop to the
-      authenticated user on connection.  ``USER dev`` is the right
-      default under crun (AI agents that refuse uid 0); under krun the
-      session uid comes from which ``ssh user@…`` the operator picks.
-    - ``--dns 169.254.1.1`` — kept for shield-bypass; under shield-up
-      the bind-mounted resolv.conf overrides this anyway.
-
-    Doesn't include ``--runtime krun`` itself or krun's microVM-sizing
-    annotations — those are orchestrator-level decisions terok keeps.
-    """
-    kp = ensure_krun_host_keypair(cfg=cfg)
-    return [
-        "-v",
-        f"{kp.public_path}:/etc/ssh/authorized_keys.d/terok:ro,z",
-        "-e",
-        "TEROK_CONTAINER_RUNTIME=krun",
-        "--user",
-        "root",
-        "--dns",
-        _PASTA_DNS_FORWARDER,
-    ]
 
 
 # ── Private helpers ─────────────────────────────────────────────────────────

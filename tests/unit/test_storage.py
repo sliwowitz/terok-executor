@@ -16,11 +16,10 @@ import pytest
 
 from terok_executor.roster.loader import MountDef
 from terok_executor.storage import (
+    SharedMountStorageInfo,
+    TaskStorageInfo,
     _dir_bytes,
     _mount_label,
-    get_shared_mounts_storage,
-    get_task_storage,
-    get_tasks_storage,
 )
 
 # ---------------------------------------------------------------------------
@@ -120,17 +119,17 @@ class TestGetTaskStorage:
     """Measuring a single task directory."""
 
     def test_measures_workspace_and_config(self, task_tree: Path):
-        info = get_task_storage(task_tree)
+        info = TaskStorageInfo.measure(task_tree)
         assert info.workspace_bytes == 150
         assert info.agent_config_bytes == 30
         assert info.total_bytes == 180
 
     def test_task_id_from_dirname(self, task_tree: Path):
-        info = get_task_storage(task_tree)
+        info = TaskStorageInfo.measure(task_tree)
         assert info.task_id == task_tree.name
 
     def test_missing_subdirs_yield_zero(self, tmp_path: Path):
-        info = get_task_storage(tmp_path)
+        info = TaskStorageInfo.measure(tmp_path)
         assert info.total_bytes == 0
 
 
@@ -143,17 +142,17 @@ class TestGetTasksStorage:
     """Bulk measurement across all task directories."""
 
     def test_finds_both_tasks(self, tasks_root: Path):
-        results = get_tasks_storage(tasks_root)
+        results = TaskStorageInfo.measure_all(tasks_root)
         assert len(results) == 2
         assert results[0].task_id == "aaa111"
         assert results[1].task_id == "bbb222"
 
     def test_each_task_has_bytes(self, tasks_root: Path):
-        results = get_tasks_storage(tasks_root)
+        results = TaskStorageInfo.measure_all(tasks_root)
         assert all(t.total_bytes > 0 for t in results)
 
     def test_missing_root_returns_empty(self):
-        assert get_tasks_storage(Path("/nonexistent")) == []
+        assert TaskStorageInfo.measure_all(Path("/nonexistent")) == []
 
 
 # ---------------------------------------------------------------------------
@@ -169,9 +168,9 @@ class TestGetSharedMountsStorage:
             MountDef("_claude-config", "/home/dev/.claude", "Claude"),
             MountDef("_codex-config", "/home/dev/.codex", "Codex"),
         )
-        with patch("terok_executor.storage.get_roster") as mock_roster:
+        with patch("terok_executor.storage.AgentRoster.shared") as mock_roster:
             mock_roster.return_value.mounts = roster_mounts
-            results = get_shared_mounts_storage(mounts_tree)
+            results = SharedMountStorageInfo.measure_all(mounts_tree)
 
         assert len(results) == 2
         claude = next(m for m in results if m.name == "_claude-config")
@@ -179,12 +178,12 @@ class TestGetSharedMountsStorage:
         assert claude.bytes == 3  # "abc"
 
     def test_missing_base_returns_empty(self):
-        with patch("terok_executor.storage.get_roster"):
-            assert get_shared_mounts_storage(Path("/nonexistent")) == []
+        with patch("terok_executor.storage.AgentRoster.shared"):
+            assert SharedMountStorageInfo.measure_all(Path("/nonexistent")) == []
 
     def test_sorted_by_name(self, mounts_tree: Path):
-        with patch("terok_executor.storage.get_roster") as mock_roster:
+        with patch("terok_executor.storage.AgentRoster.shared") as mock_roster:
             mock_roster.return_value.mounts = ()
-            results = get_shared_mounts_storage(mounts_tree)
+            results = SharedMountStorageInfo.measure_all(mounts_tree)
         names = [m.name for m in results]
         assert names == sorted(names)

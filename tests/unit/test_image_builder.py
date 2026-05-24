@@ -113,22 +113,22 @@ def test_render_l0_uses_self_base_and_family() -> None:
     fn.assert_called_once_with("fedora:44", family="rpm")
 
 
-def test_render_l1_threads_resolved_family_and_args() -> None:
-    """``render_l1`` resolves family from the base when ``family`` is None."""
-    builder = ImageBuilder("fedora:44")  # family=None — auto-detect
+def test_render_l1_takes_explicit_family() -> None:
+    """``render_l1`` is a staticmethod — family must be passed explicitly."""
     with mock.patch("terok_executor.container.build.render_l1", return_value="L1 dockerfile") as fn:
-        result = builder.render_l1("l0-tag", agents=("claude",), cache_bust="42")
+        result = ImageBuilder.render_l1("l0-tag", family="rpm", agents=("claude",), cache_bust="42")
     assert result == "L1 dockerfile"
     fn.assert_called_once_with("l0-tag", family="rpm", agents=("claude",), cache_bust="42")
 
 
-def test_render_l1_sidecar_threads_self_state() -> None:
-    """``render_l1_sidecar`` passes family + tool_name to the underlying fn."""
-    builder = ImageBuilder("fedora:44", family="rpm")
+def test_render_l1_sidecar_takes_explicit_family() -> None:
+    """``render_l1_sidecar`` is a staticmethod — family must be passed explicitly."""
     with mock.patch(
         "terok_executor.container.build.render_l1_sidecar", return_value="sidecar"
     ) as fn:
-        result = builder.render_l1_sidecar("l0-tag", tool_name="ruff", cache_bust="7")
+        result = ImageBuilder.render_l1_sidecar(
+            "l0-tag", family="rpm", tool_name="ruff", cache_bust="7"
+        )
     assert result == "sidecar"
     fn.assert_called_once_with("l0-tag", family="rpm", tool_name="ruff", cache_bust="7")
 

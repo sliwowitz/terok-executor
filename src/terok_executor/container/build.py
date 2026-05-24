@@ -259,33 +259,45 @@ class ImageBuilder:
         """L1 image tag for *agents* under ``self.base_image`` (alias when ``None``)."""
         return l1_image_tag(self.base_image, agents)
 
-    # ── Templates (instance — uses self.base_image + self.family) ───
+    # ── Templates ────────────────────────────────────────
 
     def render_l0(self) -> str:
-        """Render the L0 Dockerfile for this base."""
+        """Render the L0 Dockerfile for this base.
+
+        Instance-bound because L0 is anchored on ``self.base_image``.
+        """
         return render_l0(self.base_image, family=self._family)
 
+    @staticmethod
     def render_l1(
-        self,
         l0_tag: str,
         *,
+        family: str,
         agents: tuple[str, ...] | str = "all",
         cache_bust: str = "0",
     ) -> str:
-        """Render the L1 CLI Dockerfile for *agents* on top of *l0_tag*."""
-        return render_l1(l0_tag, family=self._family, agents=agents, cache_bust=cache_bust)
+        """Render the L1 CLI Dockerfile for *agents* on top of *l0_tag*.
 
+        Static because the L1 stage depends only on the L0 tag and the
+        package family — it never touches ``self.base_image``.  Callers
+        that already have an [`ImageBuilder`][terok_executor.container.build.ImageBuilder]
+        can pass ``builder._family`` to thread the resolved family through.
+        """
+        return render_l1(l0_tag, family=family, agents=agents, cache_bust=cache_bust)
+
+    @staticmethod
     def render_l1_sidecar(
-        self,
         l0_tag: str,
         *,
+        family: str,
         tool_name: str = "coderabbit",
         cache_bust: str = "0",
     ) -> str:
-        """Render the L1 sidecar Dockerfile for *tool_name* on top of *l0_tag*."""
-        return render_l1_sidecar(
-            l0_tag, family=self._family, tool_name=tool_name, cache_bust=cache_bust
-        )
+        """Render the L1 sidecar Dockerfile for *tool_name* on top of *l0_tag*.
+
+        Static for the same reason as [`render_l1`][terok_executor.container.build.ImageBuilder.render_l1].
+        """
+        return render_l1_sidecar(l0_tag, family=family, tool_name=tool_name, cache_bust=cache_bust)
 
     @property
     def _family(self) -> str:
@@ -453,13 +465,13 @@ def build_base_images(
         ValueError: If *build_dir* is a file or a non-empty directory,
             or if *agents* contains unknown roster entries.
     """
-    from terok_executor.roster.loader import get_roster
+    from terok_executor.roster import AgentRoster
 
     _validate_build_dir(build_dir)
     _check_podman()
 
     base_image = _normalize_base_image(base_image)
-    selected = get_roster().resolve_selection(agents)
+    selected = AgentRoster.shared().resolve_selection(agents)
 
     l0_tag = l0_image_tag(base_image)
     l1_tag = l1_image_tag(base_image, selected)
@@ -690,9 +702,9 @@ def render_l1(
     *cache_bust* invalidates the per-agent install layers when changed
     (typically set to a Unix timestamp).
     """
-    from terok_executor.roster.loader import get_roster
+    from terok_executor.roster import AgentRoster
 
-    roster = get_roster()
+    roster = AgentRoster.shared()
     selected = roster.resolve_selection(agents)
     installs = roster.installs
 
@@ -799,9 +811,9 @@ def stage_help_fragments(dest: Path, agents: tuple[str, ...]) -> None:
     real ANSI sequences so that ``hilfe`` only needs to ``cat`` them.
     Empty sections are omitted entirely; ``hilfe`` skips missing files.
     """
-    from terok_executor.roster.loader import get_roster
+    from terok_executor.roster import AgentRoster
 
-    roster = get_roster()
+    roster = AgentRoster.shared()
     helps = roster.helps
 
     by_section: dict[str, list[str]] = {}

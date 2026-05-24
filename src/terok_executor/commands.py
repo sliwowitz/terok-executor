@@ -373,9 +373,10 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
     """List registered agents."""
     import sys
 
-    from .roster.loader import _load_bundled_agents, _load_user_agents, get_roster
+    from .roster import AgentRoster
+    from .roster.loader import _load_bundled_agents, _load_user_agents
 
-    roster = get_roster()
+    roster = AgentRoster.shared()
     names = roster.all_names if show_all else roster.agent_names
 
     if not names:
@@ -401,50 +402,14 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
         print(f"{name:<{w_name}}  {label:<{w_label}}  {kind}")
 
 
-def prompt_agents_selection() -> str:
-    """Print the installed roster and read one line of executor grammar.
-
-    Empty input → ``"all"``.  Non-interactive stdin (closed pipe) exits
-    with a hint to pass the selection positionally instead.
-    """
-    from .roster.loader import get_roster
-
-    roster = get_roster()
-    providers = roster.providers
-    print("\nAvailable agents:")
-    for name in sorted(roster.agent_names):
-        provider = providers.get(name)
-        label = provider.label if provider is not None else name
-        print(f"  · {name}  — {label}")
-    try:
-        raw = input("\nType a comma list, or '-name' to exclude [all]: ").strip()
-    except EOFError as exc:
-        raise SystemExit(
-            "No interactive stdin available.  Pass the selection positionally "
-            "instead, e.g. `terok agents set all`."
-        ) from exc
-    return raw or "all"
-
-
-def validate_agent_selection(raw: str) -> None:
-    """Reject *raw* with ``SystemExit(2)`` if it names roster entries we don't have."""
-    import sys
-
-    from .roster.loader import get_roster, parse_agent_selection
-
-    try:
-        get_roster().resolve_selection(parse_agent_selection(raw))
-    except ValueError as exc:
-        print(f"Invalid agent selection: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
-
-
 def _handle_agents_set(*, selection: str | None = None) -> None:
     """Write the global ``image.agents`` default to ``config.yml``."""
     from .config_schema import ExecutorConfigView
+    from .roster import AgentRoster
 
-    raw = selection if selection is not None else prompt_agents_selection()
-    validate_agent_selection(raw)
+    roster = AgentRoster.shared()
+    raw = selection if selection is not None else roster.prompt_selection()
+    roster.validate_selection(raw)
     path = ExecutorConfigView.set_image_agents(raw)
     print(f"Wrote image.agents = {raw!r} to {path}")
 
@@ -460,9 +425,9 @@ def _handle_build(
 ) -> None:
     """Build L0+L1 container images (optionally include sidecar L1)."""
     from .container.build import BuildError, ImageBuilder
-    from .roster.loader import parse_agent_selection
+    from .roster import AgentRoster
 
-    selection = parse_agent_selection(agents)
+    selection = AgentRoster.parse_selection(agents)
 
     builder = ImageBuilder(base, family=family)
     try:

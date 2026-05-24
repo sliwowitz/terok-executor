@@ -43,10 +43,10 @@ def ensure_sandbox_ready(
     traceback.
     """
     from terok_executor.integrations.sandbox import _handle_sandbox_setup, stage_line
-    from terok_executor.roster.loader import ensure_vault_routes
+    from terok_executor.roster import AgentRoster
 
     if not no_vault:
         with stage_line("Vault routes") as s:
-            ensure_vault_routes(cfg=cfg)
+            AgentRoster.shared().ensure_vault_routes(cfg=cfg)
             s.ok("regenerated")
     _handle_sandbox_setup(cfg=cfg, no_vault=no_vault, **aggregator_kwargs)

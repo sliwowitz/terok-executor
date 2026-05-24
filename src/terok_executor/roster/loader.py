@@ -32,7 +32,7 @@ from terok_util import deep_merge, namespace_config_dir
 
 from terok_executor._util import yaml_load
 from terok_executor.credentials.auth import AuthProvider
-from terok_executor.integrations.sandbox import SandboxConfig
+from terok_executor.integrations.sandbox import DoctorCheck, SandboxConfig
 from terok_executor.provider.providers import AgentProvider
 
 from .schema import RawAgentYaml, VaultRouteEntry
@@ -293,38 +293,141 @@ class AgentRoster:
                 env.update(p.opencode_config.to_env(p.name))
         return env
 
+    # ── Process-singleton + selection parsing ──
 
-# ── Public API ────────────────────────────────────────────────────────────
+    @staticmethod
+    def shared() -> AgentRoster:
+        """Return the process-wide cached roster.
+
+        Loaded on first access; every subsequent call returns the same
+        instance.  Use this from anywhere that just needs the global
+        view; tests that mutate or replace the roster should call
+        [`load_roster`][terok_executor.roster.loader.load_roster] and
+        keep the result local.
+        """
+        return _shared_roster()
+
+    @staticmethod
+    def parse_selection(raw: str) -> str | tuple[str, ...]:
+        """Normalise a user-supplied agent selection string.
+
+        Accepts a comma-list of selection tokens or the literal ``"all"``.
+        Each token is either an agent name (``"claude"``) or a name
+        prefixed with ``-`` to exclude it from the selection
+        (``"-vibe"``).  The pseudo-name ``"all"`` is also valid as a
+        token, so ``"all,-vibe"`` means "everything except vibe".  When
+        the input contains only excludes (``"-vibe"``), the selection
+        seeds from every installable entry — same effect as
+        ``"all,-vibe"``.
+
+        Whitespace is stripped, empty / whitespace-only entries dropped,
+        and case folded.  Empty or all-whitespace input collapses to
+        ``"all"`` — the same shape
+        [`AgentRoster.resolve_selection`][terok_executor.roster.loader.AgentRoster.resolve_selection]
+        expects.  Unknown names are not checked here;
+        ``resolve_selection`` does that.
+        """
+        folded = raw.strip().lower()
+        if folded == "all" or not folded:
+            return "all"
+        tokens = tuple(n.strip() for n in folded.split(",") if n.strip())
+        return tokens or "all"
+
+    def validate_selection(self, raw: str) -> None:
+        """Reject *raw* with ``SystemExit(2)`` if it names roster entries we don't have.
+
+        CLI-flavoured: prints a ``Invalid agent selection: …`` line on
+        stderr and exits.  Domain callers that just want the parsed
+        tuple should use
+        [`parse_selection`][terok_executor.roster.loader.AgentRoster.parse_selection]
+        + [`resolve_selection`][terok_executor.roster.loader.AgentRoster.resolve_selection]
+        and handle ``ValueError`` themselves.
+        """
+        try:
+            self.resolve_selection(self.parse_selection(raw))
+        except ValueError as exc:
+            print(f"Invalid agent selection: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+
+    def prompt_selection(self) -> str:
+        """Print the installed roster and read one line of executor grammar.
+
+        Empty input → ``"all"``.  Non-interactive stdin (closed pipe)
+        exits with a hint to pass the selection positionally instead.
+        """
+        providers = self.providers
+        print("\nAvailable agents:")
+        for name in sorted(self.agent_names):
+            provider = providers.get(name)
+            label = provider.label if provider is not None else name
+            print(f"  · {name}  — {label}")
+        try:
+            raw = input("\nType a comma list, or '-name' to exclude [all]: ").strip()
+        except EOFError as exc:
+            raise SystemExit(
+                "No interactive stdin available.  Pass the selection positionally "
+                "instead, e.g. `terok agents set all`."
+            ) from exc
+        return raw or "all"
+
+    # ── Vault routes + doctor checks ──
+
+    def ensure_vault_routes(self, cfg: SandboxConfig | None = None) -> Path:
+        """Generate ``routes.json`` from this roster and write it to disk.
+
+        The routes file is written to the path configured in
+        [`SandboxConfig`][terok_sandbox.SandboxConfig] (typically
+        ``~/.local/share/terok/vault/routes.json``).
+
+        When *cfg* is ``None``, falls back to standalone defaults.
+
+        Returns the path to the written file.
+        """
+        if cfg is None:
+            cfg = SandboxConfig()
+        path = cfg.routes_path
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = self.generate_routes_json() + "\n"
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            tmp.replace(path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return path
+
+    def doctor_checks(self, *, token_broker_port: int | None = None) -> list[DoctorCheck]:
+        """Return agent-level health checks for in-container diagnostics.
+
+        Delegates to
+        [`terok_executor.doctor`][terok_executor.doctor] for the actual
+        check factories; this method is the canonical entry point so
+        consumers can discover the checks through the roster.
+
+        Args:
+            token_broker_port: Host-side vault broker TCP port.  ``None``
+                selects socket mode; any integer selects TCP mode.  Base
+                URL checks use the port (or the in-container loopback
+                port) to derive the expected host.
+        """
+        from terok_executor.doctor import _build_agent_doctor_checks
+
+        return _build_agent_doctor_checks(self, token_broker_port=token_broker_port)
 
 
 @lru_cache(maxsize=1)
-def get_roster() -> AgentRoster:
-    """Return the singleton roster instance (loaded once, cached)."""
+def _shared_roster() -> AgentRoster:
+    """Process-wide cached roster — backing for ``AgentRoster.shared``."""
     return load_roster()
 
 
-def parse_agent_selection(raw: str) -> str | tuple[str, ...]:
-    """Normalise a user-supplied agent selection string.
-
-    Accepts a comma-list of selection tokens or the literal ``"all"``.  Each
-    token is either an agent name (``"claude"``) or a name prefixed with
-    ``-`` to exclude it from the selection (``"-vibe"``).  The pseudo-name
-    ``"all"`` is also valid as a token, so ``"all,-vibe"`` means "everything
-    except vibe".  When the input contains only excludes (``"-vibe"``), the
-    selection seeds from every installable entry — same effect as
-    ``"all,-vibe"``.
-
-    Whitespace is stripped, empty / whitespace-only entries dropped, and
-    case folded.  Empty or all-whitespace input collapses to ``"all"`` —
-    the same shape [`AgentRoster.resolve_selection`][terok_executor.roster.loader.AgentRoster.resolve_selection]
-    expects.  Unknown names are not checked here; ``resolve_selection``
-    does that.
-    """
-    folded = raw.strip().lower()
-    if folded == "all" or not folded:
-        return "all"
-    tokens = tuple(n.strip() for n in folded.split(",") if n.strip())
-    return tokens or "all"
+# ── Public API ────────────────────────────────────────────────────────────
 
 
 def load_roster() -> AgentRoster:
@@ -430,37 +533,6 @@ def load_roster() -> AgentRoster:
         _all_names=tuple(all_names),
         _web_ingress=frozenset(web_ingress_names),
     )
-
-
-def ensure_vault_routes(cfg: SandboxConfig | None = None) -> Path:
-    """Generate ``routes.json`` from the YAML roster and write it to disk.
-
-    The routes file is written to the path configured in
-    [`SandboxConfig`][terok_sandbox.SandboxConfig] (typically
-    ``~/.local/share/terok/vault/routes.json``).
-
-    When *cfg* is ``None``, falls back to standalone defaults.
-
-    Returns the path to the written file.
-    """
-    if cfg is None:
-        cfg = SandboxConfig()
-    path = cfg.routes_path
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = get_roster().generate_routes_json() + "\n"
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    return path
 
 
 # ── YAML loading ──────────────────────────────────────────────────────────

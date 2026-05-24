@@ -52,7 +52,7 @@ class TestScanLeakedCredentialsWarnsOnSkip:
         # The codex provider's mount dir is intentionally absent → lstat raises.
 
         with (
-            patch("terok_executor.roster.loader.get_roster", return_value=roster),
+            patch("terok_executor.roster.loader._shared_roster", return_value=roster),
             patch(
                 "terok_executor.credentials.vault_commands._is_injected_credentials_file",
                 return_value=False,

@@ -14,10 +14,11 @@ from pydantic import ValidationError
 from terok_executor.credentials.auth import AuthProvider
 from terok_executor.provider.providers import AgentProvider
 from terok_executor.roster import (
+    AgentRoster,
     SidecarSpec,
     load_roster,
 )
-from terok_executor.roster.loader import _load_bundled_agents, parse_agent_selection
+from terok_executor.roster.loader import _load_bundled_agents
 from terok_executor.roster.schema import RawAgentYaml
 
 
@@ -565,31 +566,31 @@ class TestParseAgentSelection:
     ``resolve_selection`` consumes."""
 
     def test_all_passes_through(self) -> None:
-        assert parse_agent_selection("all") == "all"
+        assert AgentRoster.parse_selection("all") == "all"
 
     def test_empty_string_collapses_to_all(self) -> None:
-        assert parse_agent_selection("") == "all"
-        assert parse_agent_selection("   ") == "all"
+        assert AgentRoster.parse_selection("") == "all"
+        assert AgentRoster.parse_selection("   ") == "all"
 
     def test_comma_list_becomes_tuple(self) -> None:
-        assert parse_agent_selection("claude,codex") == ("claude", "codex")
+        assert AgentRoster.parse_selection("claude,codex") == ("claude", "codex")
 
     def test_preserves_exclude_prefix(self) -> None:
-        assert parse_agent_selection("claude,-vibe") == ("claude", "-vibe")
+        assert AgentRoster.parse_selection("claude,-vibe") == ("claude", "-vibe")
 
     def test_bare_exclude_kept_as_single_token(self) -> None:
-        assert parse_agent_selection("-vibe") == ("-vibe",)
+        assert AgentRoster.parse_selection("-vibe") == ("-vibe",)
 
     def test_all_and_exclude_combine(self) -> None:
-        assert parse_agent_selection("all,-vibe") == ("all", "-vibe")
+        assert AgentRoster.parse_selection("all,-vibe") == ("all", "-vibe")
 
     def test_case_folded_and_whitespace_stripped(self) -> None:
-        assert parse_agent_selection(" Claude , -VIBE ") == ("claude", "-vibe")
+        assert AgentRoster.parse_selection(" Claude , -VIBE ") == ("claude", "-vibe")
 
     def test_end_to_end_roundtrip_through_resolve(self) -> None:
         """The CLI/config string ``"-vibe"`` should install everything except vibe."""
         reg = load_roster()
-        selection = parse_agent_selection("-vibe")
+        selection = AgentRoster.parse_selection("-vibe")
         full = set(reg.resolve_selection("all"))
         assert set(reg.resolve_selection(selection)) == full - {"vibe"}
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .paths import mounts_dir
-from .roster import MountDef, get_roster
+from .roster import AgentRoster, MountDef
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,30 @@ class TaskStorageInfo:
         """Combined footprint of workspace and agent config."""
         return self.workspace_bytes + self.agent_config_bytes
 
+    @classmethod
+    def measure(cls, task_dir: Path) -> TaskStorageInfo:
+        """Measure a single task's disk footprint.
+
+        Expects the standard layout: ``<task_dir>/workspace-dangerous/``
+        for the agent-writable code, ``<task_dir>/agent-config/`` for
+        per-task configuration.
+        """
+        return cls(
+            task_id=task_dir.name,
+            workspace_bytes=_dir_bytes(task_dir / "workspace-dangerous"),
+            agent_config_bytes=_dir_bytes(task_dir / "agent-config"),
+        )
+
+    @classmethod
+    def measure_all(cls, tasks_root: Path) -> list[TaskStorageInfo]:
+        """Measure every task under *tasks_root*, sorted by task ID."""
+        if not tasks_root.is_dir():
+            return []
+        return sorted(
+            (cls.measure(d) for d in tasks_root.iterdir() if d.is_dir()),
+            key=lambda t: t.task_id,
+        )
+
 
 @dataclass(frozen=True)
 class SharedMountStorageInfo:
@@ -38,6 +62,31 @@ class SharedMountStorageInfo:
     name: str
     label: str
     bytes: int
+
+    @classmethod
+    def measure_all(cls, mounts_base: Path | None = None) -> list[SharedMountStorageInfo]:
+        """Measure each shared config mount directory.
+
+        Labels come from the agent roster when available, falling back to
+        a title-cased version of the directory name.
+        """
+        base = mounts_base or mounts_dir()
+        if not base.is_dir():
+            return []
+
+        roster_mounts = AgentRoster.shared().mounts
+        return sorted(
+            (
+                cls(
+                    name=d.name,
+                    label=_mount_label(d.name, roster_mounts),
+                    bytes=_dir_bytes(d),
+                )
+                for d in base.iterdir()
+                if d.is_dir()
+            ),
+            key=lambda m: m.name,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -59,59 +108,3 @@ def _mount_label(name: str, roster_mounts: tuple[MountDef, ...]) -> str:
             return m.label
     # Fallback: "_claude-config" → "Claude config"
     return name.lstrip("_").replace("-", " ").capitalize()
-
-
-# ---------------------------------------------------------------------------
-# Public queries
-# ---------------------------------------------------------------------------
-
-
-def get_task_storage(task_dir: Path) -> TaskStorageInfo:
-    """Measure a single task's disk footprint.
-
-    Expects the standard layout: ``<task_dir>/workspace-dangerous/`` for
-    the agent-writable code, ``<task_dir>/agent-config/`` for per-task
-    configuration.
-    """
-    return TaskStorageInfo(
-        task_id=task_dir.name,
-        workspace_bytes=_dir_bytes(task_dir / "workspace-dangerous"),
-        agent_config_bytes=_dir_bytes(task_dir / "agent-config"),
-    )
-
-
-def get_tasks_storage(tasks_root: Path) -> list[TaskStorageInfo]:
-    """Measure all tasks under *tasks_root*, sorted by task ID."""
-    if not tasks_root.is_dir():
-        return []
-    return sorted(
-        (get_task_storage(d) for d in tasks_root.iterdir() if d.is_dir()),
-        key=lambda t: t.task_id,
-    )
-
-
-def get_shared_mounts_storage(
-    mounts_base: Path | None = None,
-) -> list[SharedMountStorageInfo]:
-    """Measure each shared config mount directory.
-
-    Labels come from the agent roster when available, falling back to
-    a title-cased version of the directory name.
-    """
-    base = mounts_base or mounts_dir()
-    if not base.is_dir():
-        return []
-
-    roster_mounts = get_roster().mounts
-    return sorted(
-        (
-            SharedMountStorageInfo(
-                name=d.name,
-                label=_mount_label(d.name, roster_mounts),
-                bytes=_dir_bytes(d),
-            )
-            for d in base.iterdir()
-            if d.is_dir()
-        ),
-        key=lambda m: m.name,
-    )

@@ -11,7 +11,6 @@ from terok_executor.provider.agents import _generate_claude_wrapper
 from terok_executor.provider.providers import (
     AGENT_PROVIDERS,
     PROVIDER_NAMES,
-    collect_all_auto_approve_env,
     get_provider,
     resolve_provider_value,
 )
@@ -21,6 +20,7 @@ from terok_executor.provider.wrappers import (
     generate_agent_wrapper,
     generate_all_wrappers,
 )
+from terok_executor.roster import AgentRoster
 from tests.constants import CONTAINER_INSTRUCTIONS_PATH, CONTAINER_TEROK_DIR
 
 
@@ -350,7 +350,7 @@ class TestGenerateAllWrappers:
 
     def test_collect_all_auto_approve_env(self) -> None:
         """The merged auto-approve env map contains all provider env vars."""
-        merged = collect_all_auto_approve_env()
+        merged = AgentRoster.shared().collect_all_auto_approve_env()
         assert merged["OPENCODE_PERMISSION"] == '{"*":"allow"}'
         # VIBE_BYPASS_TOOL_PERMISSIONS is the real Vibe field
         # (vibe.core.config._settings.VibeConfig.bypass_tool_permissions;

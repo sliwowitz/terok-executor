@@ -95,7 +95,7 @@ depends_on = [
     "terok_executor.integrations.sandbox",
     "terok_executor.provider.providers",
     "terok_executor.roster.schema",
-    "terok_executor.roster.types",
+    "terok_executor.roster.types", "terok_executor.doctor",
 ]
 
 # Roster package waypoint (re-exports from loader)
@@ -144,8 +144,7 @@ depends_on = [
 # Build resource staging — standalone
 [[modules]]
 path = "terok_executor.container.build"
-depends_on = [
-    "terok_executor.roster.loader",
+depends_on = ["terok_executor.roster",
 ]
 
 # Clone-cache workspace seeding — copies cached clone into task workspace
@@ -178,8 +177,7 @@ depends_on = [
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
     "terok_executor.provider.agents",
-    "terok_executor.provider.instructions",
-    "terok_executor.roster.loader",
+    "terok_executor.provider.instructions", "terok_executor.roster",
 ]
 
 # ── credentials/ — authentication + vault ────────────────
@@ -213,8 +211,7 @@ path = "terok_executor.credentials.vault_config"
 depends_on = [
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
-    "terok_executor.roster.loader",
-    "terok_executor.vault_addr",
+    "terok_executor.vault_addr", "terok_executor.roster",
 ]
 
 # Credential proxy CLI commands — wraps sandbox lifecycle + route generation
@@ -223,8 +220,7 @@ path = "terok_executor.credentials.vault_commands"
 depends_on = [
     "terok_executor.credentials.vendor_files",
     "terok_executor.integrations.sandbox",
-    "terok_executor.paths",
-    "terok_executor.roster.loader",
+    "terok_executor.paths", "terok_executor.roster",
 ]
 
 # ── Sandbox bootstrap composition ──────────────────────────────────
@@ -234,8 +230,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.sandbox"
 depends_on = [
-    "terok_executor.integrations.sandbox",
-    "terok_executor.roster.loader",
+    "terok_executor.integrations.sandbox", "terok_executor.roster",
 ]
 
 # ── ACP host-proxy (per-task aggregator) ──────────────────────────
@@ -262,8 +257,7 @@ depends_on = [
     "terok_executor.credentials.vault_config",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
-    "terok_executor.roster.loader",
-    "terok_executor.sandbox",
+    "terok_executor.sandbox", "terok_executor.roster",
 ]
 
 # ── CLI surface ────────────────────────────────────────────────────
@@ -282,7 +276,7 @@ depends_on = [
     "terok_executor.paths",
     "terok_executor.preflight",
     "terok_executor.roster.loader",
-    "terok_executor.sandbox",
+    "terok_executor.sandbox", "terok_executor.roster",
 ]
 
 # Composes the full executor CommandTree (own verbs + sandbox deep
@@ -325,7 +319,6 @@ depends_on = [
     "terok_executor.container.runner",
     "terok_executor.credentials.auth",
     "terok_executor.credentials.vault_commands",
-    "terok_executor.doctor",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
     "terok_executor.provider.agents",

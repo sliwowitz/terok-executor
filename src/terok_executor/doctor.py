@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agent-level container health checks.
+"""Agent-level container health checks (implementation).
 
 Contributes domain-specific checks to the layered doctor protocol
 (``terok_sandbox.doctor``): socat bridge liveness, credential file
@@ -11,6 +11,10 @@ for the vault.
 The checks are returned as `DoctorCheck` specs — probe commands
 + evaluate callables — that the top-level orchestrator (``terok sickbay``)
 executes inside containers via ``podman exec``.
+
+Public entry point: [`AgentRoster.doctor_checks`][terok_executor.roster.loader.AgentRoster.doctor_checks].
+This module is the implementation home; consumers call it through the
+roster method so the dependency direction stays roster → checks.
 """
 
 from __future__ import annotations
@@ -51,12 +55,15 @@ _REAL_KEY_PREFIXES = ("sk-ant-", "sk-", "gho_", "ghp_", "ghs_", "glpat-")
 # ── Public API ───────────────────────────────────────────────────────────
 
 
-def agent_doctor_checks(
+def _build_agent_doctor_checks(
     roster: AgentRoster,
     *,
     token_broker_port: int | None = None,
 ) -> list[DoctorCheck]:
-    """Return agent-level health checks for in-container diagnostics.
+    """Assemble agent-level health checks for in-container diagnostics.
+
+    Private to the doctor module — call through
+    [`AgentRoster.doctor_checks`][terok_executor.roster.loader.AgentRoster.doctor_checks].
 
     Args:
         roster: The loaded agent roster.
@@ -64,9 +71,6 @@ def agent_doctor_checks(
             selects socket mode; any integer selects TCP mode.  Base URL
             checks use the port (or the in-container loopback port) to
             derive the expected host.
-
-    Returns:
-        List of `DoctorCheck` instances ready for orchestration.
     """
     socket_mode = token_broker_port is None
     checks: list[DoctorCheck] = [

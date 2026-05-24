@@ -7,24 +7,12 @@ Delegates to `.loader` for YAML deserialization and roster construction,
 and to `.config_stack` for generic layered config resolution.
 """
 
-from .loader import (
-    AgentRoster,
-    MountDef,
-    SidecarSpec,
-    VaultRoute,
-    ensure_vault_routes,
-    get_roster,
-    load_roster,
-    parse_agent_selection,
-)
+from .loader import AgentRoster, MountDef, SidecarSpec, VaultRoute, load_roster
 
 __all__ = [
     "AgentRoster",
     "MountDef",
     "SidecarSpec",
     "VaultRoute",
-    "ensure_vault_routes",
-    "get_roster",
     "load_roster",
-    "parse_agent_selection",
 ]

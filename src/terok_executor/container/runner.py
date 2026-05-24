@@ -114,9 +114,9 @@ class AgentRunner:
     def roster(self) -> AgentRoster:
         """Lazy-init agent roster."""
         if self._roster is None:
-            from terok_executor.roster.loader import get_roster
+            from terok_executor.roster import AgentRoster as _Roster
 
-            self._roster = get_roster()
+            self._roster = _Roster.shared()
         return self._roster
 
     # ------------------------------------------------------------------
