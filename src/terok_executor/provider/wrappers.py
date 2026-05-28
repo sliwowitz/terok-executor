@@ -164,7 +164,41 @@ def _opencode_plugin_block(provider: AgentProvider) -> list[str]:
     ]
 
 
-def initial_prompt_block(session_path: str | None) -> list[str]:
+def _interactive_seed_argv_prefix(provider: AgentProvider | None) -> list[str]:
+    """Argv tokens placed before the prompt when seeding it via ``$@``.
+
+    Most CLIs accept a bare positional string as the initial conversation
+    message (Claude, Codex, Vibe).  Two families need help:
+
+    * **OpenCode-based** (opencode itself + blablador / kisski / openrouter):
+      yargs binds the first positional of the default TUI command to a
+      working-directory path
+      (`sst/opencode v1.15.7 packages/opencode/src/cli/cmd/tui/thread.ts:79-87
+      <https://github.com/anomalyco/opencode/blob/v1.15.7/packages/opencode/src/cli/cmd/tui/thread.ts#L79-L87>`_).
+      Routing through the ``run`` subcommand makes opencode treat the text
+      as a prompt instead of attempting ``chdir`` into it.
+
+    * **GitHub Copilot**: the upstream CLI is closed-source, and the
+      `official docs
+      <https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically>`_
+      only sanction ``-p <prompt>`` and stdin for non-interactive seeding;
+      bare positional is undocumented.  Routing through ``-p`` keeps us on
+      the supported surface.
+    """
+    if provider is None:
+        return []
+    if provider.uses_opencode_instructions:
+        return ["run"]
+    if provider.name == "copilot":
+        return ["-p"]
+    return []
+
+
+def initial_prompt_block(
+    session_path: str | None,
+    *,
+    provider: AgentProvider | None = None,
+) -> list[str]:
     """Emit bash lines that pick up the task's initial prompt as the first message.
 
     Fires only on a bare interactive launch (no user args, no headless timeout)
@@ -174,15 +208,21 @@ def initial_prompt_block(session_path: str | None) -> list[str]:
 
     The renamed copy is preserved as a paper trail; the user can ``mv`` it
     back to recover from a launch that crashed before the session was saved.
+
+    *provider* shapes the seeded argv so the prompt is interpreted as a
+    conversation message and not as some CLI's positional cwd / unrelated
+    argument — see ``_interactive_seed_argv_prefix``.
     """
     guards = ['[ -z "$_timeout" ]', "[ $# -eq 0 ]"]
     if session_path:
         guards.append(f"[ ! -s {session_path} ]")
     guards.append(f"[ -s {INITIAL_PROMPT_PATH} ]")
+    prefix_tokens = _interactive_seed_argv_prefix(provider)
+    prefix = "".join(f"{shlex.quote(t)} " for t in prefix_tokens)
     return [
         "    # Pick up the task's initial prompt as the first message (one-shot).",
         f"    if {' && '.join(guards)}; then",
-        f'        set -- "$(cat {INITIAL_PROMPT_PATH})"',
+        f'        set -- {prefix}"$(cat {INITIAL_PROMPT_PATH})"',
         f"        mv {INITIAL_PROMPT_PATH} {INITIAL_PROMPT_CONSUMED_PATH}",
         "    fi",
     ]
@@ -457,7 +497,7 @@ def _generate_generic_wrapper(provider: AgentProvider) -> str:
     lines.extend(_opencode_plugin_block(provider))
     lines.extend(_session_resume_block(provider, session_path))
     lines.extend(_codex_instr_block(provider))
-    lines.extend(initial_prompt_block(session_path))
+    lines.extend(initial_prompt_block(session_path, provider=provider))
     lines.extend(_vibe_capture_fn(provider, session_path))
 
     headless_cmd = _wrap_invocation(

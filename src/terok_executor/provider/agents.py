@@ -420,7 +420,12 @@ def _generate_claude_wrapper(cfg: WrapperConfig) -> str:
 
     # Pick up the task's initial prompt on bare interactive launch when no
     # resume is being injected.  Mirrors the generic wrapper's behaviour.
-    lines.extend(initial_prompt_block("/home/dev/.terok/claude-session.txt"))
+    lines.extend(
+        initial_prompt_block(
+            "/home/dev/.terok/claude-session.txt",
+            provider=claude_provider,
+        )
+    )
 
     # Git env vars and exec — with optional timeout.
     # _terok_resume_or_fresh guards against stale session IDs: if the agent

@@ -238,14 +238,50 @@ class TestGenerateAgentWrapper:
             )
 
     def test_all_wrappers_pick_up_initial_prompt(self) -> None:
-        """Every provider's wrapper consumes initial-prompt.txt one-shot."""
+        """Every provider's wrapper consumes initial-prompt.txt one-shot.
+
+        The seeded argv shape varies by provider (see
+        [`test_initial_prompt_seed_shape_per_provider`][tests.unit.test_headless_providers.TestAgentWrappers.test_initial_prompt_seed_shape_per_provider]).
+        """
         for name in AGENT_PROVIDERS:
             wrapper = _provider_wrapper(name)
             assert INITIAL_PROMPT_PATH in wrapper, f"{name} missing initial-prompt pickup"
             assert INITIAL_PROMPT_CONSUMED_PATH in wrapper, f"{name} missing one-shot rename"
-            assert f'set -- "$(cat {INITIAL_PROMPT_PATH})"' in wrapper, (
-                f"{name} should set positional args from the prompt file"
+            assert f'"$(cat {INITIAL_PROMPT_PATH})"' in wrapper, (
+                f"{name} should reference the prompt file in its set -- line"
             )
+
+    def test_initial_prompt_seed_shape_per_provider(self) -> None:
+        """The seed argv routes the prompt through the right CLI surface.
+
+        OpenCode-based providers (opencode, blablador, kisski, openrouter)
+        prepend ``run`` because their default TUI binds positional[0] to a
+        cwd path.  Copilot prepends ``-p`` because its CLI documents
+        ``-p <prompt>`` / stdin as the only non-interactive seed forms.
+        Everything else (Claude, Codex, Vibe, Pi) accepts a bare positional.
+        """
+        bare = f'set -- "$(cat {INITIAL_PROMPT_PATH})"'
+        run = f'set -- run "$(cat {INITIAL_PROMPT_PATH})"'
+        dash_p = f'set -- -p "$(cat {INITIAL_PROMPT_PATH})"'
+        expected: dict[str, str] = {
+            "opencode": run,
+            "blablador": run,
+            "kisski": run,
+            "openrouter": run,
+            "copilot": dash_p,
+            "claude": bare,
+            "codex": bare,
+            "vibe": bare,
+            "pi": bare,
+        }
+        # Every registered provider must have an explicit decision recorded
+        # here — new providers can't sneak in without an audit of their CLI
+        # against the seed-shape categories above.
+        missing = set(AGENT_PROVIDERS) - set(expected)
+        assert not missing, f"missing seed-shape decision for: {sorted(missing)}"
+        for name in AGENT_PROVIDERS:
+            wrapper = _provider_wrapper(name)
+            assert expected[name] in wrapper, f"{name} should emit `{expected[name]}`"
 
     def test_initial_prompt_skipped_when_session_present(self) -> None:
         """Wrappers with a session_file gate the prompt pickup on no resume."""
