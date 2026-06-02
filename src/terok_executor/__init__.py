@@ -60,7 +60,13 @@ from .container.inject import inject_prompt
 from .container.runner import AgentRunner
 
 # -- Credentials (auth flows, extractors, vault commands) ----------------------
-from .credentials.auth import AUTH_PROVIDERS, Authenticator
+from .credentials.auth import (
+    AUTH_PROVIDERS,
+    Authenticator,
+    AuthSession,
+    prepare_oauth_session,
+    store_api_key,
+)
 from .credentials.vault_commands import VAULT_COMMANDS, scan_leaked_credentials
 
 # -- Krun (KVM-microVM) provisioning + runtime factory -----------------------
@@ -126,6 +132,9 @@ __all__ = [
     # Auth
     "AUTH_PROVIDERS",
     "Authenticator",
+    "AuthSession",
+    "prepare_oauth_session",
+    "store_api_key",
     # Instructions
     "bundled_default_instructions",
     "resolve_instructions",

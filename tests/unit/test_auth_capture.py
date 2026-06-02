@@ -1081,3 +1081,109 @@ class TestAuthenticateOauthGate:
                     image="img:tag",
                     oauth_enabled=False,
                 )
+
+
+class TestPrepareOauthSession:
+    """Verify the hold-don't-call session API the TUI dispatches against."""
+
+    def _provider(self) -> object:
+        from terok_executor.credentials.auth import AuthProvider
+
+        return AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="_claude-config",
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="Banner line one.\nBanner line two.",
+            modes=("oauth", "api_key"),
+        )
+
+    def test_argv_includes_provider_command_and_mount(self, tmp_path: Path) -> None:
+        """``argv`` ends with the provider command and contains the temp-dir mount."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with patch("terok_executor.credentials.auth._check_podman"):
+            with prepare_oauth_session(
+                self._provider(), None, mounts_dir=tmp_path, image="terok-l1:test"
+            ) as session:
+                assert session.argv[0] == "podman"
+                assert "terok-l1:test" in session.argv
+                assert session.argv[-1] == "claude"
+                mount_arg = f"{session.auth_dir}:/home/dev/.claude:Z"
+                assert mount_arg in session.argv
+                assert session.auth_dir.is_dir()
+        assert not session.auth_dir.exists()  # cleanup ran
+
+    def test_title_and_banner_reflect_scope(self, tmp_path: Path) -> None:
+        """Banner mentions the provider label and either the project or host-wide scope."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with patch("terok_executor.credentials.auth._check_podman"):
+            with prepare_oauth_session(
+                self._provider(), "myproj", mounts_dir=tmp_path, image="img"
+            ) as session:
+                assert "Claude" in session.title
+                assert "myproj" in session.title
+                assert "Banner line one." in session.banner
+                assert "$ podman run" in session.banner
+
+    def test_capture_delegates_to_capture_credentials(self, tmp_path: Path) -> None:
+        """``session.capture()`` forwards to ``_capture_credentials`` with stored kwargs."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with patch("terok_executor.credentials.auth._check_podman"):
+            with prepare_oauth_session(
+                self._provider(),
+                "myproj",
+                mounts_dir=tmp_path,
+                image="img",
+                credential_set="work",
+                expose_token=True,
+            ) as session:
+                with patch("terok_executor.credentials.auth._capture_credentials") as mock_cap:
+                    session.capture()
+                mock_cap.assert_called_once_with(
+                    "claude",
+                    session.auth_dir,
+                    "work",
+                    mounts_base=tmp_path,
+                    auth_provider=session.provider,
+                    expose_token=True,
+                )
+
+    def test_cleanup_is_idempotent(self, tmp_path: Path) -> None:
+        """Calling ``cleanup`` twice does not raise."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with patch("terok_executor.credentials.auth._check_podman"):
+            session = prepare_oauth_session(
+                self._provider(), None, mounts_dir=tmp_path, image="img"
+            )
+        session.cleanup()
+        session.cleanup()
+
+    def test_authenticator_prepare_oauth_rejects_api_key_only_provider(
+        self, tmp_path: Path
+    ) -> None:
+        """API-key-only providers can't be prepared for OAuth — early failure."""
+        import pytest
+
+        from terok_executor.credentials.auth import Authenticator, AuthProvider
+
+        api_only = AuthProvider(
+            name="blablador",
+            label="Blablador",
+            host_dir_name="_blablador-config",
+            container_mount="/home/dev/.blablador",
+            command=["true"],
+            banner_hint="",
+            modes=("api_key",),
+        )
+        with patch.dict(
+            "terok_executor.credentials.auth.AUTH_PROVIDERS",
+            {"blablador": api_only},
+            clear=True,
+        ):
+            with pytest.raises(SystemExit, match="does not support OAuth"):
+                Authenticator("blablador").prepare_oauth(None, mounts_dir=tmp_path, image="img")

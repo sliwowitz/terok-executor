@@ -22,6 +22,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -174,6 +175,41 @@ class Authenticator:
             image=image,
             expose_token=expose_token,
             oauth_enabled=oauth_enabled,
+        )
+
+    def prepare_oauth(
+        self,
+        project_id: str | None,
+        *,
+        mounts_dir: Path,
+        image: str,
+        expose_token: bool = False,
+        credential_set: str = "default",
+    ) -> AuthSession:
+        """Build an [`AuthSession`][terok_executor.AuthSession] without running it.
+
+        Frontends that own their own UI loop (e.g. the terok Textual TUI,
+        which wants to dispatch the OAuth container into a new terminal
+        tab or via tmux instead of inline) build the session here, run
+        ``session.argv`` however they like, then call ``session.capture()``
+        on success.  The CLI's blocking ``authenticate`` path is just
+        another such caller — see ``_run_auth_container``.
+        """
+        info = AUTH_PROVIDERS.get(self.provider)
+        if not info:
+            available = ", ".join(AUTH_PROVIDERS)
+            raise SystemExit(f"Unknown auth provider: {self.provider}. Available: {available}")
+        if not info.supports_oauth:
+            raise SystemExit(
+                f"Provider {self.provider!r} does not support OAuth — use store_api_key() instead."
+            )
+        return prepare_oauth_session(
+            info,
+            project_id,
+            mounts_dir=mounts_dir,
+            image=image,
+            expose_token=expose_token,
+            credential_set=credential_set,
         )
 
 
@@ -354,6 +390,163 @@ def _prompt_api_key(info: AuthProvider) -> str:
     return key
 
 
+@dataclass
+class AuthSession:
+    """A prepared-but-not-run OAuth auth container session.
+
+    Built by [`Authenticator.prepare_oauth`][terok_executor.Authenticator.prepare_oauth]
+    (or the module-level [`prepare_oauth_session`][terok_executor.prepare_oauth_session]
+    helper).  Hold-don't-call: the caller is responsible for running
+    ``argv`` (synchronously, in a new terminal tab, suspended TUI, etc.)
+    and calling ``capture()`` afterwards.  Use as a context manager so
+    the temp dir and any dangling container are cleaned up on exit.
+    """
+
+    provider: AuthProvider
+    """Provider descriptor (label, banner hint, mount points)."""
+
+    project_id: str | None
+    """Project scope for the banner; ``None`` for host-wide auth."""
+
+    container_name: str
+    """Podman container name (used for cleanup and ``-it`` log clarity)."""
+
+    argv: list[str]
+    """The ``podman run …`` command line — run this however you like."""
+
+    banner: str
+    """Banner text to display before launching ``argv``."""
+
+    auth_dir: Path
+    """Temp dir bind-mounted as the container's auth config target.
+
+    Lives until ``cleanup()`` (or ``__exit__``).  Credential extraction
+    in ``capture()`` reads from here, so don't remove it manually.
+    """
+
+    mounts_dir: Path
+    """Base directory for the shared post-capture mount (OAuth providers only)."""
+
+    credential_set: str = "default"
+    """Which credential set in the vault DB receives the captured token."""
+
+    expose_token: bool = False
+    """When True, real credential files are copied into the shared mount (tier 3)."""
+
+    _tmpdir: tempfile.TemporaryDirectory[str] | None = field(
+        default=None, repr=False, compare=False
+    )
+    """Internal: backing temp-dir handle, released by ``cleanup``."""
+
+    @property
+    def title(self) -> str:
+        """Short human-readable title (``"Authenticating Claude (host-wide)"``)."""
+        scope = f"for project: {self.project_id}" if self.project_id else "(host-wide)"
+        return f"Authenticating {self.provider.label} {scope}"
+
+    def capture(self) -> None:
+        """Extract credentials from ``auth_dir``, store them in the vault DB.
+
+        Call after ``argv`` exits successfully.  Safe to call multiple
+        times (the underlying extractor is idempotent on a stable
+        credential file).
+        """
+        _capture_credentials(
+            self.provider.name,
+            self.auth_dir,
+            self.credential_set,
+            mounts_base=self.mounts_dir,
+            auth_provider=self.provider,
+            expose_token=self.expose_token,
+        )
+
+    def cleanup(self) -> None:
+        """Release the temp dir and force-remove any lingering container.
+
+        Idempotent.  ``__exit__`` calls this automatically.
+        """
+        subprocess.run(
+            ["podman", "rm", "-f", self.container_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if self._tmpdir is not None:
+            self._tmpdir.cleanup()
+            self._tmpdir = None
+
+    def __enter__(self) -> AuthSession:
+        """Return self; the heavy lifting already happened in the factory."""
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        """Run ``cleanup`` on context-manager exit."""
+        self.cleanup()
+
+
+def prepare_oauth_session(
+    provider: AuthProvider,
+    project_id: str | None,
+    *,
+    mounts_dir: Path,
+    image: str,
+    expose_token: bool = False,
+    credential_set: str = "default",
+) -> AuthSession:
+    """Build an [`AuthSession`][terok_executor.AuthSession] without running it.
+
+    Creates a fresh temp dir, computes the ``podman run`` argv, and
+    cleans up any leftover container of the same name (so re-auth
+    after a previous abort isn't blocked).  The caller drives execution
+    and credential capture; see [`AuthSession`][terok_executor.AuthSession].
+
+    The temp dir uses a clean slate so the vendor auth flow re-runs end
+    to end — no stale config, no cached sessions.
+    """
+    _check_podman()
+
+    tmpdir = tempfile.TemporaryDirectory(prefix=f"terok-auth-{provider.name}-")
+    host_dir = Path(tmpdir.name)
+
+    # ``project_id`` must lead the container name; Podman rejects names
+    # starting with ``_`` or other non-alphanumeric chars, so the
+    # host-wide caller passes ``None`` and we fall back to ``host``.
+    name_prefix = project_id or "host"
+    container_name = f"{name_prefix}-auth-{provider.name}"
+    _cleanup_existing_container(container_name)
+
+    cmd = ["podman", "run", "--rm", *podman_userns_args(), "-it"]
+    if provider.extra_run_args:
+        cmd.extend(provider.extra_run_args)
+    cmd.extend(["-v", f"{host_dir}:{provider.container_mount}:Z"])
+    cmd.extend(["--name", container_name])
+    cmd.append(image)
+    cmd.extend(provider.command)
+
+    scope = f"for project: {project_id}" if project_id else "(host-wide)"
+    banner_lines = [
+        f"Authenticating {provider.label} {scope}",
+        "",
+        *provider.banner_hint.splitlines(),
+        "",
+        f"$ {' '.join(map(str, cmd))}",
+        "",
+    ]
+
+    return AuthSession(
+        provider=provider,
+        project_id=project_id,
+        container_name=container_name,
+        argv=cmd,
+        banner="\n".join(banner_lines),
+        auth_dir=host_dir,
+        mounts_dir=mounts_dir,
+        credential_set=credential_set,
+        expose_token=expose_token,
+        _tmpdir=tmpdir,
+    )
+
+
 def _run_auth_container(
     project_id: str | None,
     provider: AuthProvider,
@@ -363,57 +556,27 @@ def _run_auth_container(
     credential_set: str = "default",
     expose_token: bool = False,
 ) -> None:
-    """Run an auth container, capture credentials to the DB.
+    """Synchronous CLI helper: prepare a session, run it inline, capture.
 
-    Uses a **temporary directory** as the container mount target so the
-    vendor auth flow writes credential files into a disposable location.
-    After the container exits, per-provider extractors parse the credential
-    files and store them in the credential DB.  The shared config mount
-    (settings, memories) is untouched — no real secrets land there.
+    Thin wrapper around [`prepare_oauth_session`][terok_executor.prepare_oauth_session]
+    that preserves the original ``terok auth`` behaviour — print banner,
+    run ``podman`` in the foreground, capture on success, swallow 130
+    (Ctrl-C inside the container) without surfacing as failure.
     """
-    import tempfile
-
-    _check_podman()
-
-    # Use an empty temp dir as the mount target.  The auth tool starts with
-    # a clean slate (no existing config, sessions, or cached auth) which
-    # forces a full re-authentication flow.  After the container exits, the
-    # extractor reads the credential file from the temp dir and stores it
-    # in the DB.  The shared config mount is never written to.
-    with tempfile.TemporaryDirectory(prefix=f"terok-auth-{provider.name}-") as tmpdir:
-        host_dir = Path(tmpdir)
-
-        # ``project_id`` must lead the container name; Podman rejects names
-        # starting with ``_`` or other non-alphanumeric chars, so the
-        # host-wide caller passes ``None`` and we fall back to ``host``.
-        name_prefix = project_id or "host"
-        container_name = f"{name_prefix}-auth-{provider.name}"
-        _cleanup_existing_container(container_name)
-
-        cmd = ["podman", "run", "--rm"]
-        cmd.extend(podman_userns_args())
-        cmd.append("-it")
-        if provider.extra_run_args:
-            cmd.extend(provider.extra_run_args)
-        cmd.extend(["-v", f"{host_dir}:{provider.container_mount}:Z"])
-        cmd.extend(["--name", container_name])
-        cmd.append(image)
-        cmd.extend(provider.command)
-
-        # Banner
-        if project_id:
-            print(f"Authenticating {provider.label} for project: {project_id}")
-        else:
-            print(f"Authenticating {provider.label} (host-wide)")
-        print()
-        for line in provider.banner_hint.splitlines():
-            print(line)
-        print()
-        print("$", " ".join(map(str, cmd)))
-        print()
-
+    with prepare_oauth_session(
+        provider,
+        project_id,
+        mounts_dir=mounts_dir,
+        image=image,
+        expose_token=expose_token,
+        credential_set=credential_set,
+    ) as session:
+        print(session.banner)
         try:
-            subprocess.run(cmd, check=True)
+            # argv is built by prepare_oauth_session from the bundled roster
+            # command + a resolved image tag, no shell, no untrusted input;
+            # the foreground run is intentional for the CLI.
+            subprocess.run(session.argv, check=True)  # nosec B603
         except subprocess.CalledProcessError as e:
             if e.returncode == 130:
                 print("\nAuthentication container stopped.")
@@ -421,23 +584,9 @@ def _run_auth_container(
             raise SystemExit(f"Auth failed: {e}")
         except KeyboardInterrupt:
             print("\nAuthentication interrupted.")
-            subprocess.run(
-                ["podman", "rm", "-f", container_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            return
+            return  # session.cleanup() runs via __exit__ and removes the container
 
-        # Extract credentials from the temp dir and store in DB
-        _capture_credentials(
-            provider.name,
-            host_dir,
-            credential_set,
-            mounts_base=mounts_dir,
-            auth_provider=provider,
-            expose_token=expose_token,
-        )
+        session.capture()
 
 
 def _check_podman() -> None:
