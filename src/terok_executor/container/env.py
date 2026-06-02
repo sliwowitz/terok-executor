@@ -111,6 +111,15 @@ class ContainerEnvSpec:
     credential_scope: str = "standalone"
     """Scope for vault token creation.  terok passes ``project.id``."""
 
+    credential_set: str = "default"
+    """Vault storage namespace to read credentials from.  Pairs with
+    [`Authenticator.run`][terok_executor.Authenticator.run]'s
+    ``credential_set`` — if the auth flow stored a token under set
+    ``foo``, the runtime must read from set ``foo`` too or the container
+    will see empty env.  Default ``"default"`` matches the shared
+    host-wide bucket every standalone caller uses; terok overrides for
+    per-project credentials."""
+
     vault_transport: Literal["direct", "socket"] = "direct"
     """Vault transport mode: ``"direct"`` (HTTP base URL) or ``"socket"``
     (Unix socket path via [`socket_env`][terok_executor.roster.VaultRoute.socket_env])."""
@@ -315,6 +324,7 @@ def assemble_container_env(
                 spec.task_id,
                 vault_transport=spec.vault_transport,
                 vault_required=spec.vault_required,
+                credential_set=spec.credential_set,
             )
         )
 
@@ -430,6 +440,7 @@ def _inject_vault_tokens(
     *,
     vault_transport: Literal["direct", "socket"] = "direct",
     vault_required: bool = False,
+    credential_set: str = "default",
 ) -> dict[str, str]:
     """Inject vault phantom tokens if the vault is running.
 
@@ -445,6 +456,10 @@ def _inject_vault_tokens(
     When *vault_required* is ``False`` (standalone default), soft-fails to
     empty dict.  When ``True`` (terok project mode), raises ``SystemExit``
     if the vault is unreachable.
+
+    *credential_set* selects which vault DB namespace to query — the auth
+    flow stores credentials keyed by ``(credential_set, provider)``, and
+    the runtime must use the same value to look them back up.
     """
     from terok_executor.integrations.sandbox import SandboxConfig, VaultManager
 
@@ -475,7 +490,6 @@ def _inject_vault_tokens(
         return {}
 
     try:
-        credential_set = "default"
         stored = set(db.list_credentials(credential_set))
         routed = stored & vault_routes.keys()
 

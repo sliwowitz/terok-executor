@@ -27,7 +27,13 @@ def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpe
     return next((v for v in volumes if container_path in v.container_path), None)
 
 
-def _make_vault_db(tmp_path: Path, cred_name: str = "claude", cred_data: dict | None = None):
+def _make_vault_db(
+    tmp_path: Path,
+    cred_name: str = "claude",
+    cred_data: dict | None = None,
+    *,
+    credential_set: str = "default",
+):
     """Return a ``SandboxConfig`` with one credential pre-stored in its ``CredentialDB``.
 
     The DB is created, populated, and closed internally.
@@ -38,7 +44,7 @@ def _make_vault_db(tmp_path: Path, cred_name: str = "claude", cred_data: dict | 
     cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
     db = CredentialDB(cfg.db_path, passphrase=TEST_VAULT_PASSPHRASE)
     db.store_credential(
-        "default",
+        credential_set,
         cred_name,
         {"type": "api_key", "key": "sk-test"} if cred_data is None else cred_data,
     )
@@ -730,6 +736,36 @@ class TestVaultTokenInjection:
 
         assert "TEROK_SSH_SIGNER_TOKEN" not in result.env
         assert "TEROK_SSH_SIGNER_PORT" not in result.env
+
+    def test_vault_credential_set_isolates_lookups(self, workspace, envs_dir, roster, tmp_path):
+        """``credential_set`` selects which vault DB namespace gets read.
+
+        A credential stored under set ``other`` must be invisible when the
+        spec asks for the default set, and vice versa — otherwise per-project
+        opt-in would silently leak shared tokens into project-scoped tasks.
+        """
+        cfg = _make_vault_db(tmp_path, credential_set="my-proj")
+        # spec without credential_set override → reads from "default" → no creds visible
+        default_spec = _spec(workspace, envs_dir, credential_scope="my-proj")
+        # spec with matching credential_set → reads from "my-proj" → token issued
+        scoped_spec = _spec(
+            workspace, envs_dir, credential_scope="my-proj", credential_set="my-proj"
+        )
+        with (
+            patch(
+                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
+                return_value=True,
+            ),
+            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
+        ):
+            default_result = assemble_container_env(
+                default_spec, roster, caller_manages_vault=False
+            )
+            scoped_result = assemble_container_env(scoped_spec, roster, caller_manages_vault=False)
+
+        assert "ANTHROPIC_API_KEY" not in default_result.env
+        assert "ANTHROPIC_API_KEY" in scoped_result.env
+        assert scoped_result.env["ANTHROPIC_API_KEY"].startswith("terok-p-")
 
     def test_vault_ssh_only_no_provider_creds(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected even when no provider credentials are stored."""

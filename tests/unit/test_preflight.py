@@ -203,6 +203,69 @@ def test_credentials_db_unavailable(_cls: MagicMock) -> None:
     assert "unavailable" in r.message
 
 
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
+def test_credentials_default_set(mock_db_cls: MagicMock) -> None:
+    """No ``credential_set`` override → DB is queried with ``"default"``."""
+    db = mock_db_cls.return_value
+    db.load_credential.return_value = {"type": "api_key"}
+    _pf().check_credentials()
+    db.load_credential.assert_called_once_with("default", "claude")
+
+
+@patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
+def test_credentials_custom_set(mock_db_cls: MagicMock) -> None:
+    """``credential_set=<id>`` → DB is queried with that set, not ``"default"``."""
+    db = mock_db_cls.return_value
+    db.load_credential.return_value = {"type": "api_key"}
+    _pf(credential_set="my-proj").check_credentials()
+    db.load_credential.assert_called_once_with("my-proj", "claude")
+
+
+def test_fix_credentials_threads_mounts_dir_to_authenticator() -> None:
+    """When ``mounts_dir`` is supplied, ``_fix_credentials`` routes it to ``Authenticator``.
+
+    Pairs with the new ``credential_set`` parameter — both must be honoured
+    so the captured token's vault row and the post-capture phantom marker
+    land in the same per-project tree.
+    """
+    from pathlib import Path
+
+    from terok_executor.preflight import _fix_credentials
+
+    with (
+        patch("terok_executor.credentials.auth.Authenticator") as auth_cls,
+        patch("terok_executor.credentials.vault_config.write_vault_config"),
+    ):
+        ok = _fix_credentials(
+            "claude",
+            base_image="ubuntu:24.04",
+            credential_set="my-proj",
+            mounts_dir=Path("/proj/root/mounts"),
+        )
+    assert ok is True
+    auth_cls.return_value.run.assert_called_once()
+    kwargs = auth_cls.return_value.run.call_args.kwargs
+    assert kwargs["mounts_dir"] == Path("/proj/root/mounts")
+    assert kwargs["credential_set"] == "my-proj"
+
+
+def test_fix_credentials_default_mounts_dir_falls_back_to_global() -> None:
+    """No ``mounts_dir`` override → ``Authenticator`` sees the host-wide default."""
+    from pathlib import Path
+
+    from terok_executor.preflight import _fix_credentials
+
+    with (
+        patch("terok_executor.credentials.auth.Authenticator") as auth_cls,
+        patch("terok_executor.credentials.vault_config.write_vault_config"),
+        patch("terok_executor.paths.mounts_dir", return_value=Path("/global/mounts")),
+    ):
+        _fix_credentials("claude", base_image="ubuntu:24.04")
+    kwargs = auth_cls.return_value.run.call_args.kwargs
+    assert kwargs["mounts_dir"] == Path("/global/mounts")
+    assert kwargs["credential_set"] == "default"
+
+
 # ── check_ssh_key ────────────────────────────────────────────────────
 
 

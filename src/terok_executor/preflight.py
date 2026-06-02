@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,20 @@ class Preflight:
     family: str | None = None
     interactive: bool = True
     assume_yes: bool = field(default=False)
+    credential_set: str = "default"
+    """Vault DB namespace to check for stored credentials.  Pairs with
+    [`Authenticator.run`][terok_executor.Authenticator.run]'s
+    ``credential_set`` — a project running with per-project credentials
+    passes its own value so the preflight verdict reflects what the
+    runtime will actually load, not the shared host-wide bucket."""
+
+    mounts_dir: Path | None = None
+    """Override for the agent-config mount tree.  ``None`` means use the
+    global [`paths.mounts_dir`][terok_executor.paths.mounts_dir].  Callers
+    that pair a non-``"default"`` ``credential_set`` with a per-project
+    mount tree (terok in scope=project mode) must override this too —
+    otherwise the captured OAuth credential's post-capture writer drops
+    the phantom marker into the wrong tree and the runtime never sees it."""
 
     # ── Orchestrator ───────────────────────────────────────────────
 
@@ -162,7 +177,11 @@ class Preflight:
         if not r.ok and self.interactive:
             print(f"  {r.name}... {r.message}")
             if self._confirm(f"Authenticate {self.provider} now?") and _fix_credentials(
-                self.provider, base_image=self.base_image, family=self.family
+                self.provider,
+                base_image=self.base_image,
+                family=self.family,
+                credential_set=self.credential_set,
+                mounts_dir=self.mounts_dir,
             ):
                 r = self.check_credentials()
         _print_step(r)
@@ -296,7 +315,7 @@ class Preflight:
                 f"{self.provider} credentials", False, "credential database unavailable"
             )
         try:
-            cred = db.load_credential("default", self.provider)
+            cred = db.load_credential(self.credential_set, self.provider)
         finally:
             db.close()
         if cred:
@@ -402,25 +421,37 @@ def _fix_ssh_key(scope: str = "standalone") -> bool:
     return True
 
 
-def _fix_credentials(provider: str, *, base_image: str, family: str | None = None) -> bool:
+def _fix_credentials(
+    provider: str,
+    *,
+    base_image: str,
+    family: str | None = None,
+    credential_set: str = "default",
+    mounts_dir: Path | None = None,
+) -> bool:
     """Run the interactive authentication flow for *provider*.
 
     *family* threads through to the lazy image resolver so the auth-time
     build matches the family the rest of preflight builds against (an
-    unknown base requires the explicit override).
+    unknown base requires the explicit override).  *credential_set*
+    selects the vault DB namespace the captured token is stored under;
+    *mounts_dir* must override the host-wide default whenever
+    *credential_set* is non-default, otherwise the OAuth post-capture
+    writer drops phantom markers into the wrong tree.
     """
     from terok_executor.container.build import ImageBuilder
     from terok_executor.credentials.auth import Authenticator
     from terok_executor.credentials.vault_config import write_vault_config
-    from terok_executor.paths import mounts_dir
+    from terok_executor.paths import mounts_dir as _default_mounts_dir
 
     # Lazy image resolution — picking API key from the OAuth-or-API-key prompt
     # short-circuits before we ever invoke ensure_default_l1.
     try:
         Authenticator(provider).run(
             None,
-            mounts_dir=mounts_dir(),
+            mounts_dir=mounts_dir if mounts_dir is not None else _default_mounts_dir(),
             image=lambda: ImageBuilder(base_image, family=family).ensure_default_l1(),
+            credential_set=credential_set,
         )
     except SystemExit:
         return False

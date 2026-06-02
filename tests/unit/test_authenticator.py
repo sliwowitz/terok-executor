@@ -26,6 +26,7 @@ def test_run_delegates_with_bound_provider() -> None:
             image="some:tag",
             expose_token=True,
             oauth_enabled=False,
+            credential_set="proj-123",
         )
     auth.assert_called_once_with(
         "proj-123",
@@ -34,6 +35,7 @@ def test_run_delegates_with_bound_provider() -> None:
         image="some:tag",
         expose_token=True,
         oauth_enabled=False,
+        credential_set="proj-123",
     )
 
 
@@ -48,6 +50,7 @@ def test_run_defaults_match_underlying_fn() -> None:
         image=None,
         expose_token=False,
         oauth_enabled=True,
+        credential_set="default",
     )
 
 

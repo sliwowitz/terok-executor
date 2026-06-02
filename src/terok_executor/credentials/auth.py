@@ -161,6 +161,7 @@ class Authenticator:
         image: str | Callable[[], str] | None = None,
         expose_token: bool = False,
         oauth_enabled: bool = True,
+        credential_set: str = "default",
     ) -> None:
         """Run the auth flow for ``self.provider``; see module-level docs.
 
@@ -175,6 +176,7 @@ class Authenticator:
             image=image,
             expose_token=expose_token,
             oauth_enabled=oauth_enabled,
+            credential_set=credential_set,
         )
 
     def prepare_oauth(
@@ -221,6 +223,7 @@ def authenticate(
     image: str | Callable[[], str] | None = None,
     expose_token: bool = False,
     oauth_enabled: bool = True,
+    credential_set: str = "default",
 ) -> None:
     """Run the auth flow for *provider*, optionally scoped to a project.
 
@@ -259,6 +262,13 @@ def authenticate(
             (e.g. ``agent.codex.allow_oauth=true`` plus ``experimental:
             true``).  When the provider declares only OAuth and the
             gate is closed, raises ``SystemExit`` with a clear hint.
+        credential_set: Storage namespace in the vault DB.  Defaults to
+            ``"default"`` — the shared host-wide bucket every standalone
+            and pre-existing terok caller uses.  Per-project callers
+            pass a project-specific value (e.g. ``project.id``) to
+            keep each project's tokens isolated.  The DB schema keys on
+            ``(credential_set, provider)``, so two projects can hold
+            independent logins for the same provider side-by-side.
 
     Raises ``SystemExit`` if the provider name is unknown or no usable
     auth mode remains after gating.
@@ -283,7 +293,7 @@ def authenticate(
         choice = input("Choose [1/2]: ").strip()
         if choice == "2":
             key = _prompt_api_key(info)
-            store_api_key(provider, key)
+            store_api_key(provider, key, credential_set=credential_set)
             return
         _run_auth_container(
             project_id,
@@ -291,6 +301,7 @@ def authenticate(
             mounts_dir=mounts_dir,
             image=_resolve_image(image, provider),
             expose_token=expose_token,
+            credential_set=credential_set,
         )
 
     elif has_api_key:
@@ -298,7 +309,7 @@ def authenticate(
         # Reaches here either because the provider declares only api_key,
         # or because the OAuth gate is closed.
         key = _prompt_api_key(info)
-        store_api_key(provider, key)
+        store_api_key(provider, key, credential_set=credential_set)
 
     elif has_oauth:
         # OAuth only — image is required.
@@ -308,6 +319,7 @@ def authenticate(
             mounts_dir=mounts_dir,
             image=_resolve_image(image, provider),
             expose_token=expose_token,
+            credential_set=credential_set,
         )
 
     else:

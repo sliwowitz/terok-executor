@@ -821,7 +821,7 @@ class TestAuthenticateImageLaziness:
             authenticate(None, "claude", mounts_dir=tmp_path, image=resolver)
 
         resolver.assert_not_called()
-        mock_store.assert_called_once_with("claude", "sk-ant-test")
+        mock_store.assert_called_once_with("claude", "sk-ant-test", credential_set="default")
 
     def test_oauth_choice_resolves_image(self, tmp_path: Path) -> None:
         """User picks ``1`` (OAuth) → resolver is called exactly once."""
@@ -1016,7 +1016,7 @@ class TestAuthenticateOauthGate:
                 oauth_enabled=False,
             )
 
-        mock_store.assert_called_once_with("claude", "sk-ant-test")
+        mock_store.assert_called_once_with("claude", "sk-ant-test", credential_set="default")
         mock_run.assert_not_called()
 
     def test_oauth_enabled_default_keeps_dual_prompt(self, tmp_path: Path) -> None:
@@ -1187,3 +1187,162 @@ class TestPrepareOauthSession:
         ):
             with pytest.raises(SystemExit, match="does not support OAuth"):
                 Authenticator("blablador").prepare_oauth(None, mounts_dir=tmp_path, image="img")
+
+
+class TestAuthenticateCredentialSet:
+    """``credential_set`` must flow from ``authenticate`` to every leaf storage call.
+
+    Both the API-key fast path and the OAuth container path need it, in both
+    the dual-prompt mode and the single-mode shortcuts — otherwise opting
+    in to per-project credentials would silently write to the shared
+    ``"default"`` set and the runtime would read back nothing.
+    """
+
+    def test_dual_mode_api_key_choice_threads_set(self, tmp_path: Path) -> None:
+        """Dual-prompt + ``2`` (API key) → ``store_api_key`` sees the set."""
+        from unittest.mock import patch
+
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        provider = AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="_claude-config",
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="",
+            modes=("oauth", "api_key"),
+            api_key_hint="hint",
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"claude": provider},
+                clear=True,
+            ),
+            patch("builtins.input", return_value="2"),
+            patch(
+                "terok_executor.credentials.auth._prompt_api_key",
+                return_value="sk-ant",
+            ),
+            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+        ):
+            authenticate(None, "claude", mounts_dir=tmp_path, credential_set="my-proj")
+        mock_store.assert_called_once_with("claude", "sk-ant", credential_set="my-proj")
+
+    def test_dual_mode_oauth_choice_threads_set(self, tmp_path: Path) -> None:
+        """Dual-prompt + ``1`` (OAuth) → ``_run_auth_container`` sees the set."""
+        from unittest.mock import patch
+
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        provider = AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="_claude-config",
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="",
+            modes=("oauth", "api_key"),
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"claude": provider},
+                clear=True,
+            ),
+            patch("builtins.input", return_value="1"),
+            patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
+        ):
+            authenticate(
+                None, "claude", mounts_dir=tmp_path, image="img:tag", credential_set="my-proj"
+            )
+        assert mock_run.call_args.kwargs["credential_set"] == "my-proj"
+
+    def test_api_key_only_threads_set(self, tmp_path: Path) -> None:
+        """API-key-only provider → ``store_api_key`` sees the set, no prompt."""
+        from unittest.mock import patch
+
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        provider = AuthProvider(
+            name="vibe",
+            label="Vibe",
+            host_dir_name="_vibe-config",
+            container_mount="/home/dev/.vibe",
+            command=["vibe"],
+            banner_hint="",
+            modes=("api_key",),
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"vibe": provider},
+                clear=True,
+            ),
+            patch(
+                "terok_executor.credentials.auth._prompt_api_key",
+                return_value="sk-vibe",
+            ),
+            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+        ):
+            authenticate(None, "vibe", mounts_dir=tmp_path, credential_set="my-proj")
+        mock_store.assert_called_once_with("vibe", "sk-vibe", credential_set="my-proj")
+
+    def test_oauth_only_threads_set(self, tmp_path: Path) -> None:
+        """OAuth-only provider → ``_run_auth_container`` sees the set."""
+        from unittest.mock import patch
+
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        provider = AuthProvider(
+            name="codex",
+            label="Codex",
+            host_dir_name="_codex-config",
+            container_mount="/home/dev/.codex",
+            command=["setup-codex-auth.sh"],
+            banner_hint="",
+            modes=("oauth",),
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": provider},
+                clear=True,
+            ),
+            patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
+        ):
+            authenticate(
+                None, "codex", mounts_dir=tmp_path, image="img:tag", credential_set="my-proj"
+            )
+        assert mock_run.call_args.kwargs["credential_set"] == "my-proj"
+
+    def test_default_keeps_backcompat(self, tmp_path: Path) -> None:
+        """Callers that don't pass ``credential_set`` still hit the ``"default"`` bucket."""
+        from unittest.mock import patch
+
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        provider = AuthProvider(
+            name="vibe",
+            label="Vibe",
+            host_dir_name="_vibe-config",
+            container_mount="/home/dev/.vibe",
+            command=["vibe"],
+            banner_hint="",
+            modes=("api_key",),
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"vibe": provider},
+                clear=True,
+            ),
+            patch(
+                "terok_executor.credentials.auth._prompt_api_key",
+                return_value="sk",
+            ),
+            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+        ):
+            authenticate(None, "vibe", mounts_dir=tmp_path)
+        mock_store.assert_called_once_with("vibe", "sk", credential_set="default")
