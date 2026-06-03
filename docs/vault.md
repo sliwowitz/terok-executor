@@ -37,12 +37,11 @@ Token Broker (terok-sandbox)              Agent / tool makes API request
   to upstream over TLS                       Token encodes which provider it's for.
 ```
 
-### Why TCP, not Unix sockets?
+### SELinux considerations
 
 SELinux blocks `connect()` on host Unix sockets mounted into rootless
-Podman containers (`container_t -> unconfined_t` denied). Containers
-reach the token broker via TCP (`host.containers.internal:<port>`) instead.
-[terok-shield](https://terok-ai.github.io/terok-shield/) allows the
+Podman containers (`container_t -> unconfined_t` denied). If a custom SELinux rule 
+cannot be installed, the containers reach the token broker via TCP (`host.containers.internal:<port>`) instead. [terok-shield](https://terok-ai.github.io/terok-shield/) allows the
 token broker port through the nftables firewall via `loopback_ports`.
 
 ### Per-provider phantom token routing
@@ -189,12 +188,14 @@ vault routing after a feature mode changes.
 | CodeRabbit | —                   | API key via `--api-key`       |
 | SonarCloud | —                   | API key via `--api-key`       |
 
-## Known Limitations
+## Limitations
 
+- **Claude**: OAuth logins do not support full routing. You can either expose th
+  real token to the agent to get full Claude CLI user experience, or route
+  what's officially routable, but miss out on some subscription features.
 - **Codex**: ChatGPT/backend-api and realtime websocket traffic are routed
   through the token broker, but any newly added Codex-specific upstream
   surfaces still need explicit vault route coverage.
-
 - **Copilot**: Not proxied yet. No `vault` section in YAML.
 
 ## Package Boundaries

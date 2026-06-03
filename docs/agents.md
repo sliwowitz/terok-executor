@@ -4,23 +4,33 @@
 
 | Agent | Auth | Description |
 |-------|------|-------------|
-| Claude | OAuth, API key | Anthropic Claude Code |
-| Codex | OAuth, API key | OpenAI Codex CLI |
+| Claude | OAuth\*, API key | Anthropic Claude Code |
+| Codex | OAuth\*, API key | OpenAI Codex CLI |
 | Vibe | API key | Mistral Vibe |
 | Copilot | — | GitHub Copilot (not proxied yet) |
 | Blablador | API key | Helmholtz Blablador via OpenCode |
 | KISSKI | API key | KISSKI AcademicCloud via OpenCode |
 
-### Sidecar tools
+\* OAuth support for Claude and Codex is experimental.
 
-Tools run alongside an agent in a separate container:
+### Tools
+
+Optionally available in the container:
 
 | Tool | Auth | Description |
 |------|------|-------------|
 | gh | OAuth, API key | GitHub CLI |
 | glab | API key | GitLab CLI |
-| CodeRabbit | API key | CodeRabbit code review |
 | SonarCloud | API key | SonarCloud scanner |
+
+### Sidecar tools
+
+Tools run in a separate container:
+
+| Tool | Auth | Description |
+|------|------|-------------|
+| CodeRabbit | API key | CodeRabbit code review |
+
 
 ## Listing agents
 
@@ -78,12 +88,11 @@ credentials. See [Security](security.md) for how this works.
 
 ## Running sidecar tools
 
-Tools like CodeRabbit and SonarCloud run via `run-tool`. Arguments after
+Sidecar tools like CodeRabbit run via `run-tool`. Arguments after
 `--` are passed to the tool binary:
 
 ```bash
 terok-executor run-tool coderabbit . -- --pr 42
-terok-executor run-tool sonarcloud . --timeout 300
 ```
 
 ## Custom agents

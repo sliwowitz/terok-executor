@@ -19,22 +19,22 @@ Python when you want library-grade control.
 ## Quick start
 
 ```bash
-pip install terok-executor                        # Python 3.12+, rootless Podman, nft
-terok-executor run claude . -p "Fix the failing test in test_auth.py"
+pip install terok-executor
+terok-executor run claude ~/my-workspace
 ```
 
 The first `run` interactively offers any missing prerequisites — sandbox
-services, container images, agent credentials — one `[Y/n]` prompt
-at a time.  Mandatory items (services, images) block the launch if
+services, container images, agent credentials.
+Mandatory items (services, images) block the launch if
 declined; optional ones (SSH key, auth) print the consequence and
 proceed.
 
-For non-interactive environments, do the bootstrap explicitly first:
+Individual steps would be:
 
 ```bash
-terok-executor setup                              # install sandbox services + build base images
-terok-executor auth claude                        # authenticate (OAuth or API key)
-terok-executor run claude . -p "..."              # idempotent — safe to re-run after upgrades
+terok-executor setup                               # install sandbox services + build base images
+terok-executor auth claude                         # authenticate (OAuth or API key)
+terok-executor run claude <dir> -p "Fix the bug"   # run the agent with an initial prompt
 ```
 
 ## Use as a library
@@ -59,15 +59,16 @@ hardening guarantees.
 
 | Agent | Auth | Description |
 |-------|------|-------------|
-| Claude Code | OAuth, API key | Anthropic Claude Code |
-| Codex | OAuth, API key | OpenAI Codex CLI |
+| Claude Code | OAuth*, API key | Anthropic Claude Code |
+| Codex | OAuth*, API key | OpenAI Codex CLI |
 | Vibe | API key | Mistral Vibe |
-| Copilot | OAuth | GitHub Copilot |
 | OpenCode | API key | Generic LLM endpoint driver — bundled defaults for Helmholtz Blablador, KISSKI AcademicCloud, and your own endpoint |
 | gh | OAuth, API key | GitHub CLI |
 | glab | API key | GitLab CLI |
 | CodeRabbit | API key | CodeRabbit (sidecar tool) |
 | SonarCloud | API key | SonarCloud scanner (sidecar tool) |
+
+\* Claude and Codex OAuth are experimental, and support must be explicitly allowed in the config file. 
 
 `terok-executor agents` lists the live roster (add `--all` to
 include the tool entries).
