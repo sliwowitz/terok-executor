@@ -25,15 +25,16 @@ def ensure_sandbox_ready(
 ) -> None:
     """Generate vault routes, then run the sandbox install aggregator.
 
-    Order matters: the aggregator's vault phase restarts the vault
-    systemd unit, which reads ``routes.json`` at startup.  A bare
-    aggregator call leaves the vault empty of routing config and
-    credential fetch breaks on the next ``terok-executor run`` until
-    the operator remembers to run ``vault routes``.
+    Regenerating ``routes.json`` up front is what makes routing config
+    current before any launch — the per-container supervisor reads it
+    at container start.  A bare aggregator call would leave a stale
+    ``routes.json`` in place and credential fetch would break on the
+    next ``terok-executor run`` until the operator remembers to run
+    ``vault routes``.
 
     ``no_vault`` gates the routes pre-step (if vault isn't being
-    touched, don't regenerate); everything else (``root``, other
-    ``no_*`` flags) flows through to the aggregator.
+    touched, don't regenerate); other ``no_*`` flags flow through to
+    the aggregator.
 
     Routes regeneration renders a ``Vault routes`` stage line so it
     sits in the same column as the aggregator's own output rather

@@ -62,12 +62,8 @@ class TestHandleSetup:
 
     def test_default_runs_sandbox_setup_then_image_build(self, setup_spies) -> None:
         _handle_setup()
-        setup_spies["sandbox_setup"].assert_called_once_with(cfg=None, root=False)
+        setup_spies["sandbox_setup"].assert_called_once_with(cfg=None)
         setup_spies["build_images"].assert_called_once()
-
-    def test_root_flag_propagates_to_sandbox_setup(self, setup_spies) -> None:
-        _handle_setup(root=True)
-        setup_spies["sandbox_setup"].assert_called_once_with(cfg=None, root=True)
 
     def test_no_sandbox_skips_sandbox_setup(self, setup_spies) -> None:
         _handle_setup(no_sandbox=True)
@@ -108,16 +104,12 @@ class TestHandleUninstall:
     def test_keep_images_preserves_image_cache(self, setup_spies) -> None:
         _handle_uninstall(keep_images=True)
         setup_spies["remove_images"].assert_not_called()
-        setup_spies["sandbox_uninstall"].assert_called_once_with(cfg=None, root=False)
+        setup_spies["sandbox_uninstall"].assert_called_once_with(cfg=None)
 
     def test_no_sandbox_skips_sandbox_teardown(self, setup_spies) -> None:
         _handle_uninstall(no_sandbox=True)
         setup_spies["remove_images"].assert_called_once()
         setup_spies["sandbox_uninstall"].assert_not_called()
-
-    def test_root_flag_propagates_to_sandbox_uninstall(self, setup_spies) -> None:
-        _handle_uninstall(root=True)
-        setup_spies["sandbox_uninstall"].assert_called_once_with(cfg=None, root=True)
 
 
 # ── Sandbox-composition helper ────────────────────────────────────────
@@ -150,11 +142,6 @@ class TestEnsureSandboxReady:
         aggregator.side_effect = lambda **_: order.append("sandbox")
         ensure_sandbox_ready()
         assert order == ["routes", "sandbox"]
-
-    def test_threads_root_flag_to_aggregator(self, compose_spies) -> None:
-        _routes, aggregator = compose_spies
-        ensure_sandbox_ready(root=True)
-        assert aggregator.call_args.kwargs["root"] is True
 
     def test_no_vault_skips_route_generation(self, compose_spies) -> None:
         """``--no-vault`` means the vault unit isn't being touched — skip routes too."""

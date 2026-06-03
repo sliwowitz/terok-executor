@@ -33,7 +33,12 @@ if TYPE_CHECKING:
     import subprocess
     from collections.abc import Mapping
 
-    from terok_executor.integrations.sandbox import ContainerRuntime, LifecycleHooks, Sandbox
+    from terok_executor.integrations.sandbox import (
+        ContainerRuntime,
+        LifecycleHooks,
+        PerContainerResources,
+        Sandbox,
+    )
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -147,12 +152,19 @@ class AgentRunner:
         shared_dir: Path | None = None,
         shared_mount: str = "/shared",
         timezone: str | None = None,
+        project_id: str = "",
+        task_id: str = "",
+        dossier_path: Path | str | None = None,
     ) -> str:
         """Launch a headless agent run. Returns container name.
 
         The agent executes the *prompt* against *repo* (local path or git URL)
         and exits when done or when *timeout* is reached.  Set *follow=True*
         to block until the agent finishes (the CLI does this by default).
+
+        *project_id*, *task_id*, *dossier_path* propagate the terok
+        orchestrator's identity into the per-container supervisor sidecar.
+        Defaults preserve the standalone-executor case (no terok above).
         """
         return self._run(
             provider=provider,
@@ -177,6 +189,9 @@ class AgentRunner:
             shared_dir=shared_dir,
             shared_mount=shared_mount,
             timezone=timezone,
+            project_id=project_id,
+            supervisor_task_id=task_id,
+            dossier_path=dossier_path,
         )
 
     def run_interactive(
@@ -198,10 +213,16 @@ class AgentRunner:
         shared_dir: Path | None = None,
         shared_mount: str = "/shared",
         timezone: str | None = None,
+        project_id: str = "",
+        task_id: str = "",
+        dossier_path: Path | str | None = None,
     ) -> str:
         """Launch an interactive container. Returns container name.
 
         The container stays up after init; user logs in via ``podman exec``.
+
+        See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
+        for the *project_id* / *task_id* / *dossier_path* semantics.
         """
         return self._run(
             provider=provider,
@@ -221,6 +242,9 @@ class AgentRunner:
             shared_dir=shared_dir,
             shared_mount=shared_mount,
             timezone=timezone,
+            project_id=project_id,
+            supervisor_task_id=task_id,
+            dossier_path=dossier_path,
         )
 
     def run_web(
@@ -243,10 +267,16 @@ class AgentRunner:
         shared_dir: Path | None = None,
         shared_mount: str = "/shared",
         timezone: str | None = None,
+        project_id: str = "",
+        task_id: str = "",
+        dossier_path: Path | str | None = None,
     ) -> str:
         """Launch a toad web container. Returns container name.
 
         If *port* is None, an available port is auto-allocated.
+
+        See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
+        for the *project_id* / *task_id* / *dossier_path* semantics.
         """
         if port is None:
             with self.runtime.reserve_port() as reservation:
@@ -271,6 +301,9 @@ class AgentRunner:
             shared_dir=shared_dir,
             shared_mount=shared_mount,
             timezone=timezone,
+            project_id=project_id,
+            supervisor_task_id=task_id,
+            dossier_path=dossier_path,
         )
 
     def run_tool(
@@ -285,12 +318,18 @@ class AgentRunner:
         follow: bool = True,
         timeout: int = 600,
         timezone: str | None = None,
+        project_id: str = "",
+        task_id: str = "",
+        dossier_path: Path | str | None = None,
     ) -> str:
         """Launch a sidecar tool container. Returns container name.
 
         Runs the named tool in a lightweight sidecar L1 image (no agent
         CLIs).  The tool receives the real API key from the credential
         store — not a phantom token.
+
+        See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
+        for the *project_id* / *task_id* / *dossier_path* semantics.
         """
         return self._run(
             provider=tool,
@@ -303,6 +342,9 @@ class AgentRunner:
             tool_args=tool_args,
             branch=branch,
             timezone=timezone,
+            project_id=project_id,
+            supervisor_task_id=task_id,
+            dossier_path=dossier_path,
         )
 
     def launch_prepared(
@@ -324,6 +366,10 @@ class AgentRunner:
         hostname: str | None = None,
         annotations: Mapping[str, str] | None = None,
         runtime: str | None = None,
+        project_id: str = "",
+        task_id: str = "",
+        dossier_path: Path | str | None = None,
+        per_container: PerContainerResources | None = None,
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
 
@@ -367,6 +413,27 @@ class AgentRunner:
                 passing ``--runtime`` via *extra_args* — sandbox emits
                 the flag itself and shield reads the value to pick the
                 right firewall topology.
+            project_id: Identity written into the per-container
+                supervisor sidecar so the supervisor can scope its
+                state to the calling terok project.  Default ``""``
+                preserves the standalone-executor case where no terok
+                orchestrator sits above the runner.
+            task_id: Per-task identity written into the supervisor
+                sidecar alongside *project_id*.  Default ``""`` for
+                the standalone case.
+            dossier_path: Path to the per-task dossier file the
+                shield reads at container start.  Default ``None``
+                omits the field from the sidecar — only orchestrated
+                runs carry a dossier.
+            per_container: Pre-allocated per-container socket dir / TCP
+                ports.  When provided, the launch uses these instead of
+                allocating its own — so a caller that already threaded
+                the same instance through env assembly
+                ([`assemble_container_env`][terok_executor.container.env.assemble_container_env])
+                keeps the vault-routing env vars and the supervisor
+                binding on identical ports.  Default ``None`` allocates
+                internally (the standalone path, and external callers
+                that assemble env without per-container routing).
 
         Returns:
             The container name (same as *name*).
@@ -375,7 +442,102 @@ class AgentRunner:
             BuildError: When GPU was requested but the host has no functioning
                 NVIDIA CDI.
         """
-        from terok_executor.integrations.sandbox import GpuConfigError, RunSpec
+        from terok_executor.integrations.sandbox import (
+            GpuConfigError,
+            RunSpec,
+            Sharing,
+            VolumeSpec,
+            allocate_per_container_resources,
+        )
+
+        from .sidecar import write_supervisor_sidecar
+
+        cfg = self.sandbox.config
+
+        # Per-container socket dir / TCP ports.  Allocated here so the
+        # mount, the env vars the in-container bridge reads, and the
+        # sidecar JSON the supervisor reads all see the same values —
+        # the only path that keeps concurrent containers from colliding
+        # on the singletons baked into ``cfg``.  When the caller already
+        # allocated one (``_run`` threads it through env assembly too),
+        # reuse that instance so the vault-routing env vars and this
+        # binding land on identical ports — a second allocation here
+        # would hand back different ports and re-introduce the TCP-mode
+        # cross-container collision.
+        if per_container is None:
+            per_container = allocate_per_container_resources(cfg, name)
+
+        # Bind-mount the per-container socket dir at /run/terok/.  The
+        # supervisor's later-bound vault.sock + ssh-agent.sock surface
+        # inside the container via this single mount (instead of two
+        # singleton file-mounts that two containers would collide on).
+        env = dict(env)
+        volumes = list(volumes)
+        volumes.append(
+            VolumeSpec(
+                per_container.container_runtime_dir,
+                "/run/terok",
+                sharing=Sharing.SHARED,
+                live=True,
+            )
+        )
+        # TCP-mode env vars carry the per-container port, not the
+        # host-singleton ``cfg.token_broker_port`` — the launch flow
+        # routes through the per-container ports only.
+        if cfg.services_mode == "tcp":
+            if per_container.token_broker_port is not None:
+                env["TEROK_TOKEN_BROKER_PORT"] = str(per_container.token_broker_port)
+            if per_container.ssh_signer_port is not None:
+                env["TEROK_SSH_SIGNER_PORT"] = str(per_container.ssh_signer_port)
+            if per_container.gate_port is not None:
+                env["TEROK_GATE_PORT"] = str(per_container.gate_port)
+
+        # The gate is wired when the prepared env carries a gate token
+        # (set by ``_setup_gate`` / the orchestrator).  When active, the
+        # supervisor needs the mirror base path, the token, and — in TCP
+        # mode — the port to serve the gate in-process.
+        gate_active = "TEROK_GATE_TOKEN" in env
+
+        # Write the per-container supervisor sidecar before podman run.
+        # The terok-sandbox OCI hook installed by ``terok-sandbox setup``
+        # reads this file on container start and spawns one supervisor
+        # per container; without it the supervisor refuses to start.
+        sidecar_path = write_supervisor_sidecar(
+            name,
+            cfg=cfg,
+            per_container=per_container,
+            project_id=project_id,
+            task_id=task_id,
+            dossier_path=dossier_path,
+            gate_base_path=str(cfg.gate_base_path) if gate_active else None,
+            gate_token=env["TEROK_GATE_TOKEN"] if gate_active else None,
+            gate_port=per_container.gate_port if gate_active else None,
+        )
+        # Fail closed: a missing sidecar means the supervisor OCI hook
+        # never fires, so the container would launch with no vault,
+        # clearance, or signer behind it. Refuse the launch rather than
+        # run unsupervised.
+        if sidecar_path is None:
+            raise BuildError(
+                f"supervisor sidecar write failed for {name}; refusing to launch "
+                "an unsupervised container (no vault/clearance/signer)"
+            )
+        # The supervisor OCI hook fires only when this annotation is
+        # present (matched by ``when.annotations`` in the hook
+        # descriptor) and reads its value as the sidecar location —
+        # no XDG guessing, one anchor.
+        spec_annotations = dict(annotations or {})
+        spec_annotations["terok.sandbox.sidecar"] = str(sidecar_path)
+
+        loopback_ports = tuple(
+            p
+            for p in (
+                per_container.gate_port,
+                per_container.token_broker_port,
+                per_container.ssh_signer_port,
+            )
+            if p is not None
+        )
 
         spec = RunSpec(
             container_name=name,
@@ -391,8 +553,9 @@ class AgentRunner:
             unrestricted=unrestricted,
             sealed=sealed,
             hostname=hostname,
-            annotations=annotations or {},
+            annotations=spec_annotations,
             runtime=runtime,
+            loopback_ports=loopback_ports,
         )
 
         try:
@@ -605,8 +768,12 @@ class AgentRunner:
         shared_dir: Path | None = None,
         shared_mount: str = "/shared",
         timezone: str | None = None,
+        project_id: str = "",
+        supervisor_task_id: str = "",
+        dossier_path: Path | str | None = None,
     ) -> str:
         """Unified launch flow for all modes (headless, interactive, web, tool)."""
+        from terok_executor.integrations.sandbox import allocate_per_container_resources
         from terok_executor.paths import mounts_dir
 
         from .env import ContainerEnvSpec, assemble_container_env
@@ -614,6 +781,18 @@ class AgentRunner:
         is_tool = mode == "tool"
         task_id = _generate_task_id()
         code_repo, local_path = _resolve_repo(repo)
+
+        # Resolve the container name and allocate the per-container socket
+        # dir / TCP ports ONCE, up front.  The same instance is threaded
+        # into ``assemble_container_env`` (so vault routing — glab
+        # ``GITLAB_API_HOST``, base-URL env, broker port — uses the
+        # per-container port) and into ``launch_prepared`` (so the
+        # supervisor binds those same ports).  Allocating twice would put
+        # the routing env on the host-singleton ``cfg`` port while the
+        # supervisor bound a different one, colliding across concurrent
+        # containers in TCP mode (CWE-284).
+        cname = name or f"terok-executor-{task_id}"
+        per_container = allocate_per_container_resources(self.sandbox.config, cname)
 
         # Ensure images — sidecar L1 for tools, agent L1 for everything else
         if is_tool:
@@ -645,7 +824,12 @@ class AgentRunner:
             if local_path:
                 volumes.append(VolumeSpec(local_path, "/workspace", sharing=Sharing.PRIVATE))
             elif code_repo:
-                effective_repo = self._setup_gate(code_repo, task_id) if gate else code_repo
+                if gate:
+                    effective_repo, gate_token = self._setup_gate(code_repo)
+                    # The launch path wires this into the supervisor sidecar.
+                    env["TEROK_GATE_TOKEN"] = gate_token
+                else:
+                    effective_repo = code_repo
                 env["CODE_REPO"] = effective_repo
                 workspace = task_dir / "workspace"
                 workspace.mkdir(parents=True, exist_ok=True)
@@ -665,11 +849,15 @@ class AgentRunner:
             )
 
             # Resolve workspace and gate URL
+            gate_token = None
             if local_path:
                 ws_host = local_path
                 resolved_code_repo = None
             elif code_repo:
-                effective_repo = self._setup_gate(code_repo, task_id) if gate else code_repo
+                if gate:
+                    effective_repo, gate_token = self._setup_gate(code_repo)
+                else:
+                    effective_repo = code_repo
                 ws_host = task_dir / "workspace"
                 ws_host.mkdir(parents=True, exist_ok=True)
                 _seed_from_cache(ws_host, code_repo, self.sandbox.config, origin_url=effective_repo)
@@ -710,8 +898,12 @@ class AgentRunner:
             result = assemble_container_env(
                 ContainerEnvSpec(**spec_kwargs),
                 self.roster,
+                per_container=per_container,
             )
             env = dict(result.env)
+            if gate_token is not None:
+                # The launch path wires this into the supervisor sidecar.
+                env["TEROK_GATE_TOKEN"] = gate_token
             volumes = list(result.volumes)
 
         # Build command based on mode
@@ -742,13 +934,15 @@ class AgentRunner:
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
-        # Launch
+        # Launch — pass the SAME per_container allocated above so the
+        # supervisor binds the exact ports the vault-routing env vars
+        # point at (no second allocation).
         cname = self.launch_prepared(
             env=env,
             volumes=volumes,
             image=image_tag,
             command=command,
-            name=name or f"terok-executor-{task_id}",
+            name=cname,
             task_dir=task_dir,
             gpu=gpu,
             memory=memory,
@@ -756,6 +950,10 @@ class AgentRunner:
             unrestricted=unrestricted,
             extra_args=extra_args or None,
             hooks=hooks,
+            project_id=project_id,
+            task_id=supervisor_task_id,
+            dossier_path=dossier_path,
+            per_container=per_container,
         )
 
         # Follow output if requested
@@ -800,16 +998,19 @@ class AgentRunner:
 
         return ImageBuilder(self._base_image, self._family).build_sidecar(tool_name=tool_name)
 
-    def _setup_gate(self, repo_url: str, task_id: str) -> str:
-        """Mirror a repo via the sandbox gate and return the gate HTTP URL.
+    def _setup_gate(self, repo_url: str) -> tuple[str, str]:
+        """Mirror a repo via the gate and return ``(gate_url, gate_token)``.
 
         Steps:
         1. Create a bare git mirror under the gate base path
-        2. Ensure the gate server is running
-        3. Create a task-scoped access token
-        4. Construct the HTTP gate URL
+        2. Mint a per-container gate access token
+        3. Construct the HTTP gate URL embedding that token
 
-        The container will clone from this URL — shield blocks all other egress.
+        The gate runs inside the per-container supervisor; the token
+        travels to the container via the sidecar (the caller surfaces it as
+        ``TEROK_GATE_TOKEN`` so the launch path wires it into the sidecar).
+        The container clones from the returned URL; shield blocks all other
+        egress.
         """
         from terok_executor.integrations.sandbox import GitGate
 
@@ -834,10 +1035,9 @@ class AgentRunner:
         )
         gate.sync()
 
-        # Ensure gate server is running, create token, build URL
-        self.sandbox.ensure_gate()
-        token = self.sandbox.create_token(repo_key, task_id)
-        return self.sandbox.gate_url(gate_path, token)
+        # Mint the per-container token and build the URL that embeds it.
+        token = self.sandbox.mint_gate_token()
+        return self.sandbox.gate_url(gate_path, token), token
 
     def _direct_credential_env(self, tool_name: str) -> dict[str, str]:
         """Load the real API key for a sidecar tool and return as env dict.

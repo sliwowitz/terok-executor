@@ -45,7 +45,11 @@ release.  Old containers on protocol N keep running; new containers get
 protocol N+1 and carry the matching host-side code."""
 
 if TYPE_CHECKING:
-    from terok_executor.integrations.sandbox import CredentialDB, SandboxConfig
+    from terok_executor.integrations.sandbox import (
+        CredentialDB,
+        PerContainerResources,
+        SandboxConfig,
+    )
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -228,6 +232,7 @@ def assemble_container_env(
     roster: AgentRoster,
     *,
     caller_manages_vault: bool = False,
+    per_container: PerContainerResources | None = None,
 ) -> ContainerEnvResult:
     """Assemble container environment variables and volume mounts.
 
@@ -325,6 +330,7 @@ def assemble_container_env(
                 vault_transport=spec.vault_transport,
                 vault_required=spec.vault_required,
                 credential_set=spec.credential_set,
+                per_container=per_container,
             )
         )
 
@@ -441,8 +447,9 @@ def _inject_vault_tokens(
     vault_transport: Literal["direct", "socket"] = "direct",
     vault_required: bool = False,
     credential_set: str = "default",
+    per_container: PerContainerResources | None = None,
 ) -> dict[str, str]:
-    """Inject vault phantom tokens if the vault is running.
+    """Inject vault phantom tokens for routed providers.
 
     Handles three orthogonal concerns:
 
@@ -453,27 +460,20 @@ def _inject_vault_tokens(
     - **SSH signer**: creates a phantom token for the SSH signer when the
       scope has registered SSH keys (Phase 3).
 
-    When *vault_required* is ``False`` (standalone default), soft-fails to
-    empty dict.  When ``True`` (terok project mode), raises ``SystemExit``
-    if the vault is unreachable.
-
     *credential_set* selects which vault DB namespace to query — the auth
     flow stores credentials keyed by ``(credential_set, provider)``, and
     the runtime must use the same value to look them back up.
+
+    The per-container supervisor (spawned by the terok-sandbox OCI hook
+    on container start) embeds the vault proxy and binds to the
+    socket/port written into the sidecar config.  Token creation only
+    needs DB access; the broker port is config-derived.  *vault_required*
+    gates DB-level failure handling: a hard failure (terok project mode)
+    versus a soft-fail to an empty dict (standalone default).
     """
-    from terok_executor.integrations.sandbox import SandboxConfig, VaultManager
+    from terok_executor.integrations.sandbox import SandboxConfig
 
     cfg = SandboxConfig()
-    vault = VaultManager(cfg)
-    if not (vault.is_socket_active() or vault.is_daemon_running()):
-        if vault_required:
-            raise SystemExit(
-                "Vault is not running.\n\n"
-                "Start it with:\n"
-                "  terok vault install   (systemd socket activation)\n"
-                "  terok vault start     (manual daemon)"
-            )
-        return {}
 
     vault_routes = roster.vault_routes
     try:
@@ -481,12 +481,7 @@ def _inject_vault_tokens(
     except Exception:
         _logger.exception("Vault DB unavailable")
         if vault_required:
-            raise SystemExit(
-                "Vault DB unavailable. Check logs for details.\n\n"
-                "Start it with:\n"
-                "  terok vault install   (systemd socket activation)\n"
-                "  terok vault start     (manual daemon)"
-            ) from None
+            raise SystemExit("Vault DB unavailable. Check logs for details.") from None
         return {}
 
     try:
@@ -507,16 +502,18 @@ def _inject_vault_tokens(
             credential_types[name] = (cred.get("type") if cred else None) or "api_key"
             tokens[name] = db.create_token(scope, task_id, credential_set, name)
 
-        port = vault.token_broker_port
+        # Per-container port if the caller allocated one (production
+        # path); fallback to the host-singleton ``cfg`` field for tests
+        # + ad-hoc callers that don't pass one.  In production the runner
+        # always provides ``per_container`` so concurrent containers get
+        # distinct ports.
+        port = (
+            per_container.token_broker_port if per_container is not None else cfg.token_broker_port
+        )
     except Exception:
         _logger.exception("Vault token injection failed")
         if vault_required:
-            raise SystemExit(
-                "Vault token injection failed. Check logs for details.\n\n"
-                "Start it with:\n"
-                "  terok vault install   (systemd socket activation)\n"
-                "  terok vault start     (manual daemon)"
-            ) from None
+            raise SystemExit("Vault token injection failed. Check logs for details.") from None
         return {}
     finally:
         db.close()
@@ -530,7 +527,7 @@ def _inject_vault_tokens(
     from terok_executor.credentials.vault_config import resolve_vault_location
     from terok_executor.vault_addr import LOOPBACK_VAULT_PORT, VAULT_LOOPBACK_PORT_ENV
 
-    location = resolve_vault_location()
+    location = resolve_vault_location(token_broker_port=port)
     host_tcp = f"host.containers.internal:{port}" if port else None
     env: dict[str, str] = {}
 
@@ -563,17 +560,24 @@ def _inject_vault_tokens(
     if routed:
         if port:
             env["TEROK_TOKEN_BROKER_PORT"] = str(port)
-        if use_socket:
-            env[VAULT_LOOPBACK_PORT_ENV] = str(LOOPBACK_VAULT_PORT)
+        # The in-container loopback bridge runs in both transports
+        # (socat unix→vault.sock or socat tcp→host:broker), so the URL
+        # http://localhost:9419/v1 is uniform — agents and patched
+        # config files never see per-container host details.
+        env[VAULT_LOOPBACK_PORT_ENV] = str(LOOPBACK_VAULT_PORT)
 
     if ssh_token:
         env["TEROK_SSH_SIGNER_TOKEN"] = ssh_token
         if use_socket:
-            env["TEROK_SSH_SIGNER_SOCKET"] = (
-                f"{_CONTAINER_RUNTIME_DIR}/{cfg.ssh_signer_socket_path.name}"
-            )
+            env["TEROK_SSH_SIGNER_SOCKET"] = f"{_CONTAINER_RUNTIME_DIR}/ssh-agent.sock"
         else:
-            env["TEROK_SSH_SIGNER_PORT"] = str(vault.ssh_signer_port)
+            # Per-container port (production); fallback to cfg (tests).
+            # See ``port`` resolution above for the same shape.
+            ssh_port = (
+                per_container.ssh_signer_port if per_container is not None else cfg.ssh_signer_port
+            )
+            if ssh_port is not None:
+                env["TEROK_SSH_SIGNER_PORT"] = str(ssh_port)
 
     _logger.debug("Vault: injected %d env vars for %s", len(env), routed)
     return env

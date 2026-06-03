@@ -145,8 +145,19 @@ reset_to_current_remote() {
   fi
 }
 
+# Redact any per-container gate token embedded as Basic-Auth in a URL
+# (``http://<token>@host:port/repo``) before printing it.  The real git
+# commands below use the unredacted values; only console/log echoes are
+# scrubbed (CWE-532 — token in logs).  ``//`` replaces all matches; the
+# ``://*@`` glob is non-greedy enough for a single-credential URL.
+redact_url() {
+  # ``${1//:\/\/*@/://<redacted>@}`` collapses ``://anything@`` to
+  # ``://<redacted>@``; a URL without credentials is returned unchanged.
+  printf '%s' "${1//:\/\/*@/://<redacted>@}"
+}
+
 if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
-  echo ">> syncing repo ${CODE_REPO} -> ${REPO_ROOT}"
+  echo ">> syncing repo $(redact_url "${CODE_REPO}") -> ${REPO_ROOT}"
 
   # Make git happy about mounted host-owned dirs
   if command -v git >/dev/null 2>&1; then
@@ -182,7 +193,7 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
       [[ "${_actual}" == "${_url}" ]] && _match=true && break
     done
     if [[ "${_match}" != "true" ]]; then
-      echo ">> cached .git origin mismatch (got: ${_actual:-<none>}); wiping for fresh clone"
+      echo ">> cached .git origin mismatch (got: $(redact_url "${_actual:-<none>}")); wiping for fresh clone"
       find "${REPO_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     fi
   fi
@@ -205,7 +216,7 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     # Clone directly to the target branch if specified, avoiding an extra checkout step
     CLONE_OK=false
     if [[ -n "${TARGET_BRANCH}" ]]; then
-      echo ">> initial clone from ${SRC_REPO} (branch: ${TARGET_BRANCH})"
+      echo ">> initial clone from $(redact_url "${SRC_REPO}") (branch: ${TARGET_BRANCH})"
       CLONE_ERR_FILE="$(mktemp)"
       if git clone --recurse-submodules -b "${TARGET_BRANCH}" "${SRC_REPO}" "${REPO_ROOT}" 2>"${CLONE_ERR_FILE}"; then
         CLONE_OK=true
@@ -225,7 +236,7 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
 
     # Fallback: clone without -b (uses remote's default HEAD)
     if [[ "${CLONE_OK}" != "true" ]]; then
-      echo ">> initial clone from ${SRC_REPO}"
+      echo ">> initial clone from $(redact_url "${SRC_REPO}")"
       git clone --recurse-submodules "${SRC_REPO}" "${REPO_ROOT}"
     fi
 
@@ -314,7 +325,7 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
   if [[ "${CODE_REPO}" == file://* ]]; then
     CURRENT_ORIGIN=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
     if [[ "${CURRENT_ORIGIN}" != "${CODE_REPO}" ]]; then
-      echo ">> gatekeeping mode: fixing origin remote (was: ${CURRENT_ORIGIN})"
+      echo ">> gatekeeping mode: fixing origin remote (was: $(redact_url "${CURRENT_ORIGIN}"))"
       git -C "${REPO_ROOT}" remote set-url origin "${CODE_REPO}" || true
       git -C "${REPO_ROOT}" remote set-url --push origin "${CODE_REPO}" || true
     fi

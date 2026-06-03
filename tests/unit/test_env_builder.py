@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
+from unittest.mock import patch
 
 import pytest
-from terok_sandbox import VolumeSpec
+from terok_sandbox import SandboxConfig, VolumeSpec
 
 from terok_executor.container.env import (
     ContainerEnvResult,
@@ -456,35 +457,11 @@ class TestVaultTokenInjection:
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
         assert "ANTHROPIC_API_KEY" not in result.env
 
-    def test_vault_not_running_returns_no_tokens(self, base_spec, roster):
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=False,
-            ),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
-                return_value=False,
-            ),
-        ):
-            result = assemble_container_env(base_spec, roster, caller_manages_vault=False)
-        assert "ANTHROPIC_API_KEY" not in result.env
-
     def test_vault_running_injects_tokens(self, workspace, envs_dir, roster, tmp_path):
         cfg = _make_vault_db(tmp_path)
         spec = _spec(workspace, envs_dir, credential_scope="test-project")
 
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=False,
-            ),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "ANTHROPIC_API_KEY" in result.env
@@ -494,27 +471,15 @@ class TestVaultTokenInjection:
         """Stored credentials that don't match any vault route produce no tokens."""
         cfg = _make_vault_db(tmp_path, "nonexistent-provider")
         spec = _spec(workspace, envs_dir)
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
         assert "ANTHROPIC_API_KEY" not in result.env
 
     def test_vault_db_error_returns_empty(self, base_spec, roster):
         """DB open failure returns empty env gracefully."""
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch(
-                "terok_sandbox.config.SandboxConfig.open_credential_db",
-                side_effect=OSError("corrupt"),
-            ),
+        with patch(
+            "terok_sandbox.config.SandboxConfig.open_credential_db",
+            side_effect=OSError("corrupt"),
         ):
             result = assemble_container_env(base_spec, roster, caller_manages_vault=False)
         assert "ANTHROPIC_API_KEY" not in result.env
@@ -525,13 +490,7 @@ class TestVaultTokenInjection:
         """OAuth credential selects oauth_phantom_env (e.g. CLAUDE_CODE_OAUTH_TOKEN)."""
         cfg = _make_vault_db(tmp_path, cred_data={"type": "oauth", "access_token": "oa-tok"})
         spec = _spec(workspace, envs_dir, credential_scope="test-project")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "CLAUDE_CODE_OAUTH_TOKEN" in result.env
@@ -543,13 +502,7 @@ class TestVaultTokenInjection:
         """API-key credential uses phantom_env even when oauth_phantom_env exists."""
         cfg = _make_vault_db(tmp_path)
         spec = _spec(workspace, envs_dir, credential_scope="test-project")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "ANTHROPIC_API_KEY" in result.env
@@ -563,10 +516,6 @@ class TestVaultTokenInjection:
         spec = _spec(workspace, envs_dir)
 
         with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
             patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
             patch(
                 "terok_executor.integrations.sandbox.CredentialDB.create_token",
@@ -578,20 +527,9 @@ class TestVaultTokenInjection:
 
     def test_vault_socket_transport_injects_socket_env(self, workspace, envs_dir, roster, tmp_path):
         """Socket transport points socket_env at the mounted host vault socket."""
-        cfg = _make_vault_db(tmp_path)
+        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=None)
         spec = _spec(workspace, envs_dir, credential_scope="proj", vault_transport="socket")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=None,
-            ),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert result.env["ANTHROPIC_UNIX_SOCKET"] == "/run/terok/vault.sock"
@@ -600,20 +538,9 @@ class TestVaultTokenInjection:
         self, workspace, envs_dir, roster, tmp_path
     ):
         """Direct (TCP) transport still sets socket_env — now to the local socat bridge."""
-        cfg = _make_vault_db(tmp_path)
+        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=18731)
         spec = _spec(workspace, envs_dir, credential_scope="proj", vault_transport="direct")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert result.env["ANTHROPIC_UNIX_SOCKET"] == "/tmp/terok-vault.sock"
@@ -623,26 +550,15 @@ class TestVaultTokenInjection:
     ):
         """Socket-only deployments have no TCP broker port; the env must reflect that.
 
-        Under socket transport the broker listens only on the mounted Unix socket,
-        and ``get_token_broker_port`` returns ``None``.  The assembled env must
-        omit the TCP broker port variable rather than interpolate the literal
-        string ``"None"`` — that string would otherwise trip bridge scripts and
-        silently break credential routing.
+        Under socket transport the broker has no TCP listener — the
+        port field on the config is ``None``.  The assembled env must
+        omit the TCP broker port variable rather than interpolate the
+        literal string ``"None"`` — that string would otherwise trip
+        bridge scripts and silently break credential routing.
         """
-        cfg = _make_vault_db(tmp_path)
+        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=None)
         spec = _spec(workspace, envs_dir, credential_scope="proj", vault_transport="socket")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=None,
-            ),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_TOKEN_BROKER_PORT" not in result.env
@@ -654,67 +570,73 @@ class TestVaultTokenInjection:
         # stands up its TCP→UNIX bridge.
         assert result.env.get("TEROK_VAULT_LOOPBACK_PORT") == "9419"
 
-    def test_vault_required_raises_when_unreachable(self, workspace, envs_dir, roster):
-        """vault_required=True raises SystemExit when vault is not running."""
-        spec = _spec(workspace, envs_dir, vault_required=True)
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=False,
-            ),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
-                return_value=False,
-            ),
-            pytest.raises(SystemExit, match="Vault is not running"),
-        ):
-            assemble_container_env(spec, roster, caller_manages_vault=False)
-
-    def test_vault_not_required_soft_fails(self, workspace, envs_dir, roster):
-        """vault_required=False (default) returns empty env when vault is down."""
-        spec = _spec(workspace, envs_dir, vault_required=False)
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=False,
-            ),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
-                return_value=False,
-            ),
-        ):
-            result = assemble_container_env(spec, roster, caller_manages_vault=False)
-        assert "ANTHROPIC_API_KEY" not in result.env
-
     def test_vault_injects_ssh_signer_token(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected when scope has valid keys in ssh-keys.json."""
-        cfg = _make_vault_db_with_ssh_keys(tmp_path)
+        cfg = dataclasses.replace(_make_vault_db_with_ssh_keys(tmp_path), ssh_signer_port=18732)
         spec = _spec(workspace, envs_dir, credential_scope="myproj")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_SSH_SIGNER_TOKEN" in result.env
         assert result.env["TEROK_SSH_SIGNER_TOKEN"].startswith("terok-p-")
-        assert "TEROK_SSH_SIGNER_PORT" in result.env
+        assert result.env["TEROK_SSH_SIGNER_PORT"] == "18732"
         assert "TEROK_SSH_SIGNER_SOCKET" not in result.env
+
+    def test_per_container_broker_port_wins_over_cfg_singleton(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """Production path: when the runner passes ``per_container``, the broker
+        port comes from *that* allocation, not cfg's host-singleton field.
+
+        Concurrent containers each get a distinct broker port; reading the
+        singleton ``cfg.token_broker_port`` would collide them.  The cfg
+        field is deliberately set to a *different* value so a regression
+        that ignored ``per_container`` would surface here.
+        """
+        from terok_sandbox import PerContainerResources
+
+        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=19000)
+        spec = _spec(workspace, envs_dir, credential_scope="test-project", vault_transport="direct")
+        per_container = PerContainerResources(
+            container_runtime_dir=Path("/run/terok/sandbox/run/c"),
+            token_broker_port=20555,
+            ssh_signer_port=20556,
+            gate_port=20557,
+        )
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            result = assemble_container_env(
+                spec, roster, caller_manages_vault=False, per_container=per_container
+            )
+
+        assert result.env["TEROK_TOKEN_BROKER_PORT"] == "20555"
+
+    def test_per_container_ssh_signer_port_wins_over_cfg_singleton(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """Same per-container precedence for the SSH signer port (TCP/direct)."""
+        from terok_sandbox import PerContainerResources
+
+        cfg = dataclasses.replace(_make_vault_db_with_ssh_keys(tmp_path), ssh_signer_port=18732)
+        spec = _spec(workspace, envs_dir, credential_scope="myproj", vault_transport="direct")
+        per_container = PerContainerResources(
+            container_runtime_dir=Path("/run/terok/sandbox/run/c"),
+            token_broker_port=20555,
+            ssh_signer_port=20999,
+            gate_port=20557,
+        )
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            result = assemble_container_env(
+                spec, roster, caller_manages_vault=False, per_container=per_container
+            )
+
+        assert result.env["TEROK_SSH_SIGNER_TOKEN"].startswith("terok-p-")
+        assert result.env["TEROK_SSH_SIGNER_PORT"] == "20999"
 
     def test_vault_ssh_signer_socket_transport(self, workspace, envs_dir, roster, tmp_path):
         """Socket transport injects TEROK_SSH_SIGNER_SOCKET instead of _PORT."""
         cfg = _make_vault_db_with_ssh_keys(tmp_path)
         spec = _spec(workspace, envs_dir, credential_scope="myproj", vault_transport="socket")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_SSH_SIGNER_TOKEN" in result.env
@@ -725,13 +647,7 @@ class TestVaultTokenInjection:
         """No SSH signer token when ssh-keys.json has no entry for scope."""
         cfg = _make_vault_db(tmp_path)
         spec = _spec(workspace, envs_dir, credential_scope="no-keys-project")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_SSH_SIGNER_TOKEN" not in result.env
@@ -751,13 +667,7 @@ class TestVaultTokenInjection:
         scoped_spec = _spec(
             workspace, envs_dir, credential_scope="my-proj", credential_set="my-proj"
         )
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             default_result = assemble_container_env(
                 default_spec, roster, caller_manages_vault=False
             )
@@ -791,13 +701,7 @@ class TestVaultTokenInjection:
             db.close()
 
         spec = _spec(workspace, envs_dir, credential_scope="sshonly")
-        with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
-            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
-        ):
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_SSH_SIGNER_TOKEN" in result.env
@@ -806,18 +710,19 @@ class TestVaultTokenInjection:
         assert "ANTHROPIC_API_KEY" not in result.env
 
     def test_vault_required_hard_fails_on_db_error(self, workspace, envs_dir, roster):
-        """vault_required=True raises SystemExit on credential-DB open failure."""
+        """vault_required=True raises SystemExit on credential-DB open failure.
+
+        Post-supervisor-refactor the daemon-liveness probe is gone, but
+        a DB open failure is still a hard stop in project-required mode
+        because token creation cannot proceed without a usable DB.
+        """
         spec = _spec(workspace, envs_dir, vault_required=True)
         with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
             patch(
                 "terok_sandbox.config.SandboxConfig.open_credential_db",
                 side_effect=OSError("corrupt"),
             ),
-            pytest.raises(SystemExit, match="DB unavailable.*Check logs"),
+            pytest.raises(SystemExit, match="DB unavailable"),
         ):
             assemble_container_env(spec, roster, caller_manages_vault=False)
 
@@ -826,16 +731,12 @@ class TestVaultTokenInjection:
         cfg = _make_vault_db(tmp_path)
         spec = _spec(workspace, envs_dir, vault_required=True)
         with (
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=True,
-            ),
             patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
             patch(
                 "terok_executor.integrations.sandbox.CredentialDB.create_token",
                 side_effect=RuntimeError("boom"),
             ),
-            pytest.raises(SystemExit, match="injection failed.*Check logs"),
+            pytest.raises(SystemExit, match="injection failed"),
         ):
             assemble_container_env(spec, roster, caller_manages_vault=False)
 
@@ -925,13 +826,9 @@ class TestSharedConfigPatches:
         codex_dir = tmp_path / "_codex-config"
         codex_dir.mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path)
 
@@ -944,11 +841,15 @@ class TestSharedConfigPatches:
         providers = data.get("providers", [])
         mistral = next((p for p in providers if p.get("name") == "mistral"), None)
         assert mistral is not None, "config.toml must contain a mistral provider entry"
-        assert "host.containers.internal:18731" in mistral["api_base"]
+        # The container-side vault URL is uniform across transports: an
+        # in-container bridge re-targets ``localhost:9419`` to either a unix
+        # socket (socket mode) or the host's per-container TCP port (tcp mode),
+        # so config patches always pin to the well-known loopback endpoint.
+        assert "localhost:9419" in mistral["api_base"]
 
         codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
-        assert codex_cfg["openai_base_url"] == "http://host.containers.internal:18731/v1"
-        assert codex_cfg["chatgpt_base_url"] == "http://host.containers.internal:18731/backend-api/"
+        assert codex_cfg["openai_base_url"] == "http://localhost:9419/v1"
+        assert codex_cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
 
     def test_assemble_env_calls_patches_with_and_without_bypass(self, workspace, envs_dir, roster):
         """assemble_container_env invokes patches regardless of caller_manages_vault."""
@@ -974,13 +875,9 @@ class TestSharedConfigPatches:
         vibe_dir = tmp_path / "_vibe-config"
         vibe_dir.mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path)
             apply_shared_config_patches(roster, tmp_path)
@@ -1002,13 +899,9 @@ class TestSharedConfigPatches:
         (tmp_path / "_vibe-config").mkdir()
         (tmp_path / "_codex-config").mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path, providers=frozenset({"vibe"}))
 
@@ -1021,13 +914,9 @@ class TestSharedConfigPatches:
 
         (tmp_path / "_codex-config").mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
 
@@ -1041,8 +930,8 @@ class TestSharedConfigPatches:
             {
                 "kind": "toml_top",
                 "values": {
-                    "openai_base_url": "http://host.containers.internal:18731/v1",
-                    "chatgpt_base_url": "http://host.containers.internal:18731/backend-api/",
+                    "openai_base_url": "http://localhost:9419/v1",
+                    "chatgpt_base_url": "http://localhost:9419/backend-api/",
                 },
             }
         ]
@@ -1053,13 +942,9 @@ class TestSharedConfigPatches:
 
         (tmp_path / "_codex-config").mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
 
@@ -1084,20 +969,16 @@ class TestSharedConfigPatches:
         codex_dir = tmp_path / "_codex-config"
         codex_dir.mkdir()
 
-        with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
-            ),
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
         ):
             apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
 
         config_path = codex_dir / "config.toml"
         config_path.write_text(
             'openai_base_url = "https://user.example/v1"\n'
-            'chatgpt_base_url = "http://host.containers.internal:18731/backend-api/"\n'
+            'chatgpt_base_url = "http://localhost:9419/backend-api/"\n'
         )
 
         apply_shared_config_patches(
@@ -1114,15 +995,18 @@ class TestSharedConfigPatches:
         assert not (codex_dir / ".terok-managed-config.json").exists()
 
     def test_disabled_provider_does_not_resolve_vault_location(self, roster, tmp_path):
-        """Pure removal does not require the vault to have an address."""
+        """Pure removal does not require the vault to have an address.
+
+        ``resolve_vault_location`` is the only path that reads the
+        broker port — confirm a removal-only call never touches it
+        by failing if the helper is invoked at all.
+        """
         from terok_executor.credentials.vault_config import apply_shared_config_patches
 
         (tmp_path / "_codex-config").mkdir()
 
-        with patch.object(
-            __import__("terok_sandbox", fromlist=["VaultManager"]).VaultManager,
-            "token_broker_port",
-            new_callable=PropertyMock,
+        with patch(
+            "terok_executor.credentials.vault_config.resolve_vault_location",
             side_effect=AssertionError("vault location should not be resolved"),
         ):
             apply_shared_config_patches(
@@ -1176,11 +1060,9 @@ class TestConfigPatchSecurity:
         (vibe_dir / "config.toml").mkdir()
 
         with (
-            patch("terok_executor.integrations.sandbox.SandboxConfig"),
             patch(
-                "terok_executor.integrations.sandbox.VaultManager.token_broker_port",
-                new_callable=PropertyMock,
-                return_value=18731,
+                "terok_executor.integrations.sandbox.SandboxConfig",
+                return_value=SandboxConfig(token_broker_port=18731),
             ),
             pytest.raises(ConfigPatchError, match="Failed to apply"),
         ):

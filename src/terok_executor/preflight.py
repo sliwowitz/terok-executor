@@ -117,11 +117,11 @@ class Preflight:
         return True
 
     def _require_sandbox_services(self) -> bool:
-        """Install shield+vault+gate if needed; report remaining gap if not."""
+        """Install shield hooks if needed; report remaining gap if not."""
         r = self.check_sandbox_services()
         if not r.ok and self.interactive:
             print(f"  {r.name}... {r.message}")
-            if self._confirm("Install shield + vault + gate now?") and _fix_sandbox_services():
+            if self._confirm("Install shield hooks now?") and _fix_sandbox_services():
                 r = self.check_sandbox_services()
         _print_step(r)
         if not r.ok:
@@ -231,61 +231,28 @@ class Preflight:
         return CheckResult("git", True, "ok")
 
     def check_sandbox_services(self) -> CheckResult:  # noqa: PLR6301
-        """Roll vault + shield-hooks + gate into a single readiness verdict.
+        """Verify the shield OCI hooks are installed.
 
-        Treated as a unit because the first two — vault and shield — are
-        installed by the sandbox aggregator and fail the same way on a
-        fresh host.  Reporting each individually would just clutter the
-        first-run summary.
-
-        The gate is special-cased: when it's missing because the host has
-        *no way to run it* (no systemd to install units, no git binary to
-        drive mirrors), the verdict reports "gate unavailable: …" as a
-        contextual note rather than a remediation item.  Operators on
-        OpenRC / Gentoo or minimal images see the consequence named
-        instead of being told to "run terok-executor setup" — which
-        wouldn't fix the underlying gap.
+        The vault and git gate are not host services: the per-container
+        supervisor (spawned by the terok-sandbox OCI hook) embeds the
+        vault proxy *and* serves the git gate in-process, both starting
+        on demand.  The only host-side service that must exist before a
+        launch is therefore the shield OCI hooks; the git binary that
+        drives gate mirrors is surfaced separately by
+        [`check_git`][terok_executor.preflight.Preflight.check_git].
         """
-        from terok_executor.integrations.sandbox import (
-            GateServerManager,
-            SandboxConfig,
-            VaultManager,
-            check_environment,
-        )
+        from terok_executor.integrations.sandbox import SandboxConfig, check_environment
 
-        # One SandboxConfig read covers every downstream probe — each of the
-        # helpers below would otherwise rebuild it from layered YAML.
+        # One SandboxConfig read keeps the probe from rebuilding it from
+        # layered YAML on every call.
         cfg = SandboxConfig()
-        vault = VaultManager(cfg)
-        gate = GateServerManager(cfg)
-        missing: list[str] = []
-        if not (vault.is_socket_active() or vault.is_daemon_running()):
-            missing.append("vault")
-        if check_environment(cfg).health != "ok":
-            missing.append("shield hooks")
-
-        gate_running = gate.get_status().mode in ("systemd", "daemon")
-        gate_reason: str | None = None
-        if not gate_running:
-            # Distinguish "operator hasn't installed it yet" (fixable via
-            # `terok-executor setup`) from "the host can't host one" (don't
-            # send the operator to a setup command that won't help).
-            if not shutil.which("git"):
-                gate_reason = "no git on PATH"
-            elif not gate.is_systemd_available():
-                gate_reason = "no systemd — gate has no managed-daemon fallback yet"
-            else:
-                missing.append("gate")
-
-        if missing:
-            return CheckResult("sandbox services", False, f"missing: {', '.join(missing)}")
-        if gate_reason:
-            return CheckResult(
-                "sandbox services",
-                True,
-                f"shield + vault ready; gate unavailable: {gate_reason}",
-            )
-        return CheckResult("sandbox services", True, "shield + vault + gate ready")
+        # "bypass" means the hooks are installed but the operator opted
+        # out — that's a ready environment (the bypass itself is surfaced
+        # as a warning by ``_note_shield_bypass``), so only a genuinely
+        # missing/broken environment fails the check.
+        if check_environment(cfg).health not in ("ok", "bypass"):
+            return CheckResult("sandbox services", False, "missing: shield hooks")
+        return CheckResult("sandbox services", True, "shield ready")
 
     def check_images(self) -> CheckResult:
         """Check whether L0+L1 container images exist."""
@@ -376,12 +343,7 @@ class Preflight:
 
 
 def _fix_sandbox_services() -> bool:
-    """Self-heal missing sandbox services via [`ensure_sandbox_ready`][terok_executor.ensure_sandbox_ready].
-
-    Always per-user — the interactive preflight never escalates to
-    sudo behind the operator's back.  ``--root`` is the explicit
-    opt-in via ``terok-executor setup``.
-    """
+    """Self-heal missing sandbox services via [`ensure_sandbox_ready`][terok_executor.sandbox.ensure_sandbox_ready]."""
     from terok_executor.sandbox import ensure_sandbox_ready
 
     try:

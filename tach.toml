@@ -166,6 +166,15 @@ depends_on = [
     "terok_executor.vault_addr",
 ]
 
+# Per-container supervisor sidecar writer — pure JSON write under
+# state_dir; standalone so the runner and any future entry layer can
+# call it without pulling the full container/env graph.  The
+# SandboxConfig parameter type is only resolved under TYPE_CHECKING,
+# so no runtime depends_on is needed.
+[[modules]]
+path = "terok_executor.container.sidecar"
+depends_on = []
+
 # Agent runner facade — composes sandbox + agent config + container launch
 [[modules]]
 path = "terok_executor.container.runner"
@@ -174,6 +183,7 @@ depends_on = [
     "terok_executor.container.build",
     "terok_executor.container.cache",
     "terok_executor.container.env",
+    "terok_executor.container.sidecar",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
     "terok_executor.provider.agents",

@@ -84,6 +84,25 @@ def _isolate_user_paths(
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(fake_home / "run"))
     for var in _TEROK_PATH_OVERRIDE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    # ``terok_executor.cli`` mutates ``os.environ["TEROK_CONFIG_FILE"]``
+    # for ``--config`` / ``--raw`` directly (not via monkeypatch), so an
+    # earlier in-process ``_run_cli`` would leak across tests.
+    monkeypatch.delenv("TEROK_CONFIG_FILE", raising=False)
+    # CI containers whose ``uid_map`` maps ``geteuid()`` → 0 trip the
+    # post-userns ``_is_root()`` → paths route to ``/var/lib/terok``.
+    # Tests run as non-root by definition.
+    monkeypatch.setattr("terok_util.paths._is_root", lambda: False)
+    # Process-wide caches that latch on first read — a TCP-flavoured
+    # earlier test would otherwise leave ``token_broker_port`` non-None
+    # for every following test resolving through the registry.
+    from terok_sandbox import config as _cfg
+    from terok_sandbox.port_registry import _default as _port_registry
+    from terok_util.paths import _reset_config_caches_for_tests
+
+    _reset_config_caches_for_tests()
+    _cfg._credentials_section.cache_clear()
+    _cfg._shield_section.cache_clear()
+    _port_registry._service_ports = None
 
 
 @pytest.fixture(autouse=True)

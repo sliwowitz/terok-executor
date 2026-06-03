@@ -519,7 +519,6 @@ def _handle_stop(*, name: str) -> None:
 def _handle_setup(
     *,
     check: bool = False,
-    root: bool = False,
     no_sandbox: bool = False,
     no_images: bool = False,
     base: str = DEFAULT_BASE_IMAGE,
@@ -528,10 +527,10 @@ def _handle_setup(
 ) -> None:
     """Bootstrap the full terok-executor stack on a fresh host.
 
-    Installs the sandbox services (shield hooks + vault + gate) and
-    builds the L0+L1 container images.  ``--check`` reports status
-    without touching anything and exits non-zero when something is
-    missing.
+    Installs the sandbox services (shield hooks + gate, plus
+    credentials-DB provisioning) and builds the L0+L1 container
+    images.  ``--check`` reports status without touching anything and
+    exits non-zero when something is missing.
     """
     if check:
         _print_setup_status(base)
@@ -540,7 +539,7 @@ def _handle_setup(
     if not no_sandbox:
         from .sandbox import ensure_sandbox_ready
 
-        ensure_sandbox_ready(cfg=cfg, root=root)
+        ensure_sandbox_ready(cfg=cfg)
 
     if not no_images:
         _build_images_with_banner(base, family)
@@ -553,7 +552,6 @@ def _handle_setup(
 
 def _handle_uninstall(
     *,
-    root: bool = False,
     no_sandbox: bool = False,
     keep_images: bool = False,
     base: str = DEFAULT_BASE_IMAGE,
@@ -562,7 +560,7 @@ def _handle_uninstall(
     """Remove everything ``terok-executor setup`` installed.
 
     Reverse of setup: images first (cheap to rebuild, safe to drop),
-    then ``sandbox uninstall`` for the shield/vault/gate teardown.
+    then ``sandbox uninstall`` for the shield + gate teardown.
     ``--keep-images`` preserves the image cache so a re-install skips
     the slow rebuild step.
     """
@@ -571,7 +569,7 @@ def _handle_uninstall(
     if not no_sandbox:
         from terok_executor.integrations.sandbox import _handle_sandbox_uninstall
 
-        _handle_sandbox_uninstall(cfg=cfg, root=root)
+        _handle_sandbox_uninstall(cfg=cfg)
 
     print()
     print("Uninstall complete.")
@@ -892,15 +890,10 @@ SETUP_COMMAND = CommandDef(
             help="Report status without installing anything; exit non-zero if incomplete",
         ),
         ArgDef(
-            name="--root",
-            action="store_true",
-            help="Install shield hooks system-wide (requires sudo); vault + gate stay per-user",
-        ),
-        ArgDef(
             name="--no-sandbox",
             action="store_true",
             dest="no_sandbox",
-            help="Skip the shield+vault+gate install (caller manages these)",
+            help="Skip sandbox setup (shield hooks, gate, and credentials-DB provisioning)",
         ),
         ArgDef(
             name="--no-images",
@@ -927,15 +920,10 @@ UNINSTALL_COMMAND = CommandDef(
     handler=_handle_uninstall,
     args=(
         ArgDef(
-            name="--root",
-            action="store_true",
-            help="Remove shield hooks from the system hooks directory (requires sudo)",
-        ),
-        ArgDef(
             name="--no-sandbox",
             action="store_true",
             dest="no_sandbox",
-            help="Skip the shield+vault+gate uninstall",
+            help="Skip the shield+gate uninstall",
         ),
         ArgDef(
             name="--keep-images",

@@ -83,9 +83,14 @@ def write_vault_config(provider_name: str) -> None:
     if not auth_info:
         return
 
+    from terok_executor.integrations.sandbox import SandboxConfig
     from terok_executor.paths import mounts_dir
 
-    location = resolve_vault_location()
+    # Shared-mount patches are host-singletons (one file per provider,
+    # mounted into every container).  Use the cfg's singleton broker
+    # port — per-container ports would need per-container config files,
+    # which is a deeper refactor.
+    location = resolve_vault_location(SandboxConfig().token_broker_port)
 
     patch = route.shared_config_patch
     shared_dir = mounts_dir() / auth_info.host_dir_name
@@ -157,7 +162,11 @@ def apply_shared_config_patches(
     if not patched_routes:
         return
 
-    location = resolve_vault_location()
+    from terok_executor.integrations.sandbox import SandboxConfig
+
+    # See note in ``write_vault_config`` — shared mounts force a
+    # singleton port here regardless of per-container allocation.
+    location = resolve_vault_location(SandboxConfig().token_broker_port)
 
     for name, route in patched_routes.items():
         auth_info = roster.auth_providers.get(name)
@@ -188,33 +197,28 @@ def apply_shared_config_patches(
             ) from exc
 
 
-def resolve_vault_location() -> VaultLocation:
-    """Resolve the container-side vault addresses for the active transport.
+def resolve_vault_location(token_broker_port: int | None = None) -> VaultLocation:
+    """Return the in-container vault address.
 
-    Reads the sandbox config once to decide whether we're in socket or TCP
-    mode.  Exposed as a public helper so the env builder can use the same
-    values it later writes to config files.
+    URL is always the loopback bridge on
+    [`LOOPBACK_VAULT_PORT`][terok_executor.vault_addr.LOOPBACK_VAULT_PORT]
+    — the bridge runs in both transports and forwards to the
+    transport-specific target (host unix socket or per-container host
+    TCP port).  *token_broker_port* picks the socket-facade shape for
+    socket-only clients: ``/run/terok/vault.sock`` in socket mode (the
+    bind-mounted host socket), ``/tmp/terok-vault.sock`` in TCP mode
+    (in-container socat unix→host-TCP).
     """
-    from terok_executor.integrations.sandbox import SandboxConfig, VaultManager
     from terok_executor.vault_addr import (
         CONTAINER_VAULT_SOCKET,
         LOOPBACK_BRIDGE_SOCKET,
         LOOPBACK_VAULT_PORT,
     )
 
-    port = VaultManager(SandboxConfig()).token_broker_port
-    if port is None:
-        # Socket mode: container mounts the host vault socket directly; the
-        # loopback bridge serves clients that can only speak HTTP-over-TCP.
-        return VaultLocation(
-            url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
-            socket=CONTAINER_VAULT_SOCKET,
-        )
-    # TCP mode: direct broker on the host; socat on the container side turns
-    # a local Unix socket into a TCP connection for socket-only clients.
+    socket = LOOPBACK_BRIDGE_SOCKET if token_broker_port is not None else CONTAINER_VAULT_SOCKET
     return VaultLocation(
-        url=f"http://host.containers.internal:{port}",
-        socket=LOOPBACK_BRIDGE_SOCKET,
+        url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
+        socket=socket,
     )
 
 

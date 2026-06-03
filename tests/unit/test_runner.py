@@ -426,8 +426,15 @@ class TestLaunchPrepared:
         spec = sandbox.run.call_args[0][0]
         assert spec.annotations["dossier.meta_path"] == "/var/lib/terok/tasks/t1.json"
 
-    def test_annotations_default_empty(self, tmp_path: Path) -> None:
-        """Omitting *annotations* leaves RunSpec.annotations empty."""
+    def test_annotations_default_only_sidecar(self, tmp_path: Path) -> None:
+        """Omitting *annotations* leaves only the supervisor sidecar pointer.
+
+        Every terok-managed container now carries
+        ``terok.sandbox.sidecar=<abspath>`` so the OCI hook can find
+        the sidecar JSON; that's the trigger annotation, not caller
+        metadata, so it must be present even when the caller passed
+        no other annotations.
+        """
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
@@ -441,7 +448,8 @@ class TestLaunchPrepared:
         )
 
         spec = sandbox.run.call_args[0][0]
-        assert dict(spec.annotations) == {}
+        assert set(spec.annotations) == {"terok.sandbox.sidecar"}
+        assert spec.annotations["terok.sandbox.sidecar"].endswith("/sidecar/c.json")
 
     def test_runtime_propagates_to_runspec(self, tmp_path: Path) -> None:
         """``runtime="krun"`` lands on ``RunSpec.runtime`` — the typed channel
@@ -541,6 +549,286 @@ class TestLaunchPrepared:
                 task_dir=tmp_path,
                 gpu=True,
             )
+
+    def test_sidecar_identity_propagates(self, tmp_path: Path) -> None:
+        """``project_id`` / ``task_id`` / ``dossier_path`` reach the sidecar JSON.
+
+        The OCI prestart hook fires between ``podman create`` and
+        ``podman start``, so the supervisor must see the enriched
+        identity *before* the container is created — i.e. written
+        synchronously from inside ``launch_prepared`` rather than
+        rewritten after ``sandbox.run`` returns.
+        """
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+        dossier = tmp_path / "dossier.toml"
+        dossier.write_text("")
+
+        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+                project_id="proj-abc",
+                task_id="task-42",
+                dossier_path=dossier,
+            )
+
+        write_sidecar.assert_called_once()
+        kwargs = write_sidecar.call_args.kwargs
+        assert kwargs["project_id"] == "proj-abc"
+        assert kwargs["task_id"] == "task-42"
+        assert kwargs["dossier_path"] == dossier
+
+    def test_sidecar_identity_defaults_to_empty(self, tmp_path: Path) -> None:
+        """Standalone runs (no terok above) leave identity blank."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        kwargs = write_sidecar.call_args.kwargs
+        assert kwargs["project_id"] == ""
+        assert kwargs["task_id"] == ""
+        assert kwargs["dossier_path"] is None
+
+    def test_gate_fields_written_when_token_in_env(self, tmp_path: Path) -> None:
+        """A ``TEROK_GATE_TOKEN`` in the env wires the gate into the sidecar.
+
+        The supervisor serves the gate in-process, so the launch path
+        must carry the mirror base, the token, and the gate port into
+        the sidecar whenever the prepared env signals an active gate.
+        """
+        sandbox = _mock_sandbox()
+        cfg = sandbox.config
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={"TEROK_GATE_TOKEN": "terok-g-cafef00d"},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        kwargs = write_sidecar.call_args.kwargs
+        assert kwargs["gate_token"] == "terok-g-cafef00d"
+        assert kwargs["gate_base_path"] == str(cfg.gate_base_path)
+        # gate_port mirrors the per-container allocation (None in socket mode).
+        assert "gate_port" in kwargs
+
+    def test_gate_fields_absent_without_token(self, tmp_path: Path) -> None:
+        """No gate token in the env → no gate config in the sidecar."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        kwargs = write_sidecar.call_args.kwargs
+        assert kwargs["gate_token"] is None
+        assert kwargs["gate_base_path"] is None
+        assert kwargs["gate_port"] is None
+
+
+class TestLaunchPreparedSupervisorWiring:
+    """Per-container supervisor wiring in ``launch_prepared``.
+
+    Covers the launch-side glue the supervisor refactor added: the
+    fail-closed refusal when the sidecar can't be written, the
+    per-container TCP-mode env vars, and the ``loopback_ports`` tuple
+    shield uses to allow-list the supervisor's listeners.
+    """
+
+    def test_sidecar_write_failure_fails_closed(self, tmp_path: Path) -> None:
+        """A ``None`` from the sidecar writer refuses the launch.
+
+        A missing sidecar means the supervisor OCI hook never fires, so
+        the container would run with no vault / clearance / signer.  The
+        launch must raise ``BuildError`` rather than start unsupervised —
+        and never reach ``sandbox.run``.
+        """
+        from terok_executor.container.build import BuildError
+
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch(
+            "terok_executor.container.sidecar.write_supervisor_sidecar",
+            return_value=None,
+        ):
+            with pytest.raises(BuildError, match="refusing to launch an unsupervised container"):
+                runner.launch_prepared(
+                    env={},
+                    volumes=[],
+                    image="img",
+                    command=[],
+                    name="c",
+                    task_dir=tmp_path,
+                )
+
+        sandbox.run.assert_not_called()
+
+    def test_socket_mode_omits_per_container_port_env(self, tmp_path: Path) -> None:
+        """Socket mode allocates no TCP ports, so no broker/signer port env vars."""
+        sandbox = _mock_sandbox()  # default SandboxConfig() is socket mode
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert "TEROK_TOKEN_BROKER_PORT" not in spec.env
+        assert "TEROK_SSH_SIGNER_PORT" not in spec.env
+        assert "TEROK_GATE_PORT" not in spec.env
+        # No TCP listeners → empty loopback allow-list.
+        assert spec.loopback_ports == ()
+
+    def test_tcp_mode_injects_per_container_ports(self, tmp_path: Path) -> None:
+        """TCP mode carries the per-container broker/signer ports into the env
+        and the ``loopback_ports`` tuple — never cfg's host-singleton field.
+
+        Port allocation picks fresh free OS ports each call, so we pin the
+        allocator to a fixed [`PerContainerResources`][terok_sandbox.PerContainerResources]
+        and assert the launch path threads exactly those values through.
+        """
+        from terok_sandbox import PerContainerResources, SandboxConfig
+
+        sandbox = _mock_sandbox()
+        sandbox.config = SandboxConfig(
+            state_dir=tmp_path / "state",
+            vault_dir=tmp_path / "credentials",
+            services_mode="tcp",
+        )
+        runner = AgentRunner(sandbox=sandbox)
+        fixed = PerContainerResources(
+            container_runtime_dir=Path("/run/terok/sandbox/run/c"),
+            token_broker_port=51001,
+            ssh_signer_port=51002,
+            gate_port=51003,
+        )
+
+        with patch(
+            "terok_executor.integrations.sandbox.allocate_per_container_resources",
+            return_value=fixed,
+        ):
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.env["TEROK_TOKEN_BROKER_PORT"] == "51001"
+        assert spec.env["TEROK_SSH_SIGNER_PORT"] == "51002"
+        assert spec.env["TEROK_GATE_PORT"] == "51003"
+        # loopback_ports is the (gate, broker, ssh) listeners, all present in TCP mode.
+        assert set(spec.loopback_ports) == {51001, 51002, 51003}
+        assert len(spec.loopback_ports) == 3
+
+    def test_run_threads_one_per_container_through_env_and_launch(self, tmp_path: Path) -> None:
+        """``_run`` allocates per-container resources ONCE and threads the same
+        instance into both env assembly and the launch.
+
+        Regression for CWE-284: previously ``_run`` let ``assemble_container_env``
+        compute vault routing (glab ``GITLAB_API_HOST``, base-URL env, broker
+        port) off the host-singleton ``cfg.token_broker_port`` while
+        ``launch_prepared`` allocated its OWN per-container ports for the
+        supervisor binding — so the routing env and the bound ports diverged and
+        collided across concurrent containers in TCP mode.  The allocator must
+        fire exactly once, and the ``per_container`` env assembly sees must be
+        the very instance whose ports the supervisor binds (``loopback_ports``).
+        """
+        from terok_sandbox import PerContainerResources, SandboxConfig
+
+        import terok_executor.container.env as env_mod
+
+        sandbox = _mock_sandbox()
+        sandbox.config = SandboxConfig(
+            state_dir=tmp_path / "state",
+            vault_dir=tmp_path / "credentials",
+            services_mode="tcp",
+        )
+        runner = AgentRunner(sandbox=sandbox)
+        fixed = PerContainerResources(
+            container_runtime_dir=Path("/run/terok/sandbox/run/c"),
+            token_broker_port=52001,
+            ssh_signer_port=52002,
+            gate_port=52003,
+        )
+
+        seen: dict[str, object] = {}
+        real_assemble = env_mod.assemble_container_env
+
+        def _spy_assemble(spec, roster, **kwargs):  # type: ignore[no-untyped-def]
+            seen["per_container"] = kwargs.get("per_container")
+            return real_assemble(spec, roster, **kwargs)
+
+        with (
+            patch(
+                "terok_executor.integrations.sandbox.allocate_per_container_resources",
+                return_value=fixed,
+            ) as alloc,
+            patch.object(env_mod, "assemble_container_env", _spy_assemble),
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+        ):
+            runner.run_headless("claude", str(tmp_path), prompt="x", follow=False)
+
+        # Allocated exactly once for the whole launch — no second allocation in
+        # ``launch_prepared`` that would hand back colliding ports.
+        alloc.assert_called_once()
+        # Env assembly saw the SAME instance the supervisor binds.
+        assert seen["per_container"] is fixed
+        spec = sandbox.run.call_args[0][0]
+        assert set(spec.loopback_ports) == {52001, 52002, 52003}
+
+    def test_runtime_dir_mount_added(self, tmp_path: Path) -> None:
+        """A ``/run/terok`` bind-mount is always appended so the supervisor's
+        later-bound sockets surface inside the container via one mount."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="img",
+            command=[],
+            name="c",
+            task_dir=tmp_path,
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        mount = next(v for v in spec.volumes if v.container_path == "/run/terok")
+        assert mount is not None
 
 
 class TestWaitForExit:
@@ -733,20 +1021,19 @@ class TestGateIntegration:
 
     def test_setup_gate_calls_sandbox(self) -> None:
         sandbox = _mock_sandbox()
-        sandbox.ensure_gate.return_value = None
-        sandbox.create_token.return_value = "tok123"
-        sandbox.gate_url.return_value = "http://tok123@host:9418/repo"
+        sandbox.mint_gate_token.return_value = "terok-g-tok123"
+        sandbox.gate_url.return_value = "http://terok-g-tok123@host:9418/repo"
         runner = AgentRunner(sandbox=sandbox)
 
         with patch("terok_executor.integrations.sandbox.GitGate") as mock_gate_cls:
             mock_gate = Mock()
             mock_gate_cls.return_value = mock_gate
-            url = runner._setup_gate("git@github.com:user/repo.git", "task1")
+            url, token = runner._setup_gate("git@github.com:user/repo.git")
 
         mock_gate.sync.assert_called_once()
-        sandbox.ensure_gate.assert_called_once()
-        sandbox.create_token.assert_called_once()
-        assert url == "http://tok123@host:9418/repo"
+        sandbox.mint_gate_token.assert_called_once()
+        assert url == "http://terok-g-tok123@host:9418/repo"
+        assert token == "terok-g-tok123"
 
     def test_gate_true_with_git_url_uses_gate(self) -> None:
         sandbox = _mock_sandbox()
@@ -755,7 +1042,9 @@ class TestGateIntegration:
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
             patch.object(
-                runner, "_setup_gate", return_value="http://tok@host:9418/repo"
+                runner,
+                "_setup_gate",
+                return_value=("http://terok-g-tok@host:9418/repo", "terok-g-tok"),
             ) as mock_gate,
         ):
             runner.run_headless(
@@ -770,9 +1059,11 @@ class TestGateIntegration:
         mock_gate.assert_called_once()
         assert mock_gate.call_args[0][0] == "git@github.com:user/repo.git"
 
-        # Verify the gate URL ended up in the RunSpec env as CODE_REPO
+        # Verify the gate URL ended up in the RunSpec env as CODE_REPO and
+        # the minted token surfaced as TEROK_GATE_TOKEN for the supervisor.
         spec = sandbox.run.call_args[0][0]
-        assert spec.env.get("CODE_REPO") == "http://tok@host:9418/repo"
+        assert spec.env.get("CODE_REPO") == "http://terok-g-tok@host:9418/repo"
+        assert spec.env.get("TEROK_GATE_TOKEN") == "terok-g-tok"
 
     def test_gate_false_skips_gate(self) -> None:
         sandbox = _mock_sandbox()
@@ -795,6 +1086,39 @@ class TestGateIntegration:
         spec = sandbox.run.call_args[0][0]
         assert spec.env.get("CODE_REPO") == "git@github.com:user/repo.git"
 
+    def test_tool_mode_gate_token_reaches_supervisor(self) -> None:
+        """Tool-mode (sidecar) runs also wire the minted gate token into the
+        supervisor sidecar via ``TEROK_GATE_TOKEN``.
+
+        The tool path assembles its own minimal env (no ``assemble_container_env``),
+        so the gate-token wiring is a separate branch from the agent path and
+        needs its own coverage.
+        """
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_sidecar_image", return_value="terok-l1-sidecar:test"),
+            patch.object(runner, "_direct_credential_env", return_value={"GITHUB_TOKEN": "ghp"}),
+            patch("terok_executor.container.runner._seed_from_cache"),
+            patch.object(
+                runner,
+                "_setup_gate",
+                return_value=("http://terok-g-tooltok@host:9418/repo", "terok-g-tooltok"),
+            ) as mock_gate,
+        ):
+            runner.run_tool(
+                "coderabbit",
+                "git@github.com:user/repo.git",
+                gate=True,
+                follow=False,
+            )
+
+        mock_gate.assert_called_once()
+        spec = sandbox.run.call_args[0][0]
+        assert spec.env.get("CODE_REPO") == "http://terok-g-tooltok@host:9418/repo"
+        assert spec.env.get("TEROK_GATE_TOKEN") == "terok-g-tooltok"
+
 
 class TestVaultEnv:
     """Verify vault integration (now via env_builder).
@@ -803,22 +1127,18 @@ class TestVaultEnv:
     These tests verify the runner delegates correctly.
     """
 
-    def test_vault_not_running_no_tokens_in_run(self, tmp_path: Path) -> None:
-        """When vault is not running, headless run has no TEROK_TOKEN_BROKER_PORT."""
+    def test_no_credentials_no_tokens_in_run(self, tmp_path: Path) -> None:
+        """No stored credentials → no TEROK_TOKEN_BROKER_PORT in the spec.
+
+        Post-supervisor-refactor there's no global vault daemon to
+        probe, so token injection is gated only on "is there a routed
+        credential in the DB" — an empty per-test DB satisfies that
+        without any vault mocks.
+        """
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
-        with (
-            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_socket_active",
-                return_value=False,
-            ),
-            patch(
-                "terok_executor.integrations.sandbox.VaultManager.is_daemon_running",
-                return_value=False,
-            ),
-        ):
+        with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
 
         spec = sandbox.run.call_args[0][0]

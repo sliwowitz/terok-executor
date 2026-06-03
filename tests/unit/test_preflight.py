@@ -56,100 +56,41 @@ def test_podman_present_but_nonzero_exit(_which: MagicMock, mock_run: MagicMock)
 
 
 # ── Sandbox services aggregate ───────────────────────────────────────
+#
+# Post-supervisor-refactor: neither the vault nor the git gate is a
+# host service any more — the per-container supervisor (spawned by the
+# terok-sandbox OCI hook) embeds the vault proxy and serves the gate
+# in-process.  Preflight therefore only checks the shield OCI hooks.
 
 
-@patch("terok_executor.integrations.sandbox.GateServerManager")
-@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-def test_sandbox_services_ok(
-    mock_env: MagicMock,
-    mock_vault_cls: MagicMock,
-    mock_gate_cls: MagicMock,
-) -> None:
-    """All three (shield, vault, gate) ready → ok."""
+def test_sandbox_services_ok(mock_env: MagicMock) -> None:
+    """Shield hooks installed → ok."""
     mock_env.return_value = MagicMock(health="ok")
-    vault = mock_vault_cls.return_value
-    vault.is_socket_active.return_value = False
-    vault.is_daemon_running.return_value = True
-    gate = mock_gate_cls.return_value
-    gate.get_status.return_value = MagicMock(mode="systemd")
-    assert _pf().check_sandbox_services().ok is True
+    r = _pf().check_sandbox_services()
+    assert r.ok is True
+    assert "shield" in r.message
 
 
-@patch("terok_executor.integrations.sandbox.GateServerManager")
-@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-def test_sandbox_services_lists_missing(
-    mock_env: MagicMock,
-    mock_vault_cls: MagicMock,
-    mock_gate_cls: MagicMock,
-) -> None:
-    """Missing items are all named in the same check's message.
-
-    Pins ``GateServerManager.is_systemd_available`` so the
-    gate-unavailable branching doesn't depend on whether the host
-    running the tests has a user systemd session — without this mock
-    the gate would be reclassified as "unavailable: no systemd" on a
-    non-systemd runner and drop out of the missing list.
-    """
+def test_sandbox_services_lists_missing(mock_env: MagicMock) -> None:
+    """Missing shield hooks → fail, named in the message."""
     mock_env.return_value = MagicMock(health="setup-needed")
-    vault = mock_vault_cls.return_value
-    vault.is_socket_active.return_value = False
-    vault.is_daemon_running.return_value = False
-    gate = mock_gate_cls.return_value
-    gate.get_status.return_value = MagicMock(mode=None)
-    gate.is_systemd_available.return_value = True
-    with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
-        r = _pf().check_sandbox_services()
+    r = _pf().check_sandbox_services()
     assert r.ok is False
-    for expected in ("vault", "shield", "gate"):
-        assert expected in r.message
+    assert "shield" in r.message
 
 
-@patch("terok_executor.integrations.sandbox.GateServerManager")
-@patch("terok_executor.integrations.sandbox.VaultManager")
 @patch("terok_executor.integrations.sandbox.check_environment")
-def test_sandbox_services_ok_without_git_marks_gate_unavailable(
-    mock_env: MagicMock,
-    mock_vault_cls: MagicMock,
-    mock_gate_cls: MagicMock,
-) -> None:
-    """Missing git on PATH → gate listed as unavailable (no remediation needed)."""
-    mock_env.return_value = MagicMock(health="ok")
-    vault = mock_vault_cls.return_value
-    vault.is_socket_active.return_value = False
-    vault.is_daemon_running.return_value = True
-    gate = mock_gate_cls.return_value
-    gate.get_status.return_value = MagicMock(mode="none")
-    gate.is_systemd_available.return_value = True
-    with patch("terok_executor.preflight.shutil.which", return_value=None):
-        r = _pf().check_sandbox_services()
+def test_sandbox_services_bypass_is_ready(mock_env: MagicMock) -> None:
+    """``bypass`` health is a *ready* environment — the hooks are installed,
+    the operator merely opted out of egress filtering.  The bypass itself is
+    surfaced elsewhere as a warning, so the readiness verdict must pass rather
+    than report a missing service."""
+    mock_env.return_value = MagicMock(health="bypass")
+    r = _pf().check_sandbox_services()
     assert r.ok is True
-    assert "gate unavailable" in r.message
-    assert "no git" in r.message
-
-
-@patch("terok_executor.integrations.sandbox.GateServerManager")
-@patch("terok_executor.integrations.sandbox.VaultManager")
-@patch("terok_executor.integrations.sandbox.check_environment")
-def test_sandbox_services_ok_without_systemd_marks_gate_unavailable(
-    mock_env: MagicMock,
-    mock_vault_cls: MagicMock,
-    mock_gate_cls: MagicMock,
-) -> None:
-    """No user systemd → gate listed as unavailable (no daemon fallback yet)."""
-    mock_env.return_value = MagicMock(health="ok")
-    vault = mock_vault_cls.return_value
-    vault.is_socket_active.return_value = False
-    vault.is_daemon_running.return_value = True
-    gate = mock_gate_cls.return_value
-    gate.get_status.return_value = MagicMock(mode="none")
-    gate.is_systemd_available.return_value = False
-    with patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git"):
-        r = _pf().check_sandbox_services()
-    assert r.ok is True
-    assert "gate unavailable" in r.message
-    assert "systemd" in r.message
+    assert "shield" in r.message
 
 
 # ── check_git ────────────────────────────────────────────────────────

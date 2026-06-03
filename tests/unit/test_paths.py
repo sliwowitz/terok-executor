@@ -31,12 +31,10 @@ class TestStateRoot:
     def test_root_fallback(self) -> None:
         """Root user gets /var/lib/terok/executor.
 
-        Relies on the autouse ``_isolate_user_paths`` fixture in
-        ``tests/unit/conftest.py`` to keep ``HOME`` / ``XDG_*`` /
-        ``TEROK_*_DIR`` pointing at the test's tmp dir (and so out of
-        the way) — clearing the whole environment here would defeat
-        that contract and leave the test reaching for the operator's
-        real ``$HOME``.
+        Opts back into ``_is_root() → True`` via the local patch; the
+        autouse fixture pins it to ``False`` so the rest of the suite
+        doesn't land on ``/var/lib/terok``.  XDG_* / HOME stay
+        redirected to the tmp fake-home regardless.
         """
         with unittest.mock.patch("terok_util.paths._is_root", return_value=True):
             assert paths.state_root() == Path("/var/lib/terok/executor")

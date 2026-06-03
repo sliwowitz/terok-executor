@@ -40,13 +40,17 @@ architecture, per-agent routing table, and YAML configuration.
 
 ### Managing the vault
 
+The vault is served per container: the supervisor spawns on container
+start via the terok-sandbox OCI hook and reads the per-container
+sidecar to bind its proxy.  The vault verbs are passphrase-tier CRUD
+on the DB plus two executor-only file-level helpers:
+
 ```bash
-terok-executor vault status      # health check
-terok-executor vault start       # start manually
-terok-executor vault stop        # stop
-terok-executor vault install     # install systemd unit
-terok-executor vault routes      # show active routes
-terok-executor vault clean       # remove stale tokens
+terok-executor vault unlock      # unlock the credential DB
+terok-executor vault lock        # lock the credential DB
+terok-executor vault passphrase  # passphrase-tier CRUD subgroup
+terok-executor vault routes      # regenerate routes.json from YAML roster
+terok-executor vault clean       # remove leaked credential files from mounts
 ```
 
 ## Restricted mode
