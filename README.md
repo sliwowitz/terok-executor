@@ -1,5 +1,13 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://terok-ai.github.io/terok/terok-logo-w.svg">
+    <img src="https://terok-ai.github.io/terok/terok-logo-b.svg" alt="terok-executor" width="120">
+  </picture>
+</p>
+
 # terok-executor
 
+[![PyPI](https://img.shields.io/pypi/v/terok-executor)](https://pypi.org/project/terok-executor/)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![REUSE status](https://api.reuse.software/badge/github.com/terok-ai/terok-executor)](https://api.reuse.software/info/github.com/terok-ai/terok-executor)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=terok-ai_terok-executor&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=terok-ai_terok-executor)
@@ -13,7 +21,7 @@ host.  Use it on its own as a CLI, or import its `AgentRunner` from
 Python when you want library-grade control.
 
 <p align="center">
-  <img src="docs/img/architecture.svg" alt="terok ecosystem — terok-executor sits between project orchestration and the hardened runtime">
+  <img src="https://terok-ai.github.io/terok/img/architecture.svg" alt="terok ecosystem — terok-executor sits between project orchestration and the hardened runtime">
 </p>
 
 ## Quick start
