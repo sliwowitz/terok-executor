@@ -17,8 +17,8 @@ keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
 dependencies = [
-    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.0.124a23/terok_sandbox-0.0.124a23-py3-none-any.whl",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.0.2a2/terok_util-0.0.2a2-py3-none-any.whl",
+    "terok-sandbox>=0.1.0,<0.2.0",
+    "terok-util>=0.1.0,<0.2.0",
     "ruamel.yaml>=0.18",
     "Jinja2>=3.1",
     "tomli-w>=1.0",
@@ -54,7 +54,7 @@ classifiers = [
 packages = [
   { include = "terok_executor", from = "src" },
 ]
-version = "0.0.149a29"
+version = "0.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=4.0"
