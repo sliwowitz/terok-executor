@@ -9,7 +9,7 @@
 # ``pi-env.sh``) overrides every built-in provider's ``baseUrl`` so Pi
 # talks to the vault instead of going to ``api.anthropic.com`` /
 # ``api.openai.com`` direct.
-roster_version: 1
+roster_version: 2
 
 kind: bridge
 label: Pi

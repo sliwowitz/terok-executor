@@ -181,3 +181,106 @@ class SidecarSpec:
     Example: ``{"CODERABBIT_API_KEY": "key"}`` reads ``cred["key"]`` and
     injects it as ``CODERABBIT_API_KEY``.
     """
+
+
+@dataclass(frozen=True)
+class ProviderAuth:
+    """How a provider attaches the real credential to an upstream request.
+
+    One instance per supported mode.  A provider may carry an OAuth mode, an
+    API-key mode, or both — see [`Provider.wire_auth`][terok_executor.roster.types.Provider.wire_auth].
+    """
+
+    header: str
+    """HTTP header that carries the credential (e.g. ``"Authorization"``, ``"x-api-key"``)."""
+
+    prefix: str = ""
+    """String prepended to the token value (e.g. ``"Bearer "``, ``"token "``)."""
+
+    extra_headers: dict[str, str] = field(default_factory=dict)
+    """Headers added only for this mode (e.g. Anthropic's ``anthropic-beta``)."""
+
+
+@dataclass(frozen=True)
+class Provider:
+    """A vault-routed upstream — an LLM endpoint or a tool API.
+
+    Carries the *endpoint* concern lifted out of the agent ``vault:`` blocks:
+    where requests go (``upstream`` / ``path_upstreams``) and how the real
+    credential is attached (``oauth_auth`` / ``api_key_auth``).  This is the
+    single source the ``routes.json`` consumed by the sandbox vault is
+    generated from.  The per-agent *delivery* concern (which env var receives
+    the phantom token or base URL) stays on the agent binding, not here.
+    """
+
+    name: str
+    """Clean provider name — also the ``routes.json`` key and the vault DB
+    ``credentials.provider`` value (e.g. ``"anthropic"``, ``"github"``)."""
+
+    upstream: str
+    """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
+
+    api_key_auth: ProviderAuth | None = None
+    """Wire auth used when an API key is the stored credential, if supported."""
+
+    oauth_auth: ProviderAuth | None = None
+    """Wire auth used when an OAuth token is the stored credential, if supported."""
+
+    path_upstreams: dict[str, str] = field(default_factory=dict)
+    """Request-path prefix → upstream-base overrides (e.g. Codex's ``/backend-api/``)."""
+
+    oauth_refresh: dict[str, str] | None = None
+    """OAuth refresh config: ``{token_url, client_id, scope}``."""
+
+    shared_domain: bool = False
+    """Whether the upstream host also serves non-API traffic (docs, ``git push``…).
+
+    See [`VaultRoute.shared_domain`][terok_executor.roster.types.VaultRoute.shared_domain].
+    """
+
+    serves: dict[str, str] = field(default_factory=dict)
+    """Wire protocol → container-facing base path (LLM providers only).
+
+    Empty for tool providers (github, gitlab, …).  A provider that serves more
+    than one protocol (openrouter: ``anthropic-messages`` + ``openai-chat``)
+    backs several agent protocols from one endpoint.  Consumed by the wrapper
+    when resolving an agent×provider combo; not part of the ``routes.json``
+    contract.
+    """
+
+    def wire_auth(self) -> tuple[str, str, dict[str, str]]:
+        """Resolve the ``routes.json`` ``(auth_header, auth_prefix, oauth_extra_headers)``.
+
+        When the provider offers both OAuth and API-key auth under *different*
+        headers (Anthropic: ``Authorization: Bearer`` for OAuth vs ``x-api-key``
+        for the key), the vault must pick the header *and* prefix per stored
+        credential type at request time — signalled by the sentinel header
+        ``"dynamic"`` with an empty prefix.  A single mode emits its header and
+        prefix verbatim.
+
+        Two modes sharing a header are only representable if they're wire-
+        identical: ``routes.json`` carries a single ``auth_prefix`` /
+        ``oauth_extra_headers``, so modes on the same header but with different
+        prefixes (or extra headers) can't both be serialised — that raises
+        rather than silently wiring one mode with the other's prefix.
+
+        This reproduces the historical ``auth_header: dynamic`` wire contract
+        without the magic string ever appearing in a provider definition.
+        """
+        oauth, api_key = self.oauth_auth, self.api_key_auth
+        if oauth is not None and api_key is not None:
+            if oauth.header != api_key.header:
+                # Distinct headers → the vault selects header + prefix by the
+                # stored credential type at request time.
+                return "dynamic", "", dict(oauth.extra_headers)
+            if oauth.prefix != api_key.prefix or oauth.extra_headers != api_key.extra_headers:
+                raise ValueError(
+                    f"Provider {self.name!r} declares oauth and api_key auth on the same "
+                    f"header ({oauth.header!r}) but with different prefix/extra_headers; the "
+                    f"routes.json contract carries only one, so one mode would be wired with "
+                    f"the other's prefix. Give the modes distinct headers or unify them."
+                )
+        mode = oauth or api_key
+        if mode is None:
+            raise ValueError(f"Provider {self.name!r} declares no auth mode")
+        return mode.header, mode.prefix, dict(mode.extra_headers)

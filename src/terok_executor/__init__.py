@@ -64,6 +64,7 @@ from .credentials.auth import (
     AUTH_PROVIDERS,
     Authenticator,
     AuthSession,
+    credential_provider,
     prepare_oauth_session,
     store_api_key,
 )
@@ -76,12 +77,12 @@ from .krun import KrunHost, KrunHostKeypair, ensure_krun_host_keypair
 from .provider.agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
 from .provider.instructions import bundled_default_instructions, resolve_instructions
 from .provider.providers import (
-    AGENT_PROVIDERS,
-    PROVIDER_NAMES,
-    AgentProvider,
+    AGENT_NAMES,
+    AGENTS,
+    Agent,
     CLIOverrides,
-    get_provider,
-    resolve_provider_value,
+    get_agent,
+    resolve_agent_value,
 )
 
 # -- Roster (agent catalog + config resolution) --------------------------------
@@ -94,20 +95,20 @@ from .sandbox import ensure_sandbox_ready
 from .storage import SharedMountStorageInfo, TaskStorageInfo
 
 # -- Bootstrap YAML roster into module-level dicts ---------------------------
-# AGENT_PROVIDERS and AUTH_PROVIDERS are empty dicts populated here to avoid
+# AGENTS and AUTH_PROVIDERS are empty dicts populated here to avoid
 # circular imports (roster → auth/providers → roster).
 
 
 def _bootstrap_roster() -> None:
-    """Populate module-level provider dicts from the YAML roster."""
-    global PROVIDER_NAMES  # noqa: PLW0603 — tuple requires rebind
+    """Populate module-level agent dicts from the YAML roster."""
+    global AGENT_NAMES  # noqa: PLW0603 — tuple requires rebind
 
     import terok_executor.provider.providers as _reg
 
     roster = AgentRoster.shared()
-    AGENT_PROVIDERS.update(roster.providers)
+    AGENTS.update(roster.agents)
     AUTH_PROVIDERS.update(roster.auth_providers)
-    PROVIDER_NAMES = _reg.PROVIDER_NAMES = roster.agent_names
+    AGENT_NAMES = _reg.AGENT_NAMES = roster.agent_names
 
 
 _bootstrap_roster()
@@ -119,12 +120,12 @@ __all__ = [
     "acp_socket_is_live",
     "list_authenticated_agents",
     # Provider registry + behaviour
-    "AGENT_PROVIDERS",
-    "AgentProvider",
+    "AGENTS",
+    "Agent",
     "CLIOverrides",
-    "PROVIDER_NAMES",
-    "get_provider",
-    "resolve_provider_value",
+    "AGENT_NAMES",
+    "get_agent",
+    "resolve_agent_value",
     # Agent config preparation
     "AgentConfigSpec",
     "parse_md_agent",
@@ -133,6 +134,7 @@ __all__ = [
     "AUTH_PROVIDERS",
     "Authenticator",
     "AuthSession",
+    "credential_provider",
     "prepare_oauth_session",
     "store_api_key",
     # Instructions

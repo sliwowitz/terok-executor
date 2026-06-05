@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# KISSKI — the GWDG/AcademicCloud OpenAI-compatible endpoint.
+
+upstream: https://chat-ai.academiccloud.de
+
+auth:
+  api_key:
+    header: Authorization
+    prefix: "Bearer "
+
+serves:
+  openai-chat: "/v1"

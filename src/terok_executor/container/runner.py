@@ -130,7 +130,7 @@ class AgentRunner:
 
     def run_headless(
         self,
-        provider: str,
+        agent: str,
         repo: str,
         *,
         prompt: str,
@@ -167,7 +167,7 @@ class AgentRunner:
         Defaults preserve the standalone-executor case (no terok above).
         """
         return self._run(
-            provider=provider,
+            agent=agent,
             repo=repo,
             prompt=prompt,
             branch=branch,
@@ -196,7 +196,7 @@ class AgentRunner:
 
     def run_interactive(
         self,
-        provider: str,
+        agent: str,
         repo: str,
         *,
         branch: str | None = None,
@@ -225,7 +225,7 @@ class AgentRunner:
         for the *project_id* / *task_id* / *dossier_path* semantics.
         """
         return self._run(
-            provider=provider,
+            agent=agent,
             repo=repo,
             branch=branch,
             gate=gate,
@@ -282,7 +282,7 @@ class AgentRunner:
             with self.runtime.reserve_port() as reservation:
                 port = reservation.port
         return self._run(
-            provider="claude",  # toad uses claude as default
+            agent="claude",  # toad uses claude as default
             repo=repo,
             branch=branch,
             gate=gate,
@@ -332,7 +332,7 @@ class AgentRunner:
         for the *project_id* / *task_id* / *dossier_path* semantics.
         """
         return self._run(
-            provider=tool,
+            agent=tool,
             repo=repo,
             mode="tool",
             gate=gate,
@@ -743,7 +743,7 @@ class AgentRunner:
     def _run(
         self,
         *,
-        provider: str,
+        agent: str,
         repo: str,
         mode: str,
         prompt: str | None = None,
@@ -796,10 +796,10 @@ class AgentRunner:
 
         # Ensure images — sidecar L1 for tools, agent L1 for everything else
         if is_tool:
-            sidecar_spec = self.roster.get_sidecar_spec(provider)
+            sidecar_spec = self.roster.get_sidecar_spec(agent)
             image_tag = self._ensure_sidecar_image(sidecar_spec.tool_name)
         else:
-            agent = self.roster.get_provider(provider)
+            agent_spec = self.roster.get_agent(agent)
             image_tag = self._ensure_images()
 
         # Task directory (ephemeral for standalone runs)
@@ -818,7 +818,7 @@ class AgentRunner:
                 env["TZ"] = tz
             if branch:
                 env["GIT_BRANCH"] = branch
-            env.update(self._direct_credential_env(provider))
+            env.update(self._direct_credential_env(agent))
 
             volumes: list[VolumeSpec] = []
             if local_path:
@@ -842,7 +842,7 @@ class AgentRunner:
             agent_config_dir = self._prepare_agent_config(
                 task_dir,
                 task_id,
-                provider,
+                agent,
                 prompt=prompt,
                 mounts_base=mounts_base,
                 project_root=local_path,
@@ -869,7 +869,7 @@ class AgentRunner:
 
             spec_kwargs: dict = {
                 "task_id": task_id,
-                "provider_name": provider,
+                "agent_name": agent,
                 "workspace_host_path": ws_host,
                 "code_repo": resolved_code_repo,
                 "branch": branch,
@@ -909,12 +909,12 @@ class AgentRunner:
         # Build command based on mode
         extra_args: list[str] = []
         if mode == "tool":
-            tool_cmd = f"init-ssh-and-repo.sh && {shlex.quote(provider)}"
+            tool_cmd = f"init-ssh-and-repo.sh && {shlex.quote(agent)}"
             if tool_args:
                 tool_cmd += " " + " ".join(shlex.quote(a) for a in tool_args)
             command = ["bash", "-lc", tool_cmd]
         elif mode == "headless":
-            cmd_str = agent.build_headless_command(
+            cmd_str = agent_spec.build_headless_command(
                 timeout=timeout, model=model, max_turns=max_turns
             )
             command = ["bash", "-lc", cmd_str]
@@ -1079,7 +1079,7 @@ class AgentRunner:
         self,
         task_dir: Path,
         task_id: str,
-        provider: str,
+        agent: str,
         *,
         prompt: str | None = None,
         instructions: str | None = None,
@@ -1095,7 +1095,7 @@ class AgentRunner:
         from terok_executor.provider.instructions import resolve_instructions
 
         resolved_instructions = instructions or resolve_instructions(
-            {}, provider, project_root=project_root
+            {}, agent, project_root=project_root
         )
 
         spec = AgentConfigSpec(
@@ -1103,7 +1103,7 @@ class AgentRunner:
             task_id=task_id,
             subagents=(),
             prompt=prompt,
-            provider=provider,
+            agent=agent,
             instructions=resolved_instructions,
             mounts_base=mounts_base,
         )

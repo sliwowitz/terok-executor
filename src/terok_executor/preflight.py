@@ -282,7 +282,10 @@ class Preflight:
                 f"{self.provider} credentials", False, "credential database unavailable"
             )
         try:
-            cred = db.load_credential(self.credential_set, self.provider)
+            # Credentials are keyed by the resolved provider (claude → anthropic).
+            from terok_executor.credentials.auth import credential_provider
+
+            cred = db.load_credential(self.credential_set, credential_provider(self.provider))
         finally:
             db.close()
         if cred:

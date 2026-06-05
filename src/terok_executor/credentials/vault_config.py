@@ -65,34 +65,34 @@ class VaultLocation:
     """Filesystem path for a Unix-socket-speaking HTTP client."""
 
 
-def write_vault_config(provider_name: str) -> None:
-    """Apply ``shared_config_patch`` from the YAML roster after auth.
+def write_vault_config(name: str) -> None:
+    """Apply an entry's ``provider.config_patch`` from the YAML roster after auth.
 
-    Patches a TOML or YAML config file in the provider's shared config dir
-    to redirect API traffic through the vault.  The patch spec is declared
-    in the agent YAML — no provider-specific code needed.
+    Patches a TOML or YAML config file in the entry's shared config dir to
+    redirect API traffic through the vault.  *name* is the auth-provider name
+    (agent OR tool — e.g. ``gh``); the patch rides on the entry's vault route
+    (sourced from its ``provider:`` binding).  No provider-specific code needed.
     """
     from terok_executor.roster import AgentRoster
 
     roster = AgentRoster.shared()
-    route = roster.vault_routes.get(provider_name)
-    if not route or not route.shared_config_patch:
-        return
-
-    auth_info = roster.auth_providers.get(provider_name)
+    auth_info = roster.auth_providers.get(name)
     if not auth_info:
+        return
+    route = roster.vault_routes.get(auth_info.credential_provider or name)
+    patch = route.shared_config_patch if route else None
+    if not patch:
         return
 
     from terok_executor.integrations.sandbox import SandboxConfig
     from terok_executor.paths import mounts_dir
 
-    # Shared-mount patches are host-singletons (one file per provider,
-    # mounted into every container).  Use the cfg's singleton broker
-    # port — per-container ports would need per-container config files,
-    # which is a deeper refactor.
+    # Shared-mount patches are host-singletons (one file per agent, mounted
+    # into every container).  Use the cfg's singleton broker port —
+    # per-container ports would need per-container config files, which is a
+    # deeper refactor.
     location = resolve_vault_location(SandboxConfig().token_broker_port)
 
-    patch = route.shared_config_patch
     shared_dir = mounts_dir() / auth_info.host_dir_name
     shared_dir.mkdir(parents=True, exist_ok=True)
     config_path = _safe_config_path(shared_dir, patch["file"])
@@ -136,30 +136,38 @@ def apply_shared_config_patches(
     Raises [`ConfigPatchError`][terok_executor.credentials.vault_config.ConfigPatchError] on failure — callers must not start
     the container if vault routing cannot be established.
     """
-    patched_routes = {
-        name: route
-        for name, route in roster.vault_routes.items()
-        if route.shared_config_patch and (providers is None or name in providers)
+    # Config patches are a delivery concern keyed by the *auth-provider* name —
+    # agent OR tool (tools like ``gh`` aren't in ``roster.agents``, so iterating
+    # agents would silently skip their patches).  The patch rides on the entry's
+    # vault route (sourced from its provider binding); apply it to the entry's
+    # own shared config dir.  ``providers`` / ``disabled_providers`` filter by
+    # that name.
+    all_patches: dict[str, tuple[str, dict]] = {}
+    for name, auth_info in roster.auth_providers.items():
+        route = roster.vault_routes.get(auth_info.credential_provider or name)
+        patch = route.shared_config_patch if route else None
+        if patch:
+            all_patches[name] = (auth_info.host_dir_name, patch)
+
+    disabled = {
+        name: spec
+        for name, spec in all_patches.items()
+        if disabled_providers and name in disabled_providers
     }
-    disabled_routes = {
-        name: route
-        for name, route in roster.vault_routes.items()
-        if route.shared_config_patch and disabled_providers and name in disabled_providers
+    patched = {
+        name: spec for name, spec in all_patches.items() if providers is None or name in providers
     }
 
-    for name in disabled_routes:
-        auth_info = roster.auth_providers.get(name)
-        if not auth_info:
-            continue
+    for name, (host_dir, _patch) in disabled.items():
         try:
-            _remove_managed_patch_values(mounts_base / auth_info.host_dir_name, name)
-            _logger.debug("Removed managed config patch for disabled provider %s", name)
+            _remove_managed_patch_values(mounts_base / host_dir, name)
+            _logger.debug("Removed managed config patch for disabled agent %s", name)
         except ConfigPatchError:
             raise
         except Exception as exc:
             raise ConfigPatchError(f"Failed to remove vault config patch for {name}") from exc
 
-    if not patched_routes:
+    if not patched:
         return
 
     from terok_executor.integrations.sandbox import SandboxConfig
@@ -168,16 +176,9 @@ def apply_shared_config_patches(
     # singleton port here regardless of per-container allocation.
     location = resolve_vault_location(SandboxConfig().token_broker_port)
 
-    for name, route in patched_routes.items():
-        auth_info = roster.auth_providers.get(name)
-        if not auth_info:
-            continue
-
-        patch = route.shared_config_patch
-        if patch is None:  # filtered out above; narrows for mypy
-            continue
+    for name, (host_dir, patch) in patched.items():
         try:
-            shared_dir = mounts_base / auth_info.host_dir_name
+            shared_dir = mounts_base / host_dir
             shared_dir.mkdir(parents=True, exist_ok=True)
             config_path = _safe_config_path(shared_dir, patch["file"])
 

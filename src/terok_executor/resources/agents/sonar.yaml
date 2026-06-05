@@ -1,26 +1,20 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: tool
 label: SonarCloud
 binary: sonar-scanner
 
-vault:
-  route_prefix: sonar
-  upstream: https://sonarcloud.io
-  auth_header: Authorization
-  auth_prefix: "Bearer "
+# The SonarCloud endpoint (sonarcloud.io, shared_domain) lives in
+# resources/providers/sonarcloud.yaml.
+provider:
+  default: sonarcloud
   credential_type: api_key
   token_env:
     _default: SONAR_TOKEN
   base_url_env: SONAR_HOST_URL
-  # sonarcloud.io serves API + project pages + docs + badges on the same
-  # apex; an nft host-deny would block legitimate browsing/curling in
-  # ``shield down`` mode.  Credential containment (read-only SONAR_TOKEN
-  # shadow) carries the security weight on its own.
-  shared_domain: true
 
 auth:
   host_dir: _sonar-config

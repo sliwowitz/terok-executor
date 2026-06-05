@@ -9,30 +9,17 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-from pydantic import ValidationError
-
-from terok_executor.roster import AgentRoster, VaultRoute
-from terok_executor.roster.schema import RawAgentYaml
-
-
-def _vault_route(name: str, data: dict) -> VaultRoute | None:
-    """Validate *data* and project the ``vault:`` section to a [`VaultRoute`][]."""
-    spec = RawAgentYaml.model_validate(data)
-    if spec.vault is None:
-        return None
-    return spec.vault.to_dataclass(provider=name)
+from terok_executor.roster import AgentRoster
 
 
 class TestVaultRoutesParsed:
-    """Verify vault YAML sections are parsed into the roster."""
+    """Verify provider endpoints + agent bindings project into provider-keyed routes."""
 
-    def test_claude_route_exists(self) -> None:
-        """Claude has a vault route with Anthropic upstream and OAuth support."""
+    def test_anthropic_route_exists(self) -> None:
+        """The anthropic provider (claude's default) routes with OAuth + dynamic header."""
         reg = AgentRoster.shared()
-        route = reg.vault_routes.get("claude")
+        route = reg.vault_routes.get("anthropic")
         assert route is not None
-        assert route.route_prefix == "claude"
         assert route.upstream == "https://api.anthropic.com"
         assert route.auth_header == "dynamic"
         assert route.oauth_extra_headers == {"anthropic-beta": "oauth-2025-04-20"}
@@ -41,9 +28,9 @@ class TestVaultRoutesParsed:
         assert route.base_url_env == "ANTHROPIC_BASE_URL"
         assert route.socket_env == "ANTHROPIC_UNIX_SOCKET"
 
-    def test_codex_route_exists(self) -> None:
-        """Codex has a vault route with OpenAI + ChatGPT upstreams."""
-        route = AgentRoster.shared().vault_routes.get("codex")
+    def test_openai_route_exists(self) -> None:
+        """The openai provider (codex's default) routes with OpenAI + ChatGPT upstreams."""
+        route = AgentRoster.shared().vault_routes.get("openai")
         assert route is not None
         assert route.upstream == "https://api.openai.com"
         assert route.path_upstreams == {"/backend-api/": "https://chatgpt.com"}
@@ -51,31 +38,30 @@ class TestVaultRoutesParsed:
         assert route.shared_config_patch is not None
         assert route.shared_config_patch["file"] == "config.toml"
 
-    def test_gh_route_exists(self) -> None:
-        """GitHub CLI has a vault route with token-style auth."""
-        route = AgentRoster.shared().vault_routes.get("gh")
+    def test_github_route_exists(self) -> None:
+        """The github provider (gh's default) routes with token-style auth."""
+        route = AgentRoster.shared().vault_routes.get("github")
         assert route is not None
         assert route.auth_prefix == "token "
         assert route.upstream == "https://api.github.com"
 
-    def test_glab_route_exists(self) -> None:
-        """GitLab CLI has a vault route with PRIVATE-TOKEN header."""
-        route = AgentRoster.shared().vault_routes.get("glab")
+    def test_gitlab_route_exists(self) -> None:
+        """The gitlab provider (glab's default) routes with a PRIVATE-TOKEN header."""
+        route = AgentRoster.shared().vault_routes.get("gitlab")
         assert route is not None
         assert route.auth_header == "PRIVATE-TOKEN"
         assert route.auth_prefix == ""
-        assert route.route_prefix == "gl"
 
     def test_api_key_only_providers_use_default_token_env(self) -> None:
         """Providers without OAuth support map only ``_default`` in token_env."""
-        for name in ("vibe", "blablador", "kisski"):
+        for name in ("mistral", "blablador", "kisski"):
             route = AgentRoster.shared().vault_routes.get(name)
             assert route is not None, f"{name} missing vault route"
             assert list(route.token_env) == ["_default"], f"{name} should only map _default"
             assert route.socket_env == "", f"{name} should have no socket_env"
 
-    def test_opencode_agents_have_routes(self) -> None:
-        """Blablador and KISSKI have vault routes."""
+    def test_opencode_provider_routes(self) -> None:
+        """Blablador and KISSKI providers have routes with api_key credentials."""
         reg = AgentRoster.shared()
         for name in ("blablador", "kisski"):
             route = reg.vault_routes.get(name)
@@ -83,20 +69,21 @@ class TestVaultRoutesParsed:
             assert route.credential_type == "api_key"
 
     def test_copilot_has_no_route(self) -> None:
-        """Copilot has no vault section (tier-3, no base URL support)."""
-        assert AgentRoster.shared().vault_routes.get("copilot") is None
+        """Copilot binds no provider (tier-3, no base URL support)."""
+        # No route is keyed under any copilot-ish name, and copilot has no binding.
+        assert AgentRoster.shared().agents["copilot"].provider_binding is None
 
-    def test_claude_has_oauth_refresh(self) -> None:
-        """Claude has oauth_refresh config for proactive token refresh."""
-        route = AgentRoster.shared().vault_routes.get("claude")
+    def test_anthropic_has_oauth_refresh(self) -> None:
+        """The anthropic provider carries oauth_refresh for proactive token refresh."""
+        route = AgentRoster.shared().vault_routes.get("anthropic")
         assert route is not None
         assert route.oauth_refresh is not None
         assert "token_url" in route.oauth_refresh
         assert "client_id" in route.oauth_refresh
 
-    def test_codex_has_oauth_refresh(self) -> None:
-        """Codex has an oauth_refresh block so vault can rotate tokens in the background."""
-        route = AgentRoster.shared().vault_routes.get("codex")
+    def test_openai_has_oauth_refresh(self) -> None:
+        """The openai provider has an oauth_refresh block so the vault rotates tokens."""
+        route = AgentRoster.shared().vault_routes.get("openai")
         assert route is not None
         assert route.oauth_refresh is not None
         assert route.oauth_refresh["token_url"] == "https://auth.openai.com/oauth/token"
@@ -104,61 +91,45 @@ class TestVaultRoutesParsed:
 
 
 class TestSharedDomain:
-    """Verify the ``vault.shared_domain`` flag is parsed and surfaced."""
+    """Verify the provider ``shared_domain`` flag flows through to the route."""
 
     def test_default_is_false(self) -> None:
-        """API-only upstreams (claude, codex, gh, …) leave the flag unset."""
+        """API-only upstreams leave the flag unset."""
         roster = AgentRoster.shared()
-        for name in ("claude", "codex", "gh", "vibe", "blablador", "kisski", "openrouter"):
+        for name in (
+            "anthropic",
+            "openai",
+            "github",
+            "mistral",
+            "blablador",
+            "kisski",
+            "openrouter",
+        ):
             route = roster.vault_routes[name]
             assert route.shared_domain is False, f"{name} should not be shared_domain"
 
-    def test_glab_is_shared_domain(self) -> None:
+    def test_gitlab_is_shared_domain(self) -> None:
         """gitlab.com hosts both API and ``git push`` traffic."""
-        assert AgentRoster.shared().vault_routes["glab"].shared_domain is True
+        assert AgentRoster.shared().vault_routes["gitlab"].shared_domain is True
 
-    def test_sonar_is_shared_domain(self) -> None:
+    def test_sonarcloud_is_shared_domain(self) -> None:
         """sonarcloud.io hosts API + project pages + docs + badges."""
-        assert AgentRoster.shared().vault_routes["sonar"].shared_domain is True
-
-    def test_unknown_provider_defaults_to_false(self) -> None:
-        """Hand-rolled vault sections without the field default to False."""
-        route = _vault_route(
-            "test",
-            {"vault": {"route_prefix": "t", "upstream": "https://api.example.com"}},
-        )
-        assert route is not None
-        assert route.shared_domain is False
-
-    def test_explicit_true_round_trips(self) -> None:
-        """``shared_domain: true`` is preserved through schema → dataclass."""
-        route = _vault_route(
-            "test",
-            {
-                "vault": {
-                    "route_prefix": "t",
-                    "upstream": "https://example.com",
-                    "shared_domain": True,
-                }
-            },
-        )
-        assert route is not None
-        assert route.shared_domain is True
+        assert AgentRoster.shared().vault_routes["sonarcloud"].shared_domain is True
 
 
 class TestGenerateRoutesJson:
-    """Verify routes.json generation."""
+    """Verify routes.json generation (now keyed by clean provider names)."""
 
     def test_generates_valid_json(self) -> None:
         """generate_routes_json() produces parseable JSON with expected keys."""
         routes_json = AgentRoster.shared().generate_routes_json()
         routes = json.loads(routes_json)
-        assert "claude" in routes
-        assert routes["claude"]["upstream"] == "https://api.anthropic.com"
-        assert routes["claude"]["auth_header"] == "dynamic"
-        assert routes["claude"]["oauth_extra_headers"] == {"anthropic-beta": "oauth-2025-04-20"}
-        assert routes["codex"]["path_upstreams"] == {"/backend-api/": "https://chatgpt.com"}
-        assert "oauth_extra_headers" not in routes["codex"]
+        assert "anthropic" in routes
+        assert routes["anthropic"]["upstream"] == "https://api.anthropic.com"
+        assert routes["anthropic"]["auth_header"] == "dynamic"
+        assert routes["anthropic"]["oauth_extra_headers"] == {"anthropic-beta": "oauth-2025-04-20"}
+        assert routes["openai"]["path_upstreams"] == {"/backend-api/": "https://chatgpt.com"}
+        assert "oauth_extra_headers" not in routes["openai"]
 
     def test_all_routes_have_upstream(self) -> None:
         """Every route in the JSON has an upstream field."""
@@ -166,21 +137,22 @@ class TestGenerateRoutesJson:
         for prefix, cfg in routes.items():
             assert "upstream" in cfg, f"Route '{prefix}' missing upstream"
 
-    def test_glab_keyed_by_provider_name(self) -> None:
-        """GitLab route is keyed by provider name 'glab'."""
+    def test_gitlab_keyed_by_provider_name(self) -> None:
+        """The GitLab route is keyed by the clean provider name 'gitlab'."""
         routes = json.loads(AgentRoster.shared().generate_routes_json())
-        assert "glab" in routes
+        assert "gitlab" in routes
+        assert "glab" not in routes
 
-    def test_claude_routes_json_includes_oauth_refresh(self) -> None:
-        """Claude's routes.json entry includes oauth_refresh config."""
+    def test_anthropic_routes_json_includes_oauth_refresh(self) -> None:
+        """The anthropic routes.json entry includes oauth_refresh config."""
         routes = json.loads(AgentRoster.shared().generate_routes_json())
-        assert "oauth_refresh" in routes["claude"]
-        assert routes["claude"]["oauth_refresh"]["client_id"]
+        assert "oauth_refresh" in routes["anthropic"]
+        assert routes["anthropic"]["oauth_refresh"]["client_id"]
 
-    def test_gh_routes_json_omits_oauth_refresh(self) -> None:
+    def test_github_routes_json_omits_oauth_refresh(self) -> None:
         """Providers without oauth_refresh omit it from routes.json."""
         routes = json.loads(AgentRoster.shared().generate_routes_json())
-        assert "oauth_refresh" not in routes["gh"]
+        assert "oauth_refresh" not in routes["github"]
 
 
 class TestScanLeakedCredentials:
@@ -199,7 +171,7 @@ class TestScanLeakedCredentials:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers.get("claude")
-        route = roster.vault_routes.get("claude")
+        route = roster.vault_routes.get("anthropic")
         assert auth is not None and route is not None
 
         cred_dir = tmp_path / auth.host_dir_name
@@ -218,7 +190,7 @@ class TestScanLeakedCredentials:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
-        route = roster.vault_routes["claude"]
+        route = roster.vault_routes["anthropic"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -226,18 +198,17 @@ class TestScanLeakedCredentials:
 
         assert scan_leaked_credentials(tmp_path) == []
 
-    def test_skips_providers_without_credential_file(self, tmp_path, monkeypatch) -> None:
-        """Providers whose vault route has no credential_file are skipped."""
+    def test_skips_mounts_without_credential_file(self, tmp_path, monkeypatch) -> None:
+        """Mounts with no credential_file (opencode state dirs, …) are skipped."""
         from unittest.mock import MagicMock
 
         from terok_executor.credentials.vault_commands import scan_leaked_credentials
 
-        # Mock a roster with a provider that has a vault route but no credential_file
+        # Mock a roster whose only mount carries no credential file.
         mock_roster = MagicMock()
-        mock_route = MagicMock()
-        mock_route.credential_file = ""
-        mock_roster.vault_routes = {"fake-provider": mock_route}
-        mock_roster.auth_providers = {"fake-provider": MagicMock(host_dir_name="_fake")}
+        mock_mount = MagicMock()
+        mock_mount.credential_file = ""
+        mock_roster.mounts = [mock_mount]
         monkeypatch.setattr("terok_executor.roster.loader._shared_roster", lambda: mock_roster)
 
         assert scan_leaked_credentials(tmp_path) == []
@@ -251,7 +222,7 @@ class TestScanLeakedCredentials:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
-        route = roster.vault_routes["claude"]
+        route = roster.vault_routes["anthropic"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -387,7 +358,7 @@ class TestScanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
-        route = roster.vault_routes["claude"]
+        route = roster.vault_routes["anthropic"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -409,7 +380,7 @@ class TestScanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
-        route = roster.vault_routes["claude"]
+        route = roster.vault_routes["anthropic"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -429,7 +400,7 @@ class TestScanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
-        route = roster.vault_routes["codex"]
+        route = roster.vault_routes["openai"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -453,7 +424,7 @@ class TestScanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
-        route = roster.vault_routes["codex"]
+        route = roster.vault_routes["openai"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -476,7 +447,7 @@ class TestScanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["codex"]
-        route = roster.vault_routes["codex"]
+        route = roster.vault_routes["openai"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -498,7 +469,7 @@ class TestCleanSkipsInjectedFile:
 
         roster = AgentRoster.shared()
         auth = roster.auth_providers["claude"]
-        route = roster.vault_routes["claude"]
+        route = roster.vault_routes["anthropic"]
 
         cred_dir = tmp_path / auth.host_dir_name
         cred_dir.mkdir()
@@ -518,86 +489,6 @@ class TestCleanSkipsInjectedFile:
         assert cred_file.is_file()
 
 
-class TestToVaultRoute:
-    """Verify ``vault:`` schema parsing edge cases."""
-
-    def test_socket_env_alone_accepted(self) -> None:
-        """socket_env (without socket_path) is the new valid form."""
-        route = _vault_route(
-            "test",
-            {
-                "vault": {
-                    "route_prefix": "test",
-                    "upstream": "https://example.com",
-                    "socket_env": "TEST_SOCKET",
-                }
-            },
-        )
-        assert route is not None
-        assert route.socket_env == "TEST_SOCKET"
-
-    def test_neither_socket_field_accepted(self) -> None:
-        """Omitting socket_env is valid (agent has no socket transport)."""
-        route = _vault_route(
-            "test",
-            {
-                "vault": {
-                    "route_prefix": "test",
-                    "upstream": "https://example.com",
-                }
-            },
-        )
-        assert route is not None
-        assert route.socket_env == ""
-
-    def test_token_env_parsed(self) -> None:
-        """token_env is parsed from YAML data, keyed by credential type."""
-        route = _vault_route(
-            "test",
-            {
-                "vault": {
-                    "route_prefix": "test",
-                    "upstream": "https://example.com",
-                    "token_env": {"oauth": "MY_OAUTH_TOKEN", "_default": "MY_API_KEY"},
-                }
-            },
-        )
-        assert route is not None
-        assert route.token_env == {"oauth": "MY_OAUTH_TOKEN", "_default": "MY_API_KEY"}
-
-    def test_missing_required_field_raises(self) -> None:
-        """Missing route_prefix or upstream raises ValidationError."""
-        with pytest.raises(ValidationError, match="route_prefix"):
-            _vault_route("test", {"vault": {"upstream": "https://x.com"}})
-        with pytest.raises(ValidationError, match="upstream"):
-            _vault_route("test", {"vault": {"route_prefix": "t"}})
-
-    def test_no_vault_returns_none(self) -> None:
-        """Agent without vault section returns None.
-
-        An empty ``vault: {}`` block is invalid (route_prefix and upstream
-        are required), so it raises rather than returning None.
-        """
-        assert _vault_route("test", {}) is None
-        with pytest.raises(ValidationError):
-            _vault_route("test", {"vault": {}})
-
-    @pytest.mark.parametrize("field", ["path_upstreams", "oauth_extra_headers"])
-    def test_optional_vault_maps_reject_falsy_non_mappings(self, field: str) -> None:
-        """Falsy lists/strings must not be silently treated as absent maps."""
-        with pytest.raises(ValidationError, match=field):
-            _vault_route(
-                "test",
-                {
-                    "vault": {
-                        "route_prefix": "test",
-                        "upstream": "https://example.com",
-                        field: [],
-                    }
-                },
-            )
-
-
 class TestEnsureVaultRoutes:
     """Verify AgentRoster.ensure_vault_routes writes routes.json to disk."""
 
@@ -611,9 +502,9 @@ class TestEnsureVaultRoutes:
         assert path == mock_cfg.routes_path
         assert path.is_file()
         routes = json.loads(path.read_text())
-        # Should have at least claude route from the YAML roster
-        assert "claude" in routes
-        assert "upstream" in routes["claude"]
+        # Should have at least the anthropic route from the provider roster
+        assert "anthropic" in routes
+        assert "upstream" in routes["anthropic"]
 
     def test_falls_back_to_default_config(self, tmp_path, monkeypatch):
         """ensure_vault_routes(cfg=None) creates a SandboxConfig with standalone defaults."""

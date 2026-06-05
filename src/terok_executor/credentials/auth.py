@@ -83,6 +83,15 @@ class AuthProvider:
     marks Claude Code onboarding as complete so the first-run wizard is skipped.
     """
 
+    credential_provider: str = ""
+    """Provider name the captured credential is stored under (e.g. ``"anthropic"``).
+
+    ``terok-executor auth claude`` authenticates Claude's *default provider*, so
+    the credential is keyed under ``anthropic`` — matching the vault route and
+    the v3-migrated DB.  Populated by the roster loader from the agent's
+    ``provider.default`` binding; empty falls back to the entry's own name.
+    """
+
     def __post_init__(self) -> None:
         """Validate fields that become filesystem paths."""
         p = Path(self.host_dir_name)
@@ -347,6 +356,25 @@ def _resolve_image(image: str | Callable[[], str] | None, provider: str) -> str:
     return image() if callable(image) else image
 
 
+def credential_provider(name: str) -> str:
+    """Resolve an auth target (agent name) to the provider its credential is keyed under.
+
+    ``terok-executor auth claude`` authenticates Claude's *default provider*, so
+    the credential is stored under ``anthropic`` — the same key the vault route
+    and the v3-migrated DB use, so ``routed = stored & routes`` intersects at
+    runtime.  Tools resolve the same way (``gh`` → ``github``).  Names not in the
+    auth registry (harnesses with no credentials, or already a provider) pass
+    through unchanged.
+
+    Reads the auth registry rather than the roster so the credentials layer
+    stays below it — the resolved provider rides on each
+    [`AuthProvider`][terok_executor.credentials.auth.AuthProvider], populated by
+    the loader.
+    """
+    info = AUTH_PROVIDERS.get(name)
+    return info.credential_provider if (info and info.credential_provider) else name
+
+
 def store_api_key(
     provider: str,
     api_key: str,
@@ -355,15 +383,17 @@ def store_api_key(
     """Store an API key directly in the credential DB (no container needed).
 
     This is the non-interactive fast path for automated workflows and CI.
-    The key is stored as ``{"type": "api_key", "key": "<value>"}``.
+    The key is stored as ``{"type": "api_key", "key": "<value>"}`` under the
+    resolved provider name (see [`credential_provider`][terok_executor.credentials.auth.credential_provider]).
     """
     from terok_executor.integrations.sandbox import SandboxConfig
 
+    cred_provider = credential_provider(provider)
     cfg = SandboxConfig()
     db = cfg.open_credential_db(prompt_on_tty=True)
     try:
-        db.store_credential(credential_set, provider, {"type": "api_key", "key": api_key})
-        print(f"API key stored for {provider} (set: {credential_set})")
+        db.store_credential(credential_set, cred_provider, {"type": "api_key", "key": api_key})
+        print(f"API key stored for {cred_provider} (set: {credential_set})")
     finally:
         db.close()
 
@@ -683,7 +713,9 @@ def _capture_credentials(
             cfg = SandboxConfig()
             db = cfg.open_credential_db(prompt_on_tty=True)
             try:
-                db.store_credential(credential_set, provider_name, cred_data)
+                # Store under the resolved provider name (claude → anthropic);
+                # the mount writer above stays keyed by the agent's auth dir.
+                db.store_credential(credential_set, credential_provider(provider_name), cred_data)
                 _out.print(
                     f"\n[green]Credentials captured for {provider_name} "
                     f"(set: {credential_set})[/green]"

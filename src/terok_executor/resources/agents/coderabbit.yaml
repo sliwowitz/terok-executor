@@ -1,25 +1,23 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: tool
 label: CodeRabbit
 binary: coderabbit
 
-vault:
-  route_prefix: coderabbit
-  upstream: https://app.coderabbit.ai
-  auth_header: Authorization
-  auth_prefix: "Bearer "
+# The CodeRabbit endpoint (app.coderabbit.ai) lives in
+# resources/providers/coderabbit.yaml.
+# No base_url_env: the CLI has no API endpoint override.  It does honour
+# HTTPS_PROXY, but the token broker is a reverse proxy (route-prefix), not a
+# forward proxy (CONNECT tunnel).  Phantom tokens cannot reach the upstream
+# without vault routing.  Binary not shipped in L1 (runs in a sidecar).
+provider:
+  default: coderabbit
   credential_type: api_key
   token_env:
     _default: CODERABBIT_API_KEY
-  # No base_url_env: the CLI has no API endpoint override.  It does
-  # honour HTTPS_PROXY, but the token broker is a reverse proxy
-  # (route-prefix), not a forward proxy (CONNECT tunnel).
-  # Phantom tokens cannot reach the upstream without vault routing.
-  # Binary not shipped in L1; sidecar architecture under consideration.
 
 sidecar:
   tool_name: coderabbit

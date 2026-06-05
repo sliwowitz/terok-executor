@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# CodeRabbit — the upstream the `coderabbit` tool authenticates to.  Runs in
+# a sidecar with the real key (see the agent's `sidecar:` block); the route
+# exists so any phantom-token consumer can reach it through the vault.
+
+upstream: https://app.coderabbit.ai
+
+auth:
+  api_key:
+    header: Authorization
+    prefix: "Bearer "

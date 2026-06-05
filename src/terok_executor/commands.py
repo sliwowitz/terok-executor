@@ -388,7 +388,7 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
 
     rows: list[tuple[str, str, str]] = []
     for name in sorted(names):
-        p = roster.providers.get(name)
+        p = roster.agents.get(name)
         auth = roster.auth_providers.get(name)
         label = p.label if p else (auth.label if auth else name)
         kind = raw.get(name, {}).get("kind", "native")

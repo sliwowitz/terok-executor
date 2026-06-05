@@ -60,10 +60,9 @@ class TestCaptureCredentials:
             )
             _capture_credentials("claude", tmp_path, "default")
 
-        # Verify it's in the DB
-
+        # Verify it's in the DB — stored under the resolved provider (anthropic).
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "claude")
+        stored = db.load_credential("default", "anthropic")
         db.close()
         assert stored is not None
         assert stored["access_token"] == "sk-test-123"
@@ -414,10 +413,9 @@ class TestCaptureAppliesPostCaptureState:
         assert "Warning" in err
         assert "post_capture_state" in err
 
-        # Verify credentials were still stored in the DB
-
+        # Verify credentials were still stored in the DB (under provider key).
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "claude")
+        stored = db.load_credential("default", "anthropic")
         db.close()
         assert stored is not None
 
@@ -761,7 +759,7 @@ class TestStoreApiKey:
             store_api_key("vibe", "sk-test-key-123")
 
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "vibe")
+        stored = db.load_credential("default", "mistral")  # vibe → mistral
         db.close()
         assert stored == {"type": "api_key", "key": "sk-test-key-123"}
 
@@ -776,7 +774,7 @@ class TestStoreApiKey:
             store_api_key("claude", "sk-ant-key", credential_set="work")
 
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("work", "claude")
+        stored = db.load_credential("work", "anthropic")  # claude → anthropic
         db.close()
         assert stored["key"] == "sk-ant-key"
 

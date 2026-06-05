@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: opencode
 label: OpenRouter
@@ -28,11 +28,10 @@ session:
 capabilities:
   log_format: plain
 
-vault:
-  route_prefix: openrouter
-  upstream: https://openrouter.ai
-  auth_header: Authorization
-  auth_prefix: "Bearer "
+# The OpenRouter endpoint lives in resources/providers/openrouter.yaml.
+protocol: openai-chat
+provider:
+  default: openrouter
   credential_type: api_key
   credential_file: config.json
   token_env:

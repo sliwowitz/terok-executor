@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: native
 label: Claude
@@ -40,30 +40,20 @@ capabilities:
 wrapper:
   refuse_subcommands: [setup-token]
 
-vault:
-  route_prefix: claude
-  upstream: https://api.anthropic.com
-  # Auth header is dynamic: OAuth uses "Authorization: Bearer <token>",
-  # API key uses "x-api-key: <key>". The vault selects based on the
-  # credential type stored in the DB.
-  auth_header: dynamic
-  auth_prefix: ""
-  oauth_extra_headers:
-    anthropic-beta: oauth-2025-04-20
-  credential_type: oauth
-  credential_file: .credentials.json
-  # OAuth token refresh -- endpoint and client_id extracted from Claude Code
-  # v2.1.86 (cli.js bundle). Scopes match the refresh grant in that version.
-  # These are undocumented internals and may change with Claude Code releases.
-  oauth_refresh:
-    token_url: https://platform.claude.com/v1/oauth/token
-    client_id: 9d1c250a-e61b-44d9-88ed-5944d1962f5e
-    scope: "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
+# The endpoint Claude routes to by default (upstream, dynamic OAuth/API-key
+# header, token refresh) lives in resources/providers/anthropic.yaml.
+protocol: anthropic-messages
+provider:
+  default: anthropic
+  # Claude swaps the env-var name by stored credential type: OAuth tokens go
+  # to CLAUDE_CODE_OAUTH_TOKEN, API keys to ANTHROPIC_API_KEY.
   token_env:
     oauth: CLAUDE_CODE_OAUTH_TOKEN
     _default: ANTHROPIC_API_KEY
   base_url_env: ANTHROPIC_BASE_URL
   socket_env: ANTHROPIC_UNIX_SOCKET
+  credential_file: .credentials.json
+  credential_type: oauth
 
 auth:
   host_dir: _claude-config

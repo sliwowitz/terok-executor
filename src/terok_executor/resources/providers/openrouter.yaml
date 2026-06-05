@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenRouter — an OpenAI-compatible aggregator covering models from
+# Anthropic, OpenAI, Google, Meta, DeepSeek and others.  Drivable by any
+# harness (opencode, pi); usage is billed against OpenRouter credits.
+
+upstream: https://openrouter.ai
+
+auth:
+  api_key:
+    header: Authorization
+    prefix: "Bearer "
+
+serves:
+  openai-chat: "/v1"

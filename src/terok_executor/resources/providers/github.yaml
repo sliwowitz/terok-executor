@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# GitHub — the upstream the `gh` CLI authenticates to.  A tool provider:
+# no LLM protocol, so no `serves`.
+
+upstream: https://api.github.com
+
+auth:
+  oauth:
+    header: Authorization
+    prefix: "token "

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# GitLab — the upstream the `glab` CLI authenticates to.  A tool provider.
+# gitlab.com carries both the API and `git push` traffic on the same apex;
+# an nft host-deny would also kill pushes, so read-only credential
+# containment carries the security weight (see `shared_domain`).
+
+upstream: https://gitlab.com
+
+auth:
+  api_key:
+    header: PRIVATE-TOKEN
+    prefix: ""
+
+shared_domain: true

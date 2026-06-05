@@ -18,7 +18,7 @@ from typing import Any
 
 from terok_util import ensure_dir, ensure_dir_writable, yaml
 
-from .providers import AGENT_PROVIDERS
+from .providers import AGENTS
 
 # TODO: future — support global agent definitions in terok-config.yml (agent.subagents).
 # When implemented, global subagents would be merged with per-project subagents before
@@ -61,7 +61,7 @@ class AgentConfigSpec:
     subagents: tuple[dict, ...]
     selected_agents: tuple[str, ...] | None = None
     prompt: str | None = None
-    provider: str = "claude"
+    agent: str = "claude"
     instructions: str | None = None
     default_agent: str | None = None
     mounts_base: Path | None = None
@@ -91,7 +91,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Writes:
     - terok-executor.sh (always) — wrapper functions with git env vars
-    - agents.json (only when provider supports it and sub-agents are non-empty)
+    - agents.json (only when the agent supports it and sub-agents are non-empty)
     - prompt.txt (if prompt given, headless only)
     - instructions.md (always) — custom instructions or a neutral default
     - <envs>/_claude-config/settings.json — SessionStart hook (Claude only)
@@ -103,9 +103,9 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Returns the agent_config_dir path.
     """
-    from .providers import get_provider as _get_provider
+    from .providers import get_agent as _get_agent
 
-    resolved = _get_provider(spec.provider, default_agent=spec.default_agent)
+    resolved = _get_agent(spec.agent, default_agent=spec.default_agent)
 
     task_dir = spec.tasks_root / str(spec.task_id)
     agent_config_dir = task_dir / "agent-config"
@@ -143,7 +143,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     if mounts_base is None:
         raise ValueError("mounts_base is required in AgentConfigSpec")
     _inject_opencode_instructions(mounts_base / "_opencode-config" / "opencode.json")
-    for _p in AGENT_PROVIDERS.values():
+    for _p in AGENTS.values():
         if _p.opencode_config is not None:
             _inject_opencode_instructions(
                 mounts_base / f"_{_p.name}-config" / "opencode" / "opencode.json"

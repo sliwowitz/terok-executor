@@ -30,14 +30,16 @@ def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpe
 
 def _make_vault_db(
     tmp_path: Path,
-    cred_name: str = "claude",
+    cred_name: str = "anthropic",
     cred_data: dict | None = None,
     *,
     credential_set: str = "default",
 ):
     """Return a ``SandboxConfig`` with one credential pre-stored in its ``CredentialDB``.
 
-    The DB is created, populated, and closed internally.
+    The DB is created, populated, and closed internally.  Credentials are keyed
+    by *provider* name (``"anthropic"``) — the post-v3-migration vault contract
+    that ``routed = stored & roster.providers`` intersects against.
     """
     from terok_sandbox import CredentialDB, SandboxConfig
 
@@ -103,7 +105,7 @@ def base_spec(workspace: Path, envs_dir: Path) -> ContainerEnvSpec:
     """Minimal spec with only required fields (all dirs tmp-backed)."""
     return ContainerEnvSpec(
         task_id="test-123",
-        provider_name="claude",
+        agent_name="claude",
         workspace_host_path=workspace,
         envs_dir=envs_dir,
     )
@@ -113,7 +115,7 @@ def _spec(workspace: Path, envs_dir: Path, **overrides) -> ContainerEnvSpec:
     """Shorthand for a tmp-backed spec with overrides."""
     defaults = {
         "task_id": "t1",
-        "provider_name": "claude",
+        "agent_name": "claude",
         "workspace_host_path": workspace,
         "envs_dir": envs_dir,
     }
@@ -194,7 +196,7 @@ class TestGitIdentity:
         assert result.env["GIT_COMMITTER_EMAIL"] == "custom@t.com"
 
     def test_unknown_provider_uses_fallback(self, workspace, envs_dir, roster):
-        spec = _spec(workspace, envs_dir, provider_name="nonexistent")
+        spec = _spec(workspace, envs_dir, agent_name="nonexistent")
         result = assemble_container_env(spec, roster, caller_manages_vault=True)
         assert result.env["GIT_AUTHOR_NAME"] == "AI Agent"
 
@@ -850,6 +852,24 @@ class TestSharedConfigPatches:
         codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
         assert codex_cfg["openai_base_url"] == "http://localhost:9419/v1"
         assert codex_cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
+
+    def test_applies_tool_config_patch(self, roster, tmp_path):
+        """A *tool* (gh) — not in roster.agents — still gets its config patch.
+
+        Regression guard: patch application must iterate auth providers (agents
+        AND tools), not roster.agents, or gh's ``http_unix_socket`` vault
+        routing is silently skipped.
+        """
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"gh"}))
+
+        gh_cfg = (tmp_path / "_gh-config" / "config.yml").read_text()
+        assert "http_unix_socket" in gh_cfg  # vault socket wired in for the gh tool
 
     def test_assemble_env_calls_patches_with_and_without_bypass(self, workspace, envs_dir, roster):
         """assemble_container_env invokes patches regardless of caller_manages_vault."""

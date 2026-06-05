@@ -103,14 +103,17 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     roster = AgentRoster.shared()
     base_resolved = mounts_base.resolve(strict=False)
     leaked: list[tuple[str, Path]] = []
-    for name, route in roster.vault_routes.items():
-        if not route.credential_file:
-            continue
-        auth = roster.auth_providers.get(name)
-        if not auth:
+    # Iterate the shared mounts directly: each MountDef already pairs the
+    # agent's auth dir with the credential file its binding declares, so we
+    # don't have to re-join provider-keyed routes against agent-keyed auth
+    # providers.  ``mount.provider`` is the owning agent name (the label the
+    # operator sees); mounts without a credential file (opencode state dirs,
+    # explicit ``mounts:`` blocks) carry an empty string and are skipped.
+    for mount in roster.mounts:
+        if not mount.credential_file:
             continue
         try:
-            path = mounts_base / auth.host_dir_name / route.credential_file
+            path = mounts_base / mount.host_dir / mount.credential_file
             # lstat: do not follow symlinks — reject them outright
             st = path.lstat()
             if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
@@ -121,15 +124,14 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
             if st.st_size > 0 and not (
                 _is_injected_credentials_file(path) or _is_injected_codex_auth_file(path)
             ):
-                leaked.append((name, path))
+                leaked.append((mount.provider, path))
         except (OSError, TypeError) as exc:
             # Silently skipping turns a real leak into a no-result: the
             # operator would believe the scan was clean.  Surface a
-            # warning so it's obvious which provider was not checked
-            # and why; the loop continues so other providers still get
-            # scanned.
+            # warning so it's obvious which mount was not checked and why;
+            # the loop continues so other mounts still get scanned.
             print(
-                f"Warning [vault]: credential leak scan skipped {name!r}: {exc}",
+                f"Warning [vault]: credential leak scan skipped {mount.provider!r}: {exc}",
                 file=sys.stderr,
             )
             continue

@@ -30,21 +30,19 @@ class TestScanLeakedCredentialsWarnsOnSkip:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """A provider whose mount dir is missing yields a warning naming it."""
-        # Two providers: one has a credential file in its mount, one doesn't.
+        # Two mounts: one has a credential file present, one's dir is missing.
         roster = MagicMock()
-        route_present = MagicMock()
-        route_present.credential_file = ".credentials.json"
-        route_missing = MagicMock()
-        route_missing.credential_file = ".auth.json"
-        roster.vault_routes = {"claude": route_present, "codex": route_missing}
+        mount_present = MagicMock()
+        mount_present.provider = "claude"
+        mount_present.host_dir = "_claude-config"
+        mount_present.credential_file = ".credentials.json"
+        mount_missing = MagicMock()
+        mount_missing.provider = "codex"
+        mount_missing.host_dir = "_codex-config"
+        mount_missing.credential_file = ".auth.json"
+        roster.mounts = [mount_present, mount_missing]
 
-        auth_present = MagicMock()
-        auth_present.host_dir_name = "_claude-config"
-        auth_missing = MagicMock()
-        auth_missing.host_dir_name = "_codex-config"
-        roster.auth_providers = {"claude": auth_present, "codex": auth_missing}
-
-        # Set up only the claude provider's mount with a leaked-looking file.
+        # Set up only the claude mount with a leaked-looking file.
         (tmp_path / "_claude-config").mkdir()
         (tmp_path / "_claude-config" / ".credentials.json").write_text(
             '{"accessToken": "real-secret"}'

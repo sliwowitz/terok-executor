@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenAI — the upstream the `codex` agent authenticates to by default.
+# Codex's ChatGPT-backed traffic is split off to chatgpt.com by path.
+
+upstream: https://api.openai.com
+
+auth:
+  oauth:
+    header: Authorization
+    prefix: "Bearer "
+
+path_upstreams:
+  /backend-api/: https://chatgpt.com
+
+# OAuth refresh -- endpoint, client_id, and grant shape extracted from the
+# Codex CLI source (codex-rs/login/src/auth/manager.rs v0.123.0).
+oauth_refresh:
+  token_url: https://auth.openai.com/oauth/token
+  client_id: app_EMoamEEZ73f0CkXaXp7hrann
+
+serves:
+  openai-responses: "/v1"

@@ -14,7 +14,7 @@ Usage::
     from terok_executor import AgentRoster
 
     result = assemble_container_env(
-        ContainerEnvSpec(task_id="abc", provider_name="claude", workspace_host_path=ws),
+        ContainerEnvSpec(task_id="abc", agent_name="claude", workspace_host_path=ws),
         AgentRoster.shared(),
     )
     # result.env, result.volumes, result.task_dir
@@ -72,8 +72,8 @@ class ContainerEnvSpec:
     task_id: str
     """Unique task identifier."""
 
-    provider_name: str
-    """Agent provider name (e.g. ``"claude"``, ``"codex"``)."""
+    agent_name: str
+    """Agent name (e.g. ``"claude"``, ``"codex"``)."""
 
     workspace_host_path: Path
     """Host-side workspace directory — caller pre-creates, mounted as ``/workspace:Z``."""
@@ -373,15 +373,13 @@ def _resolve_git_identity(spec: ContainerEnvSpec, roster: AgentRoster) -> dict[s
     """Resolve the four git identity env vars.
 
     Uses explicit spec fields when provided, otherwise falls back to the
-    roster provider's configured identity (same name for both author and
+    roster agent's configured identity (same name for both author and
     committer — standalone default).
     """
-    provider = roster.providers.get(spec.provider_name)
+    agent = roster.agents.get(spec.agent_name)
 
-    author_name = spec.git_author_name or (provider.git_author_name if provider else "AI Agent")
-    author_email = spec.git_author_email or (
-        provider.git_author_email if provider else "ai@localhost"
-    )
+    author_name = spec.git_author_name or (agent.git_author_name if agent else "AI Agent")
+    author_email = spec.git_author_email or (agent.git_author_email if agent else "ai@localhost")
     committer_name = spec.git_committer_name or author_name
     committer_email = spec.git_committer_email or author_email
 
@@ -546,12 +544,13 @@ def _inject_vault_tokens(
             env[route.base_url_env] = location.url
 
         # OpenCode base URL override for proxied providers.
-        provider = roster.providers.get(name)
-        if provider and provider.opencode_config:
+        agent = roster.agents.get(name)
+        if agent and agent.opencode_config:
             env[f"TEROK_OC_{name.upper()}_BASE_URL"] = f"{location.url}/v1"
-        # glab uses its own host+protocol split; in socket mode it rides the
-        # same in-container loopback bridge as every other HTTP-only client.
-        if name == "glab":
+        # The gitlab provider (glab CLI) uses its own host+protocol split; in
+        # socket mode it rides the same in-container loopback bridge as every
+        # other HTTP-only client.
+        if name == "gitlab":
             env["API_PROTOCOL"] = "http"
             env["GITLAB_API_HOST"] = host_tcp if host_tcp else f"localhost:{LOOPBACK_VAULT_PORT}"
 

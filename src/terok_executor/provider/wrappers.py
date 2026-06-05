@@ -24,7 +24,7 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment
 
-from .providers import AGENT_PROVIDERS, AgentProvider
+from .providers import AGENTS, Agent
 
 INITIAL_PROMPT_PATH = "/home/dev/.terok/initial-prompt.txt"
 """Container path of the per-task initial prompt the TUI/CLI writes at launch."""
@@ -45,31 +45,31 @@ _TEMPLATE_NAME = "agent-wrappers.sh.j2"
 
 
 def generate_all_wrappers(has_agents: bool) -> str:
-    """Render ``terok-executor.sh``: a shell wrapper function for every provider.
+    """Render ``terok-executor.sh``: a shell wrapper function for every agent.
 
-    The output file contains a shell function per provider (``claude()``,
+    The output file contains a shell function per agent (``claude()``,
     ``codex()``, ``vibe()``, …), each with correct git env vars, timeout
     support, and session-resume logic, plus the two shared helper functions
     they call.  This lets interactive CLI users invoke any agent regardless of
-    which provider was configured as default.
+    which agent was configured as default.
 
     Args:
         has_agents: Whether an ``agents.json`` was written — adds Claude's
             ``--agents`` flag to the ``claude()`` wrapper.
     """
-    providers = [_wrapper_context(p) for p in AGENT_PROVIDERS.values()]
-    return _env().from_string(_template_source()).render(providers=providers, has_agents=has_agents)
+    agents = [_wrapper_context(a) for a in AGENTS.values()]
+    return _env().from_string(_template_source()).render(agents=agents, has_agents=has_agents)
 
 
-def generate_agent_wrapper(provider: AgentProvider, has_agents: bool = False) -> str:
-    """Render a single provider's wrapper function, without the shared helpers.
+def generate_agent_wrapper(agent: Agent, has_agents: bool = False) -> str:
+    """Render a single agent's wrapper function, without the shared helpers.
 
-    Used to inspect one provider's wrapper in isolation; the full file (with
+    Used to inspect one agent's wrapper in isolation; the full file (with
     the ``_terok_resume_or_fresh`` / ``_terok_trust_workspace_for_vibe``
     helpers) is produced by
     [`generate_all_wrappers`][terok_executor.provider.wrappers.generate_all_wrappers].
     """
-    ctx = _wrapper_context(provider)
+    ctx = _wrapper_context(agent)
     # Jinja resolves macros dynamically, so the template module's macro
     # attributes (claude_wrapper / generic_wrapper) are not statically known.
     macros: Any = _env().from_string(_template_source()).module
@@ -78,75 +78,75 @@ def generate_agent_wrapper(provider: AgentProvider, has_agents: bool = False) ->
     return str(macros.generic_wrapper(ctx))
 
 
-# ── Per-provider data preparation ───────────────────────────────────────────
+# ── Per-agent data preparation ───────────────────────────────────────────────
 
 
-def _wrapper_context(provider: AgentProvider) -> dict[str, object]:
-    """Prepare the data the template renders into one provider's shell wrapper.
+def _wrapper_context(agent: Agent) -> dict[str, object]:
+    """Prepare the data the template renders into one agent's shell wrapper.
 
     Every shell-significant value is resolved here so the template stays a pure
     layout concern: identities are shell-quoted, the session path is resolved,
     and the headless/interactive command strings are assembled (including the
     stale-session resume guard and the extra-args expansion).
     """
-    session_path = f"/home/dev/.terok/{provider.session_file}" if provider.session_file else ""
-    binary = provider.binary
-    extra = _extra_args_expansion(provider, session_path)
+    session_path = f"/home/dev/.terok/{agent.session_file}" if agent.session_file else ""
+    binary = agent.binary
+    extra = _extra_args_expansion(agent, session_path)
     wrap = (
-        f"_terok_resume_or_fresh {session_path} {provider.resume_flag} "
-        if session_path and provider.resume_flag
+        f"_terok_resume_or_fresh {session_path} {agent.resume_flag} "
+        if session_path and agent.resume_flag
         else ""
     )
     return {
-        "name": provider.name,
+        "name": agent.name,
         "binary": binary,
-        "is_claude": provider.name == "claude",
-        "is_vibe": provider.name == "vibe",
-        "is_codex": provider.name == "codex",
-        "author_name": shlex.quote(provider.git_author_name),
-        "author_email": shlex.quote(provider.git_author_email),
-        "refuse_pattern": "|".join(provider.refuse_subcommands),
-        "auto_approve_flags": list(provider.auto_approve_flags),
-        "opencode_plugin_dir": _opencode_plugin_dir(provider),
+        "is_claude": agent.name == "claude",
+        "is_vibe": agent.name == "vibe",
+        "is_codex": agent.name == "codex",
+        "author_name": shlex.quote(agent.git_author_name),
+        "author_email": shlex.quote(agent.git_author_email),
+        "refuse_pattern": "|".join(agent.refuse_subcommands),
+        "auto_approve_flags": list(agent.auto_approve_flags),
+        "opencode_plugin_dir": _opencode_plugin_dir(agent),
         "session_path": session_path,
-        "resume_flag": provider.resume_flag or "",
-        "seed_prefix": _seed_prefix(provider),
+        "resume_flag": agent.resume_flag or "",
+        "seed_prefix": _seed_prefix(agent),
         "headless_cmd": f'{wrap}timeout "$_timeout" {binary}{extra} "$@"',
         "interactive_cmd": f'{wrap}command {binary}{extra} "$@"',
     }
 
 
-def _extra_args_expansion(provider: AgentProvider, session_path: str) -> str:
+def _extra_args_expansion(agent: Agent, session_path: str) -> str:
     """Build the extra-args shell expansions placed between the binary and ``"$@"``."""
     parts: list[str] = []
-    if provider.auto_approve_flags:
+    if agent.auto_approve_flags:
         parts.append('"${_approve_args[@]}"')
-    if session_path and provider.resume_flag:
+    if session_path and agent.resume_flag:
         parts.append('"${_resume_args[@]}"')
-    if provider.name == "codex":
+    if agent.name == "codex":
         parts.append('"${_instr_args[@]}"')
     return (" " + " ".join(parts)) if parts else ""
 
 
-def _opencode_plugin_dir(provider: AgentProvider) -> str:
+def _opencode_plugin_dir(agent: Agent) -> str:
     """Return the OpenCode session-plugin directory, or ``""`` when not applicable."""
-    if not (provider.session_file and provider.uses_opencode_instructions):
+    if not (agent.session_file and agent.uses_opencode_instructions):
         return ""
-    if provider.opencode_config is not None:
-        return f"$HOME/{provider.opencode_config.config_dir}/opencode/plugins"
+    if agent.opencode_config is not None:
+        return f"$HOME/{agent.opencode_config.config_dir}/opencode/plugins"
     return "$HOME/.config/opencode/plugins"
 
 
-def _seed_prefix(provider: AgentProvider) -> str:
+def _seed_prefix(agent: Agent) -> str:
     """Return the shell-quoted argv prefix used when seeding the initial prompt.
 
     Most CLIs accept a bare positional string as the first message; OpenCode
     routes through its ``run`` subcommand and Copilot through ``-p`` so the
     text is interpreted as a prompt rather than a path or unrelated argument.
     """
-    if provider.uses_opencode_instructions:
+    if agent.uses_opencode_instructions:
         tokens = ["run"]
-    elif provider.name == "copilot":
+    elif agent.name == "copilot":
         tokens = ["-p"]
     else:
         tokens = []

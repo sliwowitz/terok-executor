@@ -2,23 +2,23 @@
 # SPDX-FileCopyrightText: 2026 Andreas Knüpfer
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agent provider registry + per-provider behaviour.
+"""Agent registry + per-agent behaviour.
 
 Each supported AI coding agent is described by an
-[`AgentProvider`][terok_executor.provider.providers.AgentProvider]
+[`Agent`][terok_executor.provider.providers.Agent]
 dataclass that owns both its capability shape (flags, environment,
 session handling) and the behaviour bound to that shape — config
-resolution ([`AgentProvider.apply_config`][terok_executor.provider.providers.AgentProvider.apply_config])
-and headless-command assembly ([`AgentProvider.build_headless_command`][terok_executor.provider.providers.AgentProvider.build_headless_command]).
+resolution ([`Agent.apply_config`][terok_executor.provider.providers.Agent.apply_config])
+and headless-command assembly ([`Agent.build_headless_command`][terok_executor.provider.providers.Agent.build_headless_command]).
 
-The ``AGENT_PROVIDERS`` dict maps short names to descriptors and is
+The ``AGENTS`` dict maps short names to descriptors and is
 populated at package load time from the YAML roster.
 """
 
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -61,10 +61,10 @@ class OpenCodeProviderConfig:
 
 
 @dataclass(frozen=True)
-class ProviderConfig:
+class AgentRunConfig:
     """Resolved per-run config for a headless provider.
 
-    Produced by [`AgentProvider.apply_config`][terok_executor.provider.providers.AgentProvider.apply_config]
+    Produced by [`Agent.apply_config`][terok_executor.provider.providers.Agent.apply_config]
     after best-effort feature mapping.
     """
 
@@ -101,29 +101,29 @@ class CLIOverrides:
     """Resolved instructions text. Delivery is provider-aware."""
 
 
-def resolve_provider_value(
+def resolve_agent_value(
     key: str,
     config: dict[str, Any],
-    provider_name: str,
+    agent_name: str,
 ) -> Any | None:
-    """Extract a provider-aware config value.
+    """Extract an agent-aware config value.
 
     Supports two forms:
 
-    * **Flat value** — ``model: opus`` → same for all providers.
-    * **Per-provider dict** — ``model: {claude: opus, codex: o3, _default: fast}``
-      → looks up *provider_name*, falls back to ``_default``, then ``None``.
+    * **Flat value** — ``model: opus`` → same for all agents.
+    * **Per-agent dict** — ``model: {claude: opus, codex: o3, _default: fast}``
+      → looks up *agent_name*, falls back to ``_default``, then ``None``.
 
-    Returns ``None`` when the key is absent or has no match for the provider.
+    Returns ``None`` when the key is absent or has no match for the agent.
 
-    **Null override behaviour**: when a per-provider dict maps a provider to
+    **Null override behaviour**: when a per-agent dict maps an agent to
     ``null`` (Python ``None``), that ``None`` is treated as "no value" and the
     resolver falls back to ``_default``.  This is intentional — it allows a
-    lower-priority config layer to set a provider-specific value that a
+    lower-priority config layer to set an agent-specific value that a
     higher-priority layer can effectively *unset* by mapping it to ``null``,
     letting the ``_default`` (or ``None``) bubble up instead.
 
-    Internal to provider config resolution — full config-stack composition
+    Internal to agent config resolution — full config-stack composition
     (``build_agent_config_stack``, ``resolve_agent_config``) lives in terok,
     which owns the global/project/preset layer semantics.
     """
@@ -131,15 +131,65 @@ def resolve_provider_value(
     if val is None:
         return None
     if isinstance(val, dict):
-        provider_val = val.get(provider_name)
-        if provider_val is not None:
-            return provider_val
+        agent_val = val.get(agent_name)
+        if agent_val is not None:
+            return agent_val
         return val.get("_default")
     return val
 
 
 @dataclass(frozen=True)
-class AgentProvider:
+class ProviderBinding:
+    """How one agent consumes a provider — the *delivery* concern.
+
+    Lifted out of the agent ``vault:`` block: which provider this agent routes
+    to by default, and the per-agent env-var / config-patch plumbing that
+    carries the phantom token and vault base URL into the agent's own
+    configuration.  The *endpoint* concern (upstream, wire auth) lives on the
+    [`Provider`][terok_executor.roster.types.Provider] this binding names.
+    """
+
+    default: str | None = None
+    """Provider name this agent routes to by default.
+
+    Set for agents with a fixed provider (natives → their LLM provider; tools
+    → their API provider; the OpenCode-shim agents → their endpoint).  ``None``
+    for harnesses (opencode, pi), which take a provider at runtime.
+    """
+
+    token_env: dict[str, str] = field(default_factory=dict)
+    """Phantom-token env var name, keyed by stored credential type.
+
+    Keys are credential types (``"oauth"``, ``"pat"``, …); ``"_default"`` is the
+    fallback.  Most agents read one var (``{"_default": "MISTRAL_API_KEY"}``);
+    Claude swaps on OAuth (``{"oauth": "CLAUDE_CODE_OAUTH_TOKEN", "_default":
+    "ANTHROPIC_API_KEY"}``).
+    """
+
+    base_url_env: str = ""
+    """Env var overridden with the vault's HTTP URL (e.g. ``"ANTHROPIC_BASE_URL"``)."""
+
+    socket_env: str = ""
+    """Env var that receives the container-side vault socket path (HTTP-over-UNIX agents)."""
+
+    credential_file: str = ""
+    """Credential file path relative to the auth mount (e.g. ``".credentials.json"``).
+
+    Drives the read-only credential shadow ([terok-ai/terok#873](https://github.com/terok-ai/terok/issues/873))
+    and the doctor's leaked-secret probe.
+    """
+
+    credential_type: str = "api_key"
+    """Default credential type captured for this agent (``"oauth"``/``"api_key"``/
+    ``"oauth_token"``/``"pat"``).  The runtime token selection uses the *stored*
+    type from the vault DB; this is the authoring default."""
+
+    config_patch: dict | None = None
+    """Optional shared-config patch applied after auth (e.g. Codex/Vibe config.toml)."""
+
+
+@dataclass(frozen=True)
+class Agent:
     """Describes how to run one AI coding agent (all modes: interactive + headless)."""
 
     name: str
@@ -202,7 +252,7 @@ class AgentProvider:
     # -- Session support --
 
     supports_session_resume: bool
-    """Whether the provider supports resuming a previous session."""
+    """Whether the agent supports resuming a previous session."""
 
     resume_flag: str | None
     """Flag to resume a session (e.g. ``"--resume"``, ``"--session"``)."""
@@ -221,13 +271,13 @@ class AgentProvider:
     # -- Claude-specific capabilities --
 
     supports_agents_json: bool
-    """Whether the provider supports ``--agents`` JSON (Claude only)."""
+    """Whether the agent supports ``--agents`` JSON (Claude only)."""
 
     supports_session_hook: bool
-    """Whether the provider supports SessionStart hooks (Claude only)."""
+    """Whether the agent supports SessionStart hooks (Claude only)."""
 
     supports_add_dir: bool
-    """Whether the provider supports ``--add-dir "/"`` (Claude only)."""
+    """Whether the agent supports ``--add-dir "/"`` (Claude only)."""
 
     # -- Log formatting --
 
@@ -252,6 +302,16 @@ class AgentProvider:
     ([terok-ai/terok#873](https://github.com/terok-ai/terok/issues/873)).
     """
 
+    protocol: str | None = None
+    """Wire protocol the agent speaks (``"anthropic-messages"`` / ``"openai-chat"`` /
+    ``"openai-responses"``), or ``None`` for non-LLM tools.  Matched against a
+    provider's ``serves`` to resolve a runtime agent×provider combo."""
+
+    provider_binding: ProviderBinding | None = None
+    """How this agent routes to a provider — see [`ProviderBinding`][terok_executor.provider.providers.ProviderBinding].
+
+    ``None`` for entries with no vault route of their own (harnesses, copilot)."""
+
     @property
     def uses_opencode_instructions(self) -> bool:
         """Whether the provider uses OpenCode's instruction system."""
@@ -263,7 +323,7 @@ class AgentProvider:
         self,
         config: dict[str, Any],
         overrides: CLIOverrides | None = None,
-    ) -> ProviderConfig:
+    ) -> AgentRunConfig:
         """Resolve config values for this provider with best-effort feature mapping.
 
         CLI flag *overrides* take precedence over *config* values.  When this
@@ -278,7 +338,7 @@ class AgentProvider:
         prompt_parts: list[str] = []
 
         # --- Model ---
-        cfg_model = resolve_provider_value("model", config, self.name)
+        cfg_model = resolve_agent_value("model", config, self.name)
         model = overrides.model or (str(cfg_model) if cfg_model is not None else None)
         if model and not self.model_flag:
             warnings.append(
@@ -287,7 +347,7 @@ class AgentProvider:
             model = None
 
         # --- Max turns ---
-        cfg_turns = resolve_provider_value("max_turns", config, self.name)
+        cfg_turns = resolve_agent_value("max_turns", config, self.name)
         max_turns_raw = overrides.max_turns if overrides.max_turns is not None else cfg_turns
         max_turns: int | None = int(max_turns_raw) if max_turns_raw is not None else None
         if max_turns is not None and not self.max_turns_flag:
@@ -300,7 +360,7 @@ class AgentProvider:
             max_turns = None
 
         # --- Timeout ---
-        cfg_timeout = resolve_provider_value("timeout", config, self.name)
+        cfg_timeout = resolve_agent_value("timeout", config, self.name)
         timeout = (
             overrides.timeout
             if overrides.timeout is not None
@@ -329,7 +389,7 @@ class AgentProvider:
         ):
             prompt_parts.insert(0, instructions)
 
-        return ProviderConfig(
+        return AgentRunConfig(
             model=model,
             max_turns=max_turns,
             timeout=timeout,
@@ -443,43 +503,43 @@ class AgentProvider:
 
 
 # ---------------------------------------------------------------------------
-# Provider registry — populated from YAML by __init__.py at package load time
+# Agent registry — populated from YAML by __init__.py at package load time
 # ---------------------------------------------------------------------------
 
-AGENT_PROVIDERS: dict[str, AgentProvider] = {}
-"""All agent providers, keyed by name.  Loaded from ``resources/agents/*.yaml``."""
+AGENTS: dict[str, Agent] = {}
+"""All agents, keyed by name.  Loaded from ``resources/agents/*.yaml``."""
 
-PROVIDER_NAMES: tuple[str, ...] = ()
+AGENT_NAMES: tuple[str, ...] = ()
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
-def resolve_provider(
-    providers: dict[str, AgentProvider],
+def resolve_agent(
+    agents: dict[str, Agent],
     name: str | None,
     *,
     default_agent: str | None = None,
-) -> AgentProvider:
-    """Look up a provider by name from *providers*, with fallback chain.
+) -> Agent:
+    """Look up an agent by name from *agents*, with fallback chain.
 
     Resolution order: explicit *name* → *default_agent* → ``"claude"``.
     Raises ``SystemExit`` if the resolved name is not found.
     """
     resolved = name or default_agent or "claude"
-    provider = providers.get(resolved)
-    if provider is None:
-        valid = ", ".join(sorted(providers))
-        raise SystemExit(f"Unknown provider {resolved!r}. Valid providers: {valid}")
-    return provider
+    agent = agents.get(resolved)
+    if agent is None:
+        valid = ", ".join(sorted(agents))
+        raise SystemExit(f"Unknown agent {resolved!r}. Valid agents: {valid}")
+    return agent
 
 
-def get_provider(name: str | None, *, default_agent: str | None = None) -> AgentProvider:
-    """Resolve a provider name against the global [`AGENT_PROVIDERS`][terok_executor.provider.providers.AGENT_PROVIDERS] registry.
+def get_agent(name: str | None, *, default_agent: str | None = None) -> Agent:
+    """Resolve an agent name against the global [`AGENTS`][terok_executor.provider.providers.AGENTS] registry.
 
-    Convenience wrapper around [`resolve_provider`][terok_executor.provider.providers.resolve_provider].
+    Convenience wrapper around [`resolve_agent`][terok_executor.provider.providers.resolve_agent].
     """
-    return resolve_provider(AGENT_PROVIDERS, name, default_agent=default_agent)
+    return resolve_agent(AGENTS, name, default_agent=default_agent)
 
 
 def collect_opencode_provider_env() -> dict[str, str]:
@@ -490,7 +550,7 @@ def collect_opencode_provider_env() -> dict[str, str]:
     contributes variables prefixed with TEROK_OC_{PROVIDER_NAME}_*.
     """
     env: dict[str, str] = {}
-    for provider in AGENT_PROVIDERS.values():
-        if provider.opencode_config is not None:
-            env.update(provider.opencode_config.to_env(provider.name))
+    for agent in AGENTS.values():
+        if agent.opencode_config is not None:
+            env.update(agent.opencode_config.to_env(agent.name))
     return env

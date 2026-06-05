@@ -1,25 +1,20 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: tool
 label: GitLab CLI
 binary: glab
 
-vault:
-  route_prefix: gl
-  upstream: https://gitlab.com
-  auth_header: PRIVATE-TOKEN
-  auth_prefix: ""
+# The GitLab endpoint (gitlab.com, PRIVATE-TOKEN auth, shared_domain) lives
+# in resources/providers/gitlab.yaml.
+provider:
+  default: gitlab
   credential_type: pat
   credential_file: config.yml
   token_env:
     _default: GITLAB_TOKEN
-  # gitlab.com carries both the API and ``git push`` traffic on the same
-  # apex; an nft host-deny would also kill pushes.  Read-only credential
-  # containment is the actual containment story for this provider.
-  shared_domain: true
 
 auth:
   host_dir: _glab-config
