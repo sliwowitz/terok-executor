@@ -12,6 +12,7 @@ path = [
   "**/*.txt",
   "**/*.css",
   "**/*.template",
+  "**/*.j2",
   "**/*.conf",
   "**/*.mjs",
   ".gitignore",

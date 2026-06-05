@@ -1,0 +1,254 @@
+{#-
+  Renders terok-executor.sh: one shell wrapper function per agent provider,
+  plus the two shared helper functions they call.  The Python side
+  (provider/wrappers.py) prepares a per-provider context dict; this template
+  owns every line of shell.
+
+  Context:
+    providers   list of per-provider context dicts (see _wrapper_context)
+    has_agents  whether an agents.json was written (Claude --agents)
+-#}
+{%- macro generic_wrapper(c) -%}
+{{ c.binary }}() {
+{%- if c.refuse_pattern %}
+    case "${1:-}" in
+        {{ c.refuse_pattern }})
+            echo "Login is unavailable inside a terok task." >&2
+            echo "Run 'terok auth {{ c.name }}' on the host instead." >&2
+            return 1 ;;
+    esac
+{%- endif %}
+    local _timeout=""
+    # Extract terok-specific flags (must come before agent flags)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --terok-timeout) _timeout="$2"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
+        . /usr/local/share/terok/terok-env-git-identity.sh
+{%- if c.is_vibe %}
+    # Lazy Mistral model sync (pure-bash mtime check, avoids Python startup)
+    if command -v vibe-model-sync >/dev/null 2>&1; then
+        local _mc=$HOME/.vibe/mistral-models.txt
+        if [ ! -f "$_mc" ] || [ -n "$(find "$_mc" -mmin +1440 2>/dev/null)" ]; then
+            vibe-model-sync >/dev/null 2>&1 || true
+        fi
+    fi
+{%- endif %}
+{%- if c.auto_approve_flags %}
+    local _approve_args=()
+    if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
+{%- for flag in c.auto_approve_flags %}
+        _approve_args+=({{ flag | shquote }})
+{%- endfor %}
+    fi
+{%- endif %}
+{%- if c.opencode_plugin_dir %}
+    # Ensure OpenCode session plugin is installed
+    local _plugin_src=/usr/local/share/terok/opencode-session-plugin.mjs
+    local _plugin_dir={{ c.opencode_plugin_dir }}
+    if [ -f "$_plugin_src" ]; then
+        mkdir -p "$_plugin_dir"
+        ln -sf "$_plugin_src" "$_plugin_dir/terok-session.mjs"
+    fi
+{%- endif %}
+{%- if c.session_path and c.resume_flag %}
+    local _resume_args=()
+    if [ -s {{ c.session_path }} ] && \
+       { [ -n "$_timeout" ] || [ $# -eq 0 ]; }; then
+        _resume_args+=({{ c.resume_flag }} "$(cat {{ c.session_path }})")
+    fi
+{%- endif %}
+{%- if c.is_codex %}
+    local _instr_args=()
+    [ -f /home/dev/.terok/instructions.md ] && \
+        _instr_args+=(-c 'model_instructions_file="/home/dev/.terok/instructions.md"')
+{%- endif %}
+    # Pick up the task's initial prompt as the first message (one-shot).
+    if [ -z "$_timeout" ] && [ $# -eq 0 ]{% if c.session_path %} && [ ! -s {{ c.session_path }} ]{% endif %} && [ -s /home/dev/.terok/initial-prompt.txt ]; then
+        set -- {{ c.seed_prefix }}"$(cat /home/dev/.terok/initial-prompt.txt)"
+        mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
+    fi
+{%- if c.is_vibe and c.session_path %}
+    _terok_capture_vibe_session() {
+        python3 -c "
+import json, os, glob
+files = sorted(glob.glob(os.path.expanduser('~/.vibe/logs/session/session_*/meta.json')),
+               key=os.path.getmtime, reverse=True)
+if files:
+    with open(files[0]) as f:
+        sid = json.load(f).get('session_id', '')
+    if sid:
+        print(sid)
+" > {{ c.session_path }} 2>/dev/null || true
+    }
+{%- endif %}
+    if [ -n "$_timeout" ]; then
+        (
+            _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
+{%- if c.is_vibe %}
+{{ vibe_subshell_setup() }}
+{%- endif %}
+{%- if c.session_path %}
+            export TEROK_SESSION_FILE={{ c.session_path }}
+{%- endif %}
+        {{ c.headless_cmd }}
+{%- if c.is_vibe and c.session_path %}
+        local _rc=$?; _terok_capture_vibe_session; return $_rc
+{%- endif %}
+        )
+    else
+        (
+            _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
+{%- if c.is_vibe %}
+{{ vibe_subshell_setup() }}
+{%- endif %}
+{%- if c.session_path %}
+            export TEROK_SESSION_FILE={{ c.session_path }}
+{%- endif %}
+        {{ c.interactive_cmd }}
+{%- if c.is_vibe and c.session_path %}
+        local _rc=$?; _terok_capture_vibe_session; return $_rc
+{%- endif %}
+        )
+    fi
+}
+{%- endmacro -%}
+
+{%- macro vibe_subshell_setup() -%}
+{{ '            ' }}# ── Vibe: yolo + per-task instructions + workspace trust ──
+            export VIBE_BYPASS_TOOL_PERMISSIONS=true
+            if [ -f "/home/dev/.terok/instructions.md" ] && [ -n "${TASK_ID:-}" ]; then
+                local _vibe_prompt_id="terok-task-${TASK_ID}"
+                local _vibe_prompts_dir="${HOME}/.vibe/prompts"
+                local _vibe_prompt_file="${_vibe_prompts_dir}/${_vibe_prompt_id}.md"
+                mkdir -p "${_vibe_prompts_dir}"
+                cp "/home/dev/.terok/instructions.md" "${_vibe_prompt_file}"
+                export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"
+                trap 'rm -f "${_vibe_prompt_file}"' EXIT
+            fi
+            _terok_trust_workspace_for_vibe "/workspace"
+{%- endmacro -%}
+
+{%- macro claude_wrapper(c, has_agents) -%}
+claude() {
+{%- if c.refuse_pattern %}
+    case "${1:-}" in
+        {{ c.refuse_pattern }})
+            echo "Login is unavailable inside a terok task." >&2
+            echo "Run 'terok auth claude' on the host instead." >&2
+            return 1 ;;
+    esac
+{%- endif %}
+    local _timeout=""
+    # Extract terok-specific flags (must come before claude flags)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --terok-timeout) _timeout="$2"; shift 2 ;;
+            *) break ;;
+        esac
+    done
+    local _args=()
+    [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
+        . /usr/local/share/terok/terok-env-git-identity.sh
+    _args+=(--add-dir "/")
+{%- if has_agents %}
+    [ -f /home/dev/.terok/agents.json ] && \
+        _args+=(--agents "$(cat /home/dev/.terok/agents.json)")
+{%- endif %}
+    [ -f /home/dev/.terok/instructions.md ] && \
+        _args+=(--append-system-prompt "$(cat /home/dev/.terok/instructions.md)")
+    [ -s /home/dev/.terok/claude-session.txt ] && \
+       { [ -n "$_timeout" ] || [ $# -eq 0 ]; } && \
+        _args+=(--resume "$(cat /home/dev/.terok/claude-session.txt)")
+    # Pick up the task's initial prompt as the first message (one-shot).
+    if [ -z "$_timeout" ] && [ $# -eq 0 ] && [ ! -s /home/dev/.terok/claude-session.txt ] && [ -s /home/dev/.terok/initial-prompt.txt ]; then
+        set -- "$(cat /home/dev/.terok/initial-prompt.txt)"
+        mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
+    fi
+    if [ -n "$_timeout" ]; then
+        (
+            _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
+            export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
+            _terok_resume_or_fresh /home/dev/.terok/claude-session.txt --resume timeout "$_timeout" claude "${_args[@]}" "$@"
+        )
+    else
+        (
+            _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
+            export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
+            _terok_resume_or_fresh /home/dev/.terok/claude-session.txt --resume command claude "${_args[@]}" "$@"
+        )
+    fi
+}
+{%- endmacro -%}
+# WORKAROUND: stale-session guard (timing-based heuristic).
+#
+# When a user starts an agent, exits immediately (no real interaction),
+# and re-runs, the captured session ID points to a conversation that was
+# never persisted.  The agent then fails with "No conversation found".
+#
+# This is a best-effort mitigation, not a proper fix: we assume that
+# any non-zero exit within 2 seconds of launch is a stale-session error
+# and retry without --resume.  This heuristic can misfire (e.g. a fast
+# config error would also trigger a retry), but the retry is harmless —
+# it just runs without resume, which is the correct fallback anyway.
+#
+# A proper fix would validate the session ID against the agent's storage
+# before injecting --resume, but that requires agent-specific probes
+# that don't exist yet.
+_terok_resume_or_fresh() {
+    local _session_file="$1" _resume_flag="$2"; shift 2
+    local _start; _start=$(date +%s)
+    "$@"; local _rc=$?
+    local _elapsed=$(( $(date +%s) - _start ))
+    if [ $_rc -ne 0 ] && [ $_elapsed -lt 2 ] && [ -s "$_session_file" ]; then
+        echo "terok: session not found (stale?), retrying without resume" >&2
+        rm -f "$_session_file"
+        local _retry=() _skip=false
+        for _a in "$@"; do
+            if $_skip; then _skip=false; continue; fi
+            if [ "$_a" = "$_resume_flag" ]; then _skip=true; continue; fi
+            _retry+=("$_a")
+        done
+        "${_retry[@]}"; _rc=$?
+    fi
+    return $_rc
+}
+
+# Idempotently mark a container path as trusted in Vibe.
+#
+# Vibe's trust system lives at $VIBE_HOME/trusted_folders.toml as
+# ``trusted = [...]`` + ``untrusted = [...]``.  The CLI has a --trust
+# flag; the ACP entrypoint has no equivalent.  Without trust, the
+# project's AGENTS.md chain isn't composed into the system prompt
+# (vibe/core/config/harness_files/_harness_manager.py:196 returns early
+# when ``trusted_workdir`` is None).
+#
+# ~/.vibe is shared across every task container, so the write is
+# guarded with ``flock`` to avoid TOML corruption when two tasks land
+# at the same moment.  ``/workspace`` is a container-only path that
+# never resolves on the host, so persisting it in shared state is
+# benign — it only affects future containers that mount the same
+# /workspace, which is exactly what we want.
+#
+# The TOML merge itself lives in
+# ``/usr/local/share/terok/terok-trust-workspace.py`` (installed by the
+# L1 Dockerfile); the same script is invoked by the ACP wrapper
+# (``terok-vibe-acp``) so future Vibe schema changes land in one place.
+_terok_trust_workspace_for_vibe() {
+    local _path="$1"
+    local _tf="${HOME}/.vibe/trusted_folders.toml"
+    local _merge=/usr/local/share/terok/terok-trust-workspace.py
+    [ -x "${_merge}" ] || return 0
+    mkdir -p "$(dirname "${_tf}")"
+    (
+        flock -x 200
+        python3 "${_merge}" "${_path}" "${_tf}"
+    ) 200>"${_tf}.lock"
+}
+{% for c in providers %}
+# Generated by terok
+{% if c.is_claude %}{{ claude_wrapper(c, has_agents) }}{% else %}{{ generic_wrapper(c) }}{% endif %}
+{% endfor -%}

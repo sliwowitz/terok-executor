@@ -13,14 +13,14 @@ from pathlib import Path
 
 from terok_executor.provider.agents import (
     AgentConfigSpec,
-    _generate_claude_wrapper,
     _inject_opencode_instructions,
     _subagents_to_json,
     _write_session_hook,
     parse_md_agent,
     prepare_agent_config_dir,
 )
-from terok_executor.provider.wrappers import WrapperConfig
+from terok_executor.provider.providers import AGENT_PROVIDERS
+from terok_executor.provider.wrappers import generate_agent_wrapper
 from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,
@@ -136,7 +136,7 @@ class TestGenerateClaudeWrapper:
 
     def test_basic_wrapper(self) -> None:
         """Wrapper includes add-dir / and git env vars."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False))
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
         assert "claude()" in wrapper
         assert '--add-dir "/"' in wrapper
         assert "_terok_apply_git_identity Claude noreply@anthropic.com" in wrapper
@@ -144,34 +144,35 @@ class TestGenerateClaudeWrapper:
 
     def test_wrapper_with_agents(self) -> None:
         """Wrapper includes agents.json reference when has_agents=True."""
-        assert "agents.json" in _generate_claude_wrapper(WrapperConfig(has_agents=True))
+        assert "agents.json" in generate_agent_wrapper(AGENT_PROVIDERS["claude"], has_agents=True)
 
     def test_wrapper_includes_append_system_prompt(self) -> None:
-        """Wrapper includes --append-system-prompt when has_instructions=True."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False, has_instructions=True))
+        """Wrapper injects --append-system-prompt via a runtime file guard."""
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
+        assert "[ -f /home/dev/.terok/instructions.md ]" in wrapper
         assert "--append-system-prompt" in wrapper
 
     def test_wrapper_timeout_support(self) -> None:
         """Wrapper parses --terok-timeout and wraps claude with timeout."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False))
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
         assert "--terok-timeout" in wrapper
         assert 'timeout "$_timeout" claude' in wrapper
         assert 'command claude "${_args[@]}" "$@"' in wrapper
 
     def test_wrapper_resume_from_session_file(self) -> None:
         """Wrapper adds --resume from claude-session.txt when it exists."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False))
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
         assert "claude-session.txt" in wrapper
         assert "--resume" in wrapper
 
     def test_wrapper_sets_memory_override(self) -> None:
         """Wrapper exports CLAUDE_COWORK_MEMORY_PATH_OVERRIDE."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False))
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
         assert f'"{CONTAINER_CLAUDE_MEMORY_OVERRIDE}"' in wrapper
 
     def test_wrapper_picks_up_initial_prompt(self) -> None:
         """Wrapper consumes initial-prompt.txt one-shot, gated on no resume."""
-        wrapper = _generate_claude_wrapper(WrapperConfig(has_agents=False))
+        wrapper = generate_agent_wrapper(AGENT_PROVIDERS["claude"])
         assert "/home/dev/.terok/initial-prompt.txt" in wrapper
         assert "/home/dev/.terok/initial-prompt.consumed.txt" in wrapper
         # Resume always wins — pickup is skipped if the session file is present.

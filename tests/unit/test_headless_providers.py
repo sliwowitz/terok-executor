@@ -7,7 +7,6 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from terok_executor.provider.agents import _generate_claude_wrapper
 from terok_executor.provider.providers import (
     AGENT_PROVIDERS,
     PROVIDER_NAMES,
@@ -24,26 +23,14 @@ from terok_executor.roster import AgentRoster
 from tests.constants import CONTAINER_INSTRUCTIONS_PATH, CONTAINER_TEROK_DIR
 
 
-def _provider_wrapper(
-    name: str,
-    *,
-    has_agents: bool = False,
-) -> str:
+def _provider_wrapper(name: str, *, has_agents: bool = False) -> str:
     """Generate a wrapper for a provider under test."""
-    kwargs = {"claude_wrapper_fn": _generate_claude_wrapper} if name == "claude" else {}
-    return generate_agent_wrapper(
-        AGENT_PROVIDERS[name],
-        has_agents=has_agents,
-        **kwargs,
-    )
+    return generate_agent_wrapper(AGENT_PROVIDERS[name], has_agents=has_agents)
 
 
 def _all_wrappers(*, has_agents: bool = False) -> str:
     """Generate the combined multi-provider wrapper file."""
-    return generate_all_wrappers(
-        has_agents=has_agents,
-        claude_wrapper_fn=_generate_claude_wrapper,
-    )
+    return generate_all_wrappers(has_agents=has_agents)
 
 
 class TestAgentProviderRegistry:
@@ -119,12 +106,6 @@ class TestGenerateAgentWrapper:
         wrapper = _provider_wrapper("claude")
         assert "claude()" in wrapper
         assert "--add-dir" in wrapper
-
-    def test_claude_wrapper_requires_fn(self) -> None:
-        """Claude provider without claude_wrapper_fn raises ValueError."""
-        p = AGENT_PROVIDERS["claude"]
-        with pytest.raises(ValueError):
-            generate_agent_wrapper(p, has_agents=False)
 
     def test_generic_wrapper_has_timeout_support(self) -> None:
         """All non-Claude wrappers support --terok-timeout."""
@@ -212,7 +193,7 @@ class TestGenerateAgentWrapper:
         """
         from terok_executor.provider.wrappers import generate_all_wrappers
 
-        all_wrappers = generate_all_wrappers(has_agents=True, claude_wrapper_fn=lambda _c: "")
+        all_wrappers = generate_all_wrappers(has_agents=True)
         # Definition appears exactly once (no duplicate inlines)…
         assert all_wrappers.count("_terok_trust_workspace_for_vibe()") == 1
         # …and the flock guard is wired up.
