@@ -16,9 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from terok_util import ensure_dir, ensure_dir_writable
-
-from terok_executor._util import yaml_load as _yaml_load
+from terok_util import ensure_dir, ensure_dir_writable, yaml
 
 from .providers import AGENT_PROVIDERS
 
@@ -191,7 +189,7 @@ def parse_md_agent(file_path: str) -> dict:
     if content.startswith("---"):
         parts = content.split("---", 2)
         if len(parts) >= 3:
-            frontmatter = _yaml_load(parts[1]) or {}
+            frontmatter = yaml.load(parts[1]) or {}
             if not isinstance(frontmatter, dict):
                 frontmatter = {}
             body = parts[2].strip()

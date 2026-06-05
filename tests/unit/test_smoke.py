@@ -97,12 +97,11 @@ class TestPackageImport:
         assert result == bundled_default_instructions()
 
     def test_import_util(self) -> None:
-        """Vendored ``_util`` module exposes its executor-only helpers.
+        """``_util`` exposes its executor-only helpers.
 
-        Cross-package filesystem helpers (``ensure_dir``, ...) live in
-        the shared `terok_util` package and are imported directly at
-        every call site; only the executor-specific bits stay here.
+        Cross-package helpers (``ensure_dir``, the YAML facade, ...) live in
+        the shared `terok_util` package and are imported directly at every
+        call site; only the executor-specific bits stay here.
         """
         mod = importlib.import_module("terok_executor._util")
-        assert hasattr(mod, "yaml_load")
         assert hasattr(mod, "detect_host_timezone")

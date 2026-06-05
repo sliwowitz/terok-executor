@@ -90,7 +90,6 @@ depends_on = [
 [[modules]]
 path = "terok_executor.roster.loader"
 depends_on = [
-    "terok_executor._util",
     "terok_executor.credentials.auth",
     "terok_executor.integrations.sandbox",
     "terok_executor.provider.providers",
@@ -134,7 +133,6 @@ depends_on = [
 [[modules]]
 path = "terok_executor.provider.agents"
 depends_on = [
-    "terok_executor._util",
     "terok_executor.provider.providers",
     "terok_executor.provider.wrappers",
 ]

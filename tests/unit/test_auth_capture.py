@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER, CredentialDB
 
 from terok_executor.credentials.auth import (
@@ -1099,6 +1100,7 @@ class TestPrepareOauthSession:
             modes=("oauth", "api_key"),
         )
 
+    @pytest.mark.needs_podman
     def test_argv_includes_provider_command_and_mount(self, tmp_path: Path) -> None:
         """``argv`` ends with the provider command and contains the temp-dir mount."""
         from terok_executor.credentials.auth import prepare_oauth_session
@@ -1115,6 +1117,7 @@ class TestPrepareOauthSession:
                 assert session.auth_dir.is_dir()
         assert not session.auth_dir.exists()  # cleanup ran
 
+    @pytest.mark.needs_podman
     def test_title_and_banner_reflect_scope(self, tmp_path: Path) -> None:
         """Banner mentions the provider label and either the project or host-wide scope."""
         from terok_executor.credentials.auth import prepare_oauth_session
@@ -1128,6 +1131,7 @@ class TestPrepareOauthSession:
                 assert "Banner line one." in session.banner
                 assert "$ podman run" in session.banner
 
+    @pytest.mark.needs_podman
     def test_capture_delegates_to_capture_credentials(self, tmp_path: Path) -> None:
         """``session.capture()`` forwards to ``_capture_credentials`` with stored kwargs."""
         from terok_executor.credentials.auth import prepare_oauth_session
@@ -1152,6 +1156,7 @@ class TestPrepareOauthSession:
                     expose_token=True,
                 )
 
+    @pytest.mark.needs_podman
     def test_cleanup_is_idempotent(self, tmp_path: Path) -> None:
         """Calling ``cleanup`` twice does not raise."""
         from terok_executor.credentials.auth import prepare_oauth_session
@@ -1167,8 +1172,6 @@ class TestPrepareOauthSession:
         self, tmp_path: Path
     ) -> None:
         """API-key-only providers can't be prepared for OAuth — early failure."""
-        import pytest
-
         from terok_executor.credentials.auth import Authenticator, AuthProvider
 
         api_only = AuthProvider(

@@ -28,9 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic import ValidationError
-from terok_util import deep_merge, namespace_config_dir
+from terok_util import deep_merge, namespace_config_dir, yaml
 
-from terok_executor._util import yaml_load
 from terok_executor.credentials.auth import AuthProvider
 from terok_executor.integrations.sandbox import DoctorCheck, SandboxConfig
 from terok_executor.provider.providers import AgentProvider
@@ -545,7 +544,7 @@ def _user_agents_dir() -> Path:
 
 def _load_yaml(text: str) -> dict:
     """Parse YAML text into a dict via ruamel.yaml round-trip loader."""
-    result = yaml_load(text)
+    result = yaml.load(text)
     return result if isinstance(result, dict) else {}
 
 
