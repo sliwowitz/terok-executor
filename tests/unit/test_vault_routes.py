@@ -36,8 +36,8 @@ class TestVaultRoutesParsed:
         assert route.upstream == "https://api.anthropic.com"
         assert route.auth_header == "dynamic"
         assert route.oauth_extra_headers == {"anthropic-beta": "oauth-2025-04-20"}
-        assert "ANTHROPIC_API_KEY" in route.phantom_env
-        assert "CLAUDE_CODE_OAUTH_TOKEN" in route.oauth_phantom_env
+        assert route.token_env["_default"] == "ANTHROPIC_API_KEY"
+        assert route.token_env["oauth"] == "CLAUDE_CODE_OAUTH_TOKEN"
         assert route.base_url_env == "ANTHROPIC_BASE_URL"
         assert route.socket_env == "ANTHROPIC_UNIX_SOCKET"
 
@@ -66,12 +66,12 @@ class TestVaultRoutesParsed:
         assert route.auth_prefix == ""
         assert route.route_prefix == "gl"
 
-    def test_api_key_only_providers_have_no_oauth_phantom_env(self) -> None:
-        """Providers without OAuth support have empty oauth_phantom_env."""
+    def test_api_key_only_providers_use_default_token_env(self) -> None:
+        """Providers without OAuth support map only ``_default`` in token_env."""
         for name in ("vibe", "blablador", "kisski"):
             route = AgentRoster.shared().vault_routes.get(name)
             assert route is not None, f"{name} missing vault route"
-            assert route.oauth_phantom_env == {}, f"{name} should have no oauth_phantom_env"
+            assert list(route.token_env) == ["_default"], f"{name} should only map _default"
             assert route.socket_env == "", f"{name} should have no socket_env"
 
     def test_opencode_agents_have_routes(self) -> None:
@@ -550,20 +550,20 @@ class TestToVaultRoute:
         assert route is not None
         assert route.socket_env == ""
 
-    def test_oauth_phantom_env_parsed(self) -> None:
-        """oauth_phantom_env is parsed from YAML data."""
+    def test_token_env_parsed(self) -> None:
+        """token_env is parsed from YAML data, keyed by credential type."""
         route = _vault_route(
             "test",
             {
                 "vault": {
                     "route_prefix": "test",
                     "upstream": "https://example.com",
-                    "oauth_phantom_env": {"MY_OAUTH_TOKEN": True},
+                    "token_env": {"oauth": "MY_OAUTH_TOKEN", "_default": "MY_API_KEY"},
                 }
             },
         )
         assert route is not None
-        assert route.oauth_phantom_env == {"MY_OAUTH_TOKEN": True}
+        assert route.token_env == {"oauth": "MY_OAUTH_TOKEN", "_default": "MY_API_KEY"}
 
     def test_missing_required_field_raises(self) -> None:
         """Missing route_prefix or upstream raises ValidationError."""

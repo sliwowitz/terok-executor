@@ -50,10 +50,8 @@ vault:
   # for env-var-only consumers (e.g. Pi) so that any other agent in the
   # same container can route through the vault using the OAuth phantom
   # token under OpenAI's standard env-var name.
-  phantom_env:
-    OPENAI_API_KEY: true
-  oauth_phantom_env:
-    OPENAI_API_KEY: true
+  token_env:
+    _default: OPENAI_API_KEY
   # OAuth refresh -- endpoint, client_id, and grant shape extracted from the
   # Codex CLI source (codex-rs/login/src/auth/manager.rs v0.123.0).  The CLI
   # itself can be redirected at its own refresh attempts via the

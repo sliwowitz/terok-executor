@@ -13,8 +13,8 @@ vault:
   auth_header: Authorization
   auth_prefix: "Bearer "
   credential_type: api_key
-  phantom_env:
-    SONAR_TOKEN: true
+  token_env:
+    _default: SONAR_TOKEN
   base_url_env: SONAR_HOST_URL
   # sonarcloud.io serves API + project pages + docs + badges on the same
   # apex; an nft host-deny would block legitimate browsing/curling in

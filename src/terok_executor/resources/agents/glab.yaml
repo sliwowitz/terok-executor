@@ -14,8 +14,8 @@ vault:
   auth_prefix: ""
   credential_type: pat
   credential_file: config.yml
-  phantom_env:
-    GITLAB_TOKEN: true
+  token_env:
+    _default: GITLAB_TOKEN
   # gitlab.com carries both the API and ``git push`` traffic on the same
   # apex; an nft host-deny would also kill pushes.  Read-only credential
   # containment is the actual containment story for this provider.

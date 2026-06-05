@@ -484,10 +484,10 @@ class TestVaultTokenInjection:
             result = assemble_container_env(base_spec, roster, caller_manages_vault=False)
         assert "ANTHROPIC_API_KEY" not in result.env
 
-    def test_vault_oauth_credential_uses_oauth_phantom_env(
+    def test_vault_oauth_credential_uses_oauth_token_env(
         self, workspace, envs_dir, roster, tmp_path
     ):
-        """OAuth credential selects oauth_phantom_env (e.g. CLAUDE_CODE_OAUTH_TOKEN)."""
+        """OAuth credential selects the oauth ``token_env`` entry (CLAUDE_CODE_OAUTH_TOKEN)."""
         cfg = _make_vault_db(tmp_path, cred_data={"type": "oauth", "access_token": "oa-tok"})
         spec = _spec(workspace, envs_dir, credential_scope="test-project")
         with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
@@ -498,8 +498,8 @@ class TestVaultTokenInjection:
         # API key env var must NOT be set when OAuth credential is stored
         assert "ANTHROPIC_API_KEY" not in result.env
 
-    def test_vault_api_key_falls_back_to_phantom_env(self, workspace, envs_dir, roster, tmp_path):
-        """API-key credential uses phantom_env even when oauth_phantom_env exists."""
+    def test_vault_api_key_uses_default_token_env(self, workspace, envs_dir, roster, tmp_path):
+        """API-key credential falls back to the ``_default`` ``token_env`` entry."""
         cfg = _make_vault_db(tmp_path)
         spec = _spec(workspace, envs_dir, credential_scope="test-project")
         with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):

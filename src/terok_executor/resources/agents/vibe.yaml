@@ -45,8 +45,8 @@ vault:
   auth_prefix: "Bearer "
   credential_type: api_key
   credential_file: .env
-  phantom_env:
-    MISTRAL_API_KEY: true
+  token_env:
+    _default: MISTRAL_API_KEY
   shared_config_patch:
     file: config.toml
     toml_table: providers

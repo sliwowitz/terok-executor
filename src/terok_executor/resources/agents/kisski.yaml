@@ -35,8 +35,8 @@ vault:
   auth_prefix: "Bearer "
   credential_type: api_key
   credential_file: config.json
-  phantom_env:
-    KISSKI_API_KEY: true
+  token_env:
+    _default: KISSKI_API_KEY
 
 opencode:
   display_name: KISSKI

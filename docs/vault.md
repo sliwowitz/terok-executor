@@ -131,8 +131,9 @@ vault:
   auth_header: dynamic           # OAuth -> Bearer, API key -> x-api-key
   credential_type: oauth
   credential_file: .credentials.json
-  phantom_env:
-    ANTHROPIC_API_KEY: true      # env var gets the phantom token
+  token_env:                     # phantom-token env var, keyed by credential type
+    oauth: CLAUDE_CODE_OAUTH_TOKEN
+    _default: ANTHROPIC_API_KEY  # fallback for any non-OAuth credential
   base_url_env: ANTHROPIC_BASE_URL  # optional: env var for token broker URL
   shared_config_patch: ...       # optional: file patch for token broker URL
 ```

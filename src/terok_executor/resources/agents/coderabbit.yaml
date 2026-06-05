@@ -13,8 +13,8 @@ vault:
   auth_header: Authorization
   auth_prefix: "Bearer "
   credential_type: api_key
-  phantom_env:
-    CODERABBIT_API_KEY: true
+  token_env:
+    _default: CODERABBIT_API_KEY
   # No base_url_env: the CLI has no API endpoint override.  It does
   # honour HTTPS_PROXY, but the token broker is a reverse proxy
   # (route-prefix), not a forward proxy (CONNECT tunnel).

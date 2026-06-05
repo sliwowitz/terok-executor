@@ -222,8 +222,8 @@ def _make_phantom_token_checks(roster: AgentRoster) -> list[DoctorCheck]:
     seen_vars: set[str] = set()
 
     for name, route in roster.vault_routes.items():
-        # Collect all phantom env vars (api_key + oauth types)
-        env_vars = list(route.phantom_env.keys()) + list(route.oauth_phantom_env.keys())
+        # Collect all phantom-token env var names (deduped downstream)
+        env_vars = list(route.token_env.values())
         for var in env_vars:
             if var in seen_vars:
                 continue

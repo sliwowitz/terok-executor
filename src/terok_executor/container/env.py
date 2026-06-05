@@ -453,8 +453,8 @@ def _inject_vault_tokens(
 
     Handles three orthogonal concerns:
 
-    - **Auth**: selects ``phantom_env`` vs ``oauth_phantom_env`` based on the
-      stored credential type (Phase 1).
+    - **Auth**: picks the phantom-token env var from ``token_env`` keyed by
+      the stored credential type (Phase 1).
     - **Transport**: resolves the shared vault address and writes it into
       every route's ``socket_env`` / ``base_url_env`` (Phase 2).
     - **SSH signer**: creates a phantom token for the SSH signer when the
@@ -535,12 +535,10 @@ def _inject_vault_tokens(
         if name not in routed:
             continue
 
-        is_oauth = credential_types.get(name) == "oauth"
-        token_vars = (
-            route.oauth_phantom_env if (is_oauth and route.oauth_phantom_env) else route.phantom_env
-        )
-        for env_var in token_vars:
-            env[env_var] = tokens[name]
+        stored_type = credential_types.get(name, "")
+        token_var = route.token_env.get(stored_type) or route.token_env.get("_default")
+        if token_var:
+            env[token_var] = tokens[name]
 
         if route.socket_env:
             env[route.socket_env] = location.socket

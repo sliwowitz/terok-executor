@@ -240,8 +240,7 @@ class RawVault(StrictModel):
     auth_prefix: str = "Bearer "
     credential_type: Literal["api_key", "oauth", "oauth_token", "pat"] = "api_key"
     credential_file: str = ""
-    phantom_env: dict[str, bool] = Field(default_factory=dict)
-    oauth_phantom_env: dict[str, bool] = Field(default_factory=dict)
+    token_env: dict[str, str] = Field(default_factory=dict)
     base_url_env: str = ""
     socket_env: str = ""
     shared_config_patch: dict | None = None
@@ -274,8 +273,7 @@ class RawVault(StrictModel):
             auth_prefix=self.auth_prefix,
             credential_type=self.credential_type,
             credential_file=self.credential_file,
-            phantom_env=dict(self.phantom_env),
-            oauth_phantom_env=dict(self.oauth_phantom_env),
+            token_env=dict(self.token_env),
             base_url_env=self.base_url_env,
             socket_env=self.socket_env,
             shared_config_patch=self.shared_config_patch,

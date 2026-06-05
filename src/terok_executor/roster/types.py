@@ -82,14 +82,16 @@ class VaultRoute:
     credential_file: str = ""
     """Credential file path relative to the auth mount."""
 
-    phantom_env: dict[str, bool] = field(default_factory=dict)
-    """Phantom env vars for API-key credentials (e.g. ``{"ANTHROPIC_API_KEY": true}``)."""
+    token_env: dict[str, str] = field(default_factory=dict)
+    """Phantom-token env var name, keyed by stored credential type.
 
-    oauth_phantom_env: dict[str, bool] = field(default_factory=dict)
-    """Phantom env vars for OAuth credentials (e.g. ``{"CLAUDE_CODE_OAUTH_TOKEN": true}``).
-
-    When the stored credential type is ``"oauth"`` and this is non-empty, these
-    env vars are injected *instead of* [`phantom_env`][terok_executor.roster.types.VaultRoute.phantom_env].
+    The named env var carries the phantom token the agent reads in place of
+    the real credential.  Keys are credential types (``"oauth"``, ``"pat"``,
+    …); ``"_default"`` is the fallback for any type without an explicit
+    entry.  Most agents read one env var regardless of type
+    (``{"_default": "MISTRAL_API_KEY"}``); Claude swaps the name when an
+    OAuth token is stored
+    (``{"oauth": "CLAUDE_CODE_OAUTH_TOKEN", "_default": "ANTHROPIC_API_KEY"}``).
     """
 
     base_url_env: str = ""
