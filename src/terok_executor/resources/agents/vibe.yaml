@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: native
 label: Mistral Vibe
@@ -38,16 +38,15 @@ session:
 capabilities:
   log_format: plain
 
-vault:
-  route_prefix: vibe
-  upstream: https://api.mistral.ai
-  auth_header: Authorization
-  auth_prefix: "Bearer "
+# The Mistral endpoint Vibe routes to lives in resources/providers/mistral.yaml.
+protocol: openai-chat
+provider:
+  default: mistral
   credential_type: api_key
   credential_file: .env
   token_env:
     _default: MISTRAL_API_KEY
-  shared_config_patch:
+  config_patch:
     file: config.toml
     toml_table: providers
     toml_match: {name: mistral}
@@ -72,9 +71,12 @@ install:
         cp /tmp/terok-scripts/terok-vibe-acp /usr/local/bin/terok-vibe-acp; \
         cp /tmp/terok-scripts/vibe-model-sync.sh /usr/local/bin/vibe-model-sync; \
         cp /tmp/terok-scripts/mistral-model-sync.py /usr/local/bin/mistral-model-sync.py; \
+        cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
         chmod +x /usr/local/bin/terok-vibe-acp \
                  /usr/local/bin/vibe-model-sync \
-                 /usr/local/bin/mistral-model-sync.py; \
+                 /usr/local/bin/mistral-model-sync.py \
+                 /usr/local/bin/terok-native-provider; \
+        ln -sf terok-native-provider /usr/local/bin/vibe-provider; \
         pipx install mistral-vibe; \
         pipx inject mistral-vibe mistralai
 

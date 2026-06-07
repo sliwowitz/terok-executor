@@ -60,10 +60,9 @@ class TestCaptureCredentials:
             )
             _capture_credentials("claude", tmp_path, "default")
 
-        # Verify it's in the DB
-
+        # Verify it's in the DB — stored under the resolved provider (anthropic).
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "claude")
+        stored = db.load_credential("default", "anthropic")
         db.close()
         assert stored is not None
         assert stored["access_token"] == "sk-test-123"
@@ -414,10 +413,9 @@ class TestCaptureAppliesPostCaptureState:
         assert "Warning" in err
         assert "post_capture_state" in err
 
-        # Verify credentials were still stored in the DB
-
+        # Verify credentials were still stored in the DB (under provider key).
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "claude")
+        stored = db.load_credential("default", "anthropic")
         db.close()
         assert stored is not None
 
@@ -761,7 +759,7 @@ class TestStoreApiKey:
             store_api_key("vibe", "sk-test-key-123")
 
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("default", "vibe")
+        stored = db.load_credential("default", "mistral")  # vibe → mistral
         db.close()
         assert stored == {"type": "api_key", "key": "sk-test-key-123"}
 
@@ -776,7 +774,7 @@ class TestStoreApiKey:
             store_api_key("claude", "sk-ant-key", credential_set="work")
 
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
-        stored = db.load_credential("work", "claude")
+        stored = db.load_credential("work", "anthropic")  # claude → anthropic
         db.close()
         assert stored["key"] == "sk-ant-key"
 
@@ -1190,6 +1188,119 @@ class TestPrepareOauthSession:
         ):
             with pytest.raises(SystemExit, match="does not support OAuth"):
                 Authenticator("blablador").prepare_oauth(None, mounts_dir=tmp_path, image="img")
+
+
+class TestDeviceAuth:
+    """Headless device-code login, offered as a method in the auth prompt."""
+
+    def _codex(self) -> object:
+        from terok_executor.credentials.auth import AuthProvider
+
+        return AuthProvider(
+            name="codex",
+            label="Codex",
+            host_dir_name="_codex-config",
+            container_mount="/home/dev/.codex",
+            command=["setup-codex-auth.sh"],
+            banner_hint="",
+            modes=("oauth", "api_key"),
+            extra_run_args=("-p", "127.0.0.1:1455:1455"),
+            device_auth=True,
+        )
+
+    def test_roster_marks_codex_device_auth_capable(self) -> None:
+        """The bundled roster declares device-auth for codex but not claude/vibe."""
+        from terok_executor import AUTH_PROVIDERS
+
+        assert AUTH_PROVIDERS["codex"].supports_device_auth
+        assert not AUTH_PROVIDERS["claude"].supports_device_auth
+        assert not AUTH_PROVIDERS["vibe"].supports_device_auth
+
+    def test_session_appends_flag_and_drops_port(self, tmp_path: Path) -> None:
+        """Device-auth runs ``<command> --device-auth`` with no port forwarding."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with (
+            patch("terok_executor.credentials.auth._check_podman"),
+            patch("terok_executor.credentials.auth._cleanup_existing_container"),
+        ):
+            with prepare_oauth_session(
+                self._codex(), None, mounts_dir=tmp_path, image="img", device_auth=True
+            ) as session:
+                assert session.argv[-2:] == ["setup-codex-auth.sh", "--device-auth"]
+                assert "-p" not in session.argv  # the device-code flow needs no callback port
+
+    def test_browser_flow_keeps_port_and_plain_command(self, tmp_path: Path) -> None:
+        """Without device-auth the browser flow keeps its port-forward and command."""
+        from terok_executor.credentials.auth import prepare_oauth_session
+
+        with (
+            patch("terok_executor.credentials.auth._check_podman"),
+            patch("terok_executor.credentials.auth._cleanup_existing_container"),
+        ):
+            with prepare_oauth_session(
+                self._codex(), None, mounts_dir=tmp_path, image="img"
+            ) as session:
+                assert session.argv[-1] == "setup-codex-auth.sh"
+                assert "-p" in session.argv
+
+    def test_menu_device_code_choice_runs_with_device_auth(self, tmp_path: Path) -> None:
+        """A device-auth-capable provider offers device-code as a method (here choice 2:
+        1=OAuth, 2=device-code, 3=API key); picking it runs the container device_auth=True."""
+        from terok_executor.credentials.auth import authenticate
+
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": self._codex()},
+                clear=True,
+            ),
+            patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
+            patch("builtins.input", return_value="2"),
+        ):
+            authenticate(None, "codex", mounts_dir=tmp_path, image="img")
+        assert mock_run.call_args.kwargs["device_auth"] is True
+
+    def test_menu_plain_oauth_choice_no_device_auth(self, tmp_path: Path) -> None:
+        """Choosing the plain OAuth method (choice 1) runs the container device_auth=False."""
+        from terok_executor.credentials.auth import authenticate
+
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": self._codex()},
+                clear=True,
+            ),
+            patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
+            patch("builtins.input", return_value="1"),
+        ):
+            authenticate(None, "codex", mounts_dir=tmp_path, image="img")
+        assert mock_run.call_args.kwargs["device_auth"] is False
+
+    def test_menu_omits_device_code_for_unsupported_provider(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A provider without device-auth shows no device-code method (just OAuth/API key)."""
+        from terok_executor.credentials.auth import AuthProvider, authenticate
+
+        claude = AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="_claude-config",
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="",
+            modes=("oauth", "api_key"),
+        )
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS", {"claude": claude}, clear=True
+            ),
+            patch("terok_executor.credentials.auth._run_auth_container"),
+            patch("builtins.input", return_value="1"),
+        ):
+            authenticate(None, "claude", mounts_dir=tmp_path, image="img")
+        assert "device code" not in capsys.readouterr().out.lower()
 
 
 class TestAuthenticateCredentialSet:

@@ -30,14 +30,16 @@ def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpe
 
 def _make_vault_db(
     tmp_path: Path,
-    cred_name: str = "claude",
+    cred_name: str = "anthropic",
     cred_data: dict | None = None,
     *,
     credential_set: str = "default",
 ):
     """Return a ``SandboxConfig`` with one credential pre-stored in its ``CredentialDB``.
 
-    The DB is created, populated, and closed internally.
+    The DB is created, populated, and closed internally.  Credentials are keyed
+    by *provider* name (``"anthropic"``) — the post-v3-migration vault contract
+    that ``routed = stored & roster.providers`` intersects against.
     """
     from terok_sandbox import CredentialDB, SandboxConfig
 
@@ -103,7 +105,7 @@ def base_spec(workspace: Path, envs_dir: Path) -> ContainerEnvSpec:
     """Minimal spec with only required fields (all dirs tmp-backed)."""
     return ContainerEnvSpec(
         task_id="test-123",
-        provider_name="claude",
+        agent_name="claude",
         workspace_host_path=workspace,
         envs_dir=envs_dir,
     )
@@ -113,7 +115,7 @@ def _spec(workspace: Path, envs_dir: Path, **overrides) -> ContainerEnvSpec:
     """Shorthand for a tmp-backed spec with overrides."""
     defaults = {
         "task_id": "t1",
-        "provider_name": "claude",
+        "agent_name": "claude",
         "workspace_host_path": workspace,
         "envs_dir": envs_dir,
     }
@@ -157,6 +159,21 @@ class TestBaseEnv:
         assert result.env["TEROK_CONTAINER_PROTOCOL"] == str(CONTAINER_PROTOCOL)
 
 
+class TestProviderSelection:
+    """Verify the selected provider is injected as ``TEROK_PROVIDER``."""
+
+    def test_no_provider_unset(self, base_spec, roster):
+        """No provider selected → ``TEROK_PROVIDER`` is absent."""
+        result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
+        assert "TEROK_PROVIDER" not in result.env
+
+    def test_provider_injected(self, workspace, envs_dir, roster):
+        """A selected provider lands in ``TEROK_PROVIDER`` for the wrappers."""
+        spec = _spec(workspace, envs_dir, provider="openrouter")
+        result = assemble_container_env(spec, roster, caller_manages_vault=True)
+        assert result.env["TEROK_PROVIDER"] == "openrouter"
+
+
 # ---------------------------------------------------------------------------
 # Git identity
 # ---------------------------------------------------------------------------
@@ -194,7 +211,7 @@ class TestGitIdentity:
         assert result.env["GIT_COMMITTER_EMAIL"] == "custom@t.com"
 
     def test_unknown_provider_uses_fallback(self, workspace, envs_dir, roster):
-        spec = _spec(workspace, envs_dir, provider_name="nonexistent")
+        spec = _spec(workspace, envs_dir, agent_name="nonexistent")
         result = assemble_container_env(spec, roster, caller_manages_vault=True)
         assert result.env["GIT_AUTHOR_NAME"] == "AI Agent"
 
@@ -677,6 +694,23 @@ class TestVaultTokenInjection:
         assert "ANTHROPIC_API_KEY" in scoped_result.env
         assert scoped_result.env["ANTHROPIC_API_KEY"].startswith("terok-p-")
 
+    def test_vault_materializes_generic_provider_handle(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """An authenticated provider gets a generic ``TEROK_PROVIDER_*`` handle so a
+        harness can select it at runtime, and OpenRouter keeps its mandatory ``/api``."""
+        cfg = _make_vault_db(tmp_path, cred_name="openrouter")
+        spec = _spec(workspace, envs_dir)
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            env = assemble_container_env(spec, roster, caller_manages_vault=False).env
+
+        assert env["TEROK_PROVIDER_OPENROUTER_TOKEN"].startswith("terok-p-")
+        # OpenRouter serves openai-chat at /api/v1 and its Anthropic skin at /api.
+        assert env["TEROK_PROVIDER_OPENROUTER_BASE_OPENAI_CHAT"].endswith("/api/v1")
+        assert env["TEROK_PROVIDER_OPENROUTER_BASE_ANTHROPIC_MESSAGES"].endswith("/api")
+        # The curated OpenCode base URL picks up the same /api/v1, not a bare /v1.
+        assert env["TEROK_OC_OPENROUTER_BASE_URL"].endswith("/api/v1")
+
     def test_vault_ssh_only_no_provider_creds(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected even when no provider credentials are stored."""
         from terok_sandbox import CredentialDB, SandboxConfig
@@ -848,8 +882,98 @@ class TestSharedConfigPatches:
         assert "localhost:9419" in mistral["api_base"]
 
         codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
-        assert codex_cfg["openai_base_url"] == "http://localhost:9419/v1"
+        # No stored credential → falls back to the route's declared type (oauth),
+        # so codex routes to the ChatGPT backend.
+        assert codex_cfg["openai_base_url"] == "http://localhost:9419/backend-api/codex"
         assert codex_cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
+
+    def test_codex_api_key_credential_routes_to_v1(self, roster, tmp_path):
+        """An API-key codex credential routes inference to /v1, not the ChatGPT backend."""
+        from terok_executor.credentials import vault_config
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        codex_dir = tmp_path / "_codex-config"
+        codex_dir.mkdir()
+        with (
+            patch(
+                "terok_executor.integrations.sandbox.SandboxConfig",
+                return_value=SandboxConfig(token_broker_port=18731),
+            ),
+            patch.object(vault_config, "_stored_credential_type", return_value="api_key"),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"codex"}))
+
+        import tomllib
+
+        cfg = tomllib.loads((codex_dir / "config.toml").read_text())
+        assert cfg["openai_base_url"] == "http://localhost:9419/v1"
+        assert cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
+
+    def test_credential_type_overlay_folds_per_type_keys(self):
+        """The overlay merges by_credential_type[type] over toml_set; unknowns fall through."""
+        from terok_executor.credentials.vault_config import _credential_type_overlay
+
+        spec = {
+            "file": "config.toml",
+            "toml_set": {"chatgpt_base_url": "X"},
+            "by_credential_type": {
+                "oauth": {"openai_base_url": "BACKEND"},
+                "api_key": {"openai_base_url": "V1"},
+            },
+        }
+        assert _credential_type_overlay(spec, "oauth")["toml_set"] == {
+            "chatgpt_base_url": "X",
+            "openai_base_url": "BACKEND",
+        }
+        assert _credential_type_overlay(spec, "api_key")["toml_set"] == {
+            "chatgpt_base_url": "X",
+            "openai_base_url": "V1",
+        }
+        # Unknown type → base toml_set only (caller's declared-default fallback handles this).
+        assert _credential_type_overlay(spec, "weird")["toml_set"] == {"chatgpt_base_url": "X"}
+        # No overlay → patch returned unchanged.
+        bare = {"toml_set": {"a": "b"}}
+        assert _credential_type_overlay(bare, "oauth") is bare
+
+    def test_applies_tool_config_patch(self, roster, tmp_path):
+        """A *tool* (gh) — not in roster.agents — still gets its config patch.
+
+        Regression guard: patch application must iterate auth providers (agents
+        AND tools), not roster.agents, or gh's ``http_unix_socket`` vault
+        routing is silently skipped.
+        """
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
+        ):
+            apply_shared_config_patches(roster, tmp_path, providers=frozenset({"gh"}))
+
+        gh_cfg = (tmp_path / "_gh-config" / "config.yml").read_text()
+        assert "http_unix_socket" in gh_cfg  # vault socket wired in for the gh tool
+
+    def test_disabled_provider_not_repatched_when_providers_none(self, roster, tmp_path):
+        """Disabling a config patch must win even when ``providers=None`` (apply-all).
+
+        Regression: with ``providers=None`` the entry landed in both the patched
+        and disabled sets, so the removal ran and then the same patch was written
+        back in the same call — disabling had no effect.
+        """
+        from terok_executor.credentials.vault_config import apply_shared_config_patches
+
+        codex_dir = tmp_path / "_codex-config"
+        codex_dir.mkdir()
+        with patch(
+            "terok_executor.integrations.sandbox.SandboxConfig",
+            return_value=SandboxConfig(token_broker_port=18731),
+        ):
+            apply_shared_config_patches(
+                roster, tmp_path, providers=None, disabled_providers=frozenset({"codex"})
+            )
+
+        cfg = codex_dir / "config.toml"
+        assert not cfg.exists() or "openai_base_url" not in cfg.read_text()
 
     def test_assemble_env_calls_patches_with_and_without_bypass(self, workspace, envs_dir, roster):
         """assemble_container_env invokes patches regardless of caller_manages_vault."""
@@ -866,6 +990,7 @@ class TestSharedConfigPatches:
                 envs_dir,
                 providers=None,
                 disabled_providers=None,
+                credential_set="default",
             )
 
     def test_patches_idempotent(self, roster, tmp_path):
@@ -930,7 +1055,7 @@ class TestSharedConfigPatches:
             {
                 "kind": "toml_top",
                 "values": {
-                    "openai_base_url": "http://localhost:9419/v1",
+                    "openai_base_url": "http://localhost:9419/backend-api/codex",
                     "chatgpt_base_url": "http://localhost:9419/backend-api/",
                 },
             }
@@ -1127,3 +1252,39 @@ class TestSharedConfigMountsUnit:
         )
         cred = [m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"]
         assert cred == []
+
+
+class TestExposedProviderMaterialization:
+    """`_materialize_exposed_providers` surfaces exposed creds as TEROK_PROVIDER_* handles."""
+
+    def test_emits_real_token_and_direct_upstream_base(self, roster, tmp_path):
+        """An exposed provider gets the same handle shape as a routed one — but the
+        real token and the upstream base, so a harness reaches it directly."""
+        import json
+
+        from terok_executor.container.env import _materialize_exposed_providers
+
+        claude_dir = tmp_path / "_claude-config"
+        claude_dir.mkdir()
+        (claude_dir / ".credentials.json").write_text(
+            json.dumps(
+                {
+                    "claudeAiOauth": {
+                        "accessToken": "sk-ant-oat-real",
+                        "refreshToken": "r",
+                        "expiresAt": 1,
+                    }
+                }
+            )
+        )
+        env = _materialize_exposed_providers(roster, tmp_path, frozenset({"claude"}))
+        assert env["TEROK_PROVIDER_ANTHROPIC_TOKEN"] == "sk-ant-oat-real"
+        assert (
+            env["TEROK_PROVIDER_ANTHROPIC_BASE_ANTHROPIC_MESSAGES"] == "https://api.anthropic.com"
+        )
+
+    def test_skips_provider_without_credential_file(self, roster, tmp_path):
+        """A missing/unreadable credential file is skipped, not fatal."""
+        from terok_executor.container.env import _materialize_exposed_providers
+
+        assert _materialize_exposed_providers(roster, tmp_path, frozenset({"claude"})) == {}

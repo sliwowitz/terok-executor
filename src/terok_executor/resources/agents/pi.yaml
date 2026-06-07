@@ -5,15 +5,20 @@
 # native CLIs, Pi has no vault route of its own: it consumes whichever
 # provider phantom tokens are already in the container env (set by
 # co-installed claude/codex/vibe/etc.) and routes API calls through the
-# vault.  ``pi-vault-routes.mjs`` (auto-discovered via the symlink in
-# ``pi-env.sh``) overrides every built-in provider's ``baseUrl`` so Pi
-# talks to the vault instead of going to ``api.anthropic.com`` /
-# ``api.openai.com`` direct.
-roster_version: 1
+# vault.  ``pi-vault-routes.ts`` (auto-discovered as a ``.ts`` extension via
+# the symlink in ``pi-env.sh`` — Pi only discovers ``*.ts``, not ``.mjs``)
+# points each materialized provider's ``baseUrl`` at the vault so Pi talks to
+# it instead of going to ``api.anthropic.com`` / ``api.openai.com`` direct.
+roster_version: 2
 
-kind: bridge
+kind: harness
 label: Pi
 binary: pi
+
+# Pi adapts to many providers; openai-chat is the common one its vault-routing
+# extension covers.  Declaring it surfaces Pi in the readiness manifest paired
+# with every authenticated openai-chat provider (see pi-vault-routes.ts).
+protocol: openai-chat
 
 git_identity:
   name: Pi
@@ -54,8 +59,9 @@ install:
     RUN set -eux; \
         install -m 0644 /tmp/terok-scripts/pi-env.sh \
                 /etc/profile.d/pi-env.sh; \
-        install -D -m 0644 /tmp/terok-scripts/pi-vault-routes.mjs \
-                /usr/local/share/terok/pi-extensions/vault-routes.mjs
+        install -D -m 0644 /tmp/terok-scripts/pi-vault-routes.ts \
+                /usr/local/share/terok/pi-extensions/vault-routes.ts; \
+        install -m 0755 /tmp/terok-scripts/pi-provider /usr/local/bin/pi-provider
   run_as_dev: |
     RUN npm install -g @earendil-works/pi-coding-agent
 

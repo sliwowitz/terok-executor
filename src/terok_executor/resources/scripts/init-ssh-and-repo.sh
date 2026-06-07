@@ -440,6 +440,14 @@ if command -v nvfortran >/dev/null 2>&1; then
   nvfortran --version || true
 fi
 
+# Refresh the agent/provider readiness manifest (/home/dev/.terok/agents.json)
+# from the container's live state.  Advisory metadata: the command is absent
+# in the sidecar image (which ships no agents), and a failure must never abort
+# startup, so the launch stays best-effort.
+if command -v terok-agents >/dev/null 2>&1; then
+  terok-agents || true
+fi
+
 # Signal readiness for host tools that watch initial logs
 echo ">> init complete"
 exec bash

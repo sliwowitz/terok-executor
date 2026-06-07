@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from terok_executor.credentials.auth import AuthProvider
-from terok_executor.provider.providers import AgentProvider
+from terok_executor.provider.providers import Agent
 from terok_executor.roster import (
     AgentRoster,
     SidecarSpec,
@@ -22,9 +22,9 @@ from terok_executor.roster.loader import _load_bundled_agents
 from terok_executor.roster.schema import RawAgentYaml
 
 
-def _agent_provider(name: str, data: dict) -> AgentProvider:
-    """Validate *data* through the schema and return its [`AgentProvider`][]."""
-    return RawAgentYaml.model_validate(data).to_agent_provider(name)
+def _agent_provider(name: str, data: dict) -> Agent:
+    """Validate *data* through the schema and return its [`Agent`][]."""
+    return RawAgentYaml.model_validate(data).to_agent(name)
 
 
 def _auth_provider(name: str, data: dict) -> AuthProvider | None:
@@ -69,10 +69,7 @@ class TestLoadBundledAgents:
             "copilot",
             "gh",
             "glab",
-            "blablador",
-            "kisski",
             "opencode",
-            "openrouter",
             "pi",
             "sonar",
             "toad",
@@ -81,14 +78,14 @@ class TestLoadBundledAgents:
         assert set(agents.keys()) == expected
 
     def test_each_agent_has_kind(self) -> None:
-        valid_kinds = {"native", "opencode", "bridge", "tool", "runtime"}
+        valid_kinds = {"native", "harness", "frontend", "tool", "infra"}
         for name, data in _load_bundled_agents().items():
             assert "kind" in data, f"{name}.yaml missing 'kind' field"
             assert data["kind"] in valid_kinds, f"{name}.yaml has invalid kind={data['kind']!r}"
 
     def test_agents_have_required_sections(self) -> None:
         for name, data in _load_bundled_agents().items():
-            if data["kind"] in ("tool", "runtime"):
+            if data["kind"] in ("tool", "frontend", "infra"):
                 continue
             assert "label" in data, f"{name}: missing label"
             assert "binary" in data, f"{name}: missing binary"
@@ -223,13 +220,13 @@ class TestRosterVersion:
 
 
 class TestDeserializeProvider:
-    """Verify YAML → AgentProvider conversion."""
+    """Verify YAML → Agent conversion."""
 
     def test_claude_full_fidelity(self) -> None:
         agents = _load_bundled_agents()
         p = _agent_provider("claude", agents["claude"])
 
-        assert isinstance(p, AgentProvider)
+        assert isinstance(p, Agent)
         assert p.name == "claude"
         assert p.label == "Claude"
         assert p.binary == "claude"
@@ -247,11 +244,9 @@ class TestDeserializeProvider:
         assert p.resume_flag == "--resume"
         assert p.continue_flag is None
         assert p.session_file is None
-        assert p.supports_agents_json is True
         assert p.supports_session_hook is True
         assert p.supports_add_dir is True
         assert p.log_format == "claude-stream-json"
-        assert p.opencode_config is None
 
     def test_codex_subcommand_and_flags(self) -> None:
         agents = _load_bundled_agents()
@@ -263,13 +258,14 @@ class TestDeserializeProvider:
         assert p.supports_session_resume is False
 
     def test_blablador_opencode_config(self) -> None:
-        agents = _load_bundled_agents()
-        p = _agent_provider("blablador", agents["blablador"])
+        # Blablador is a provider, not an agent — its OpenCode config drives the
+        # opencode-provider wrapper the `blablador` command symlinks to.
+        provider = load_roster().providers["blablador"]
 
-        assert p.opencode_config is not None
-        assert p.opencode_config.display_name == "Helmholtz Blablador"
-        assert p.opencode_config.env_var_prefix == "BLABLADOR"
-        assert p.opencode_config.config_dir == ".blablador"
+        assert provider.opencode_config is not None
+        assert provider.opencode_config.display_name == "Helmholtz Blablador"
+        assert provider.opencode_config.env_var_prefix == "BLABLADOR"
+        assert provider.opencode_config.config_dir == ".blablador"
 
     def test_vibe_session_support(self) -> None:
         agents = _load_bundled_agents()
@@ -405,10 +401,7 @@ class TestLoadRegistry:
             "codex",
             "copilot",
             "vibe",
-            "blablador",
-            "kisski",
             "opencode",
-            "openrouter",
             "pi",
         }
         assert set(reg.agent_names) == expected_agents
@@ -421,9 +414,9 @@ class TestLoadRegistry:
 
     def test_providers_only_agents(self) -> None:
         reg = load_roster()
-        assert "gh" not in reg.providers
-        assert "glab" not in reg.providers
-        assert "claude" in reg.providers
+        assert "gh" not in reg.agents
+        assert "glab" not in reg.agents
+        assert "claude" in reg.agents
 
     def test_auth_includes_tools(self) -> None:
         reg = load_roster()
@@ -459,18 +452,18 @@ class TestLoadRegistry:
 
     def test_get_provider_resolves(self) -> None:
         reg = load_roster()
-        p = reg.get_provider("codex")
+        p = reg.get_agent("codex")
         assert p.name == "codex"
 
     def test_get_provider_fallback(self) -> None:
         reg = load_roster()
-        p = reg.get_provider(None)
+        p = reg.get_agent(None)
         assert p.name == "claude"
 
     def test_get_provider_unknown_exits(self) -> None:
         reg = load_roster()
-        with pytest.raises(SystemExit, match="Unknown provider"):
-            reg.get_provider("nonexistent")
+        with pytest.raises(SystemExit, match="Unknown agent"):
+            reg.get_agent("nonexistent")
 
     def test_get_auth_provider_unknown_exits(self) -> None:
         reg = load_roster()
@@ -634,7 +627,7 @@ class TestUserOverrides:
         with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
             reg = load_roster()
 
-        p = reg.get_provider("claude")
+        p = reg.get_agent("claude")
         assert p.name == "claude"
         assert p.label == "Claude Custom"
 
@@ -654,7 +647,7 @@ class TestUserOverrides:
             reg = load_roster()
 
         assert "custom" in reg.agent_names
-        p = reg.get_provider("custom")
+        p = reg.get_agent("custom")
         assert p.label == "Custom Agent"
 
     def test_user_new_tool(self, tmp_path: Path) -> None:
@@ -696,11 +689,11 @@ class TestRegistryBehavior:
     """Verify the registry produces well-formed, usable provider dataclasses."""
 
     def test_every_agent_has_valid_headless_provider(self) -> None:
-        """Each agent deserializes into a AgentProvider with required fields."""
+        """Each agent deserializes into a Agent with required fields."""
         reg = load_roster()
         for name in reg.agent_names:
-            p = reg.get_provider(name)
-            assert isinstance(p, AgentProvider)
+            p = reg.get_agent(name)
+            assert isinstance(p, Agent)
             assert p.name == name
             assert p.binary  # non-empty binary
             assert p.label  # non-empty label
@@ -737,7 +730,7 @@ class TestRegistryBehavior:
     def test_auto_approve_env_values_are_strings(self) -> None:
         """Auto-approve env values must be strings (injected into container env)."""
         reg = load_roster()
-        for name, p in reg.providers.items():
+        for name, p in reg.agents.items():
             for k, v in p.auto_approve_env.items():
                 assert isinstance(k, str), f"{name}: env key {k!r} not str"
                 assert isinstance(v, str), f"{name}: env value {v!r} not str"
@@ -745,7 +738,7 @@ class TestRegistryBehavior:
     def test_session_resume_consistency(self) -> None:
         """Providers with session resume must have a resume_flag."""
         reg = load_roster()
-        for name, p in reg.providers.items():
+        for name, p in reg.agents.items():
             if p.supports_session_resume:
                 assert p.resume_flag, f"{name}: supports_resume but no resume_flag"
 
@@ -771,8 +764,8 @@ class TestStrictValidation:
             pytest.param({"headless": {"prommpt_flag": "-p"}}, id="nested-field-typo"),
             pytest.param({"definitely_not_a_section": True}, id="unknown-root-key"),
             pytest.param(
-                {"vault": {"route_prefix": "x", "upstream": "y", "rooute_prefix": "x"}},
-                id="nested-vault-typo",
+                {"provider": {"default": "x", "tokn_env": {}}},
+                id="nested-provider-typo",
             ),
         ],
     )
@@ -797,9 +790,8 @@ class TestStrictValidation:
 
     def test_invalid_credential_type_rejected(self) -> None:
         data = {
-            "vault": {
-                "route_prefix": "x",
-                "upstream": "https://x",
+            "provider": {
+                "default": "x",
                 "credential_type": "smoke-signal",
             }
         }

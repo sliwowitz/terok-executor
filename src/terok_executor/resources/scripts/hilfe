@@ -43,6 +43,33 @@ _terok_section() {
 _terok_executors() { _terok_section 'Available AI agents:' agents.txt; }
 _terok_dev_tools() { _terok_section 'Dev tools:'           dev-tools.txt; }
 
+# Agents (the CLI tools above) and providers (LLM endpoints) are independent
+# axes.  The authenticated providers the vault routes for this container come
+# from the materialized phantom-token env vars (one per provider).
+_terok_providers() {
+    local _list
+    _list=$(printenv \
+        | sed -n 's/^TEROK_PROVIDER_\(.*\)_TOKEN=.*/\1/p' \
+        | tr '[:upper:]' '[:lower:]' | sort -u)
+    [ -n "$_list" ] || return 0
+    # Providers in magenta (distinct from the cyan agent/tool commands), joined
+    # with plain commas so the line reads as a sentence.
+    printf '\n\033[1mProviders (LLM endpoints):\033[0m '
+    local _first=1 _p
+    for _p in $_list; do
+        [ "$_first" -eq 1 ] || printf ', '
+        printf '\033[35m%s\033[0m' "$_p"
+        _first=0
+    done
+    printf '\n'
+    printf '  Point any agent at a provider it speaks to: \033[36m<agent> --provider <name>\033[0m\n'
+    printf '  (e.g. \033[36mopencode --provider openrouter\033[0m).  \033[36mopencode\033[0m reaches any of them;\n'
+    printf '  native CLIs default to their own.  Ready pairs: \033[36mproviders\033[0m\n'
+    [ -n "${TEROK_PROVIDER:-}" ] && \
+        printf "  This task's default provider: \033[35m%s\033[0m\n" "$TEROK_PROVIDER"
+    return 0
+}
+
 _terok_notes() {
     printf '\n\033[1mterok container notes:\033[0m\n'
     printf '  - \033[36m/workspace\033[0m  main project git checkout for this task\n'
@@ -61,6 +88,7 @@ _terok_notes() {
 
 _terok_permission_mode
 _terok_executors
+_terok_providers
 _terok_dev_tools
 
 if [[ "$_mode" == "--kurz" ]]; then

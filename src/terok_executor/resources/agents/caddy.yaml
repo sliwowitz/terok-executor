@@ -4,9 +4,9 @@
 # Caddy reverse proxy — runtime ingress that gates web-UI roster entries
 # (toad today, Vibes and others in future) with a per-container token.
 # Not an agent or tool: pulled in via ``install.depends_on: [caddy]``.
-roster_version: 1
+roster_version: 2
 
-kind: runtime
+kind: infra
 label: Caddy
 
 install:

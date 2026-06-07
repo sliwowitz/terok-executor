@@ -76,9 +76,11 @@ RUN mkdir -p /usr/local/share/terok && \
 # are cached above.
 ARG AGENT_CACHE_BUST=0
 
-# Stage scripts and the help fragments rendered from the roster.
+# Stage scripts, the help fragments, and the agent→protocol map baked from
+# the roster (read back by the in-container readiness check).
 COPY scripts/ /tmp/terok-scripts/
 COPY help.d/ /usr/local/share/terok/help.d/
+COPY agent-protocols.json {{ agent_protocols_path }}
 
 # Always-on terok scripts (env helpers, banner, updaters).
 RUN set -eux; \
@@ -87,12 +89,16 @@ RUN set -eux; \
     cp /tmp/terok-scripts/terok-trust-workspace.py /usr/local/share/terok/; \
     cp /tmp/terok-scripts/terok-env.sh /etc/profile.d/terok-env.sh; \
     cp /tmp/terok-scripts/hilfe /usr/local/bin/hilfe; \
+    cp /tmp/terok-scripts/terok-agents.py /usr/local/bin/terok-agents; \
+    cp /tmp/terok-scripts/providers /usr/local/bin/providers; \
     cp /tmp/terok-scripts/allthethings.sh /usr/local/bin/allthethings.sh; \
     cp /tmp/terok-scripts/update-all-the-things /usr/local/bin/update-all-the-things; \
     chmod +x /usr/local/share/terok/terok-env-git-identity.sh \
              /usr/local/share/terok/terok-acp-env.sh \
              /usr/local/share/terok/terok-trust-workspace.py \
              /usr/local/bin/hilfe \
+             /usr/local/bin/terok-agents \
+             /usr/local/bin/providers \
              /usr/local/bin/allthethings.sh \
              /usr/local/bin/update-all-the-things
 

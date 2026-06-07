@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
+
+"""Print the readiness manifest concisely: which providers each agent can use.
+
+A friendlier view of ``~/.terok/agents.json`` (written per task by
+``terok-agents``) — grouped by agent, coloured, ready pairs only.  ``--all``
+also lists the pairs that aren't ready (and why-not is implicit: the provider
+doesn't serve the agent's wire protocol, or isn't authenticated).
+
+Agents are the CLI tools (cyan, matching ``hilfe``); providers are the LLM
+endpoints (magenta).  Self-contained (stdlib only): it runs inside task
+containers where terok is not installed.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+MANIFEST = Path(os.environ.get("HOME", "/home/dev")) / ".terok" / "agents.json"
+
+_CYAN = "\033[36m"
+_MAGENTA = "\033[35m"
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
+
+
+def main(argv: list[str]) -> int:
+    """Render the manifest; ``--all`` includes not-ready pairs."""
+    show_all = "--all" in argv[1:]
+    try:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        print(f"No readiness manifest at {MANIFEST} — run inside a terok task.", file=sys.stderr)
+        return 1
+
+    ready: dict[str, list[str]] = defaultdict(list)
+    blocked: dict[str, list[str]] = defaultdict(list)
+    for pair in manifest.get("pairs", []):
+        bucket = ready if pair.get("ready") else blocked
+        bucket[pair["agent"]].append(pair["provider"])
+
+    if not ready and not blocked:
+        print("No (agent, provider) pairs — authenticate a provider on the host.", file=sys.stderr)
+        return 0
+
+    agents = sorted(ready if not show_all else {**ready, **blocked})
+    width = max((len(a) for a in agents), default=0)
+    print(f"{_BOLD}Ready agent → providers:{_RESET}")
+    for agent in sorted(ready):
+        names = ", ".join(f"{_MAGENTA}{p}{_RESET}" for p in sorted(set(ready[agent])))
+        print(f"  {_CYAN}{agent:<{width}}{_RESET} {_DIM}→{_RESET} {names}")
+    if show_all:
+        print(f"\n{_BOLD}{_DIM}Not ready (protocol mismatch or unauthenticated):{_RESET}")
+        for agent in sorted(blocked):
+            names = ", ".join(sorted(set(blocked[agent])))
+            print(f"  {_DIM}{agent:<{width}}  {names}{_RESET}")
+    else:
+        print(f"\n{_DIM}Use: <agent> --provider <name>   ·   not-ready too: providers --all{_RESET}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: native
 label: Codex
@@ -31,35 +31,39 @@ capabilities:
 wrapper:
   refuse_subcommands: [login, logout]
 
-vault:
-  route_prefix: codex
-  upstream: https://api.openai.com
-  path_upstreams:
-    /backend-api/: https://chatgpt.com
-  auth_header: Authorization
-  auth_prefix: "Bearer "
-  credential_type: oauth
+# The endpoint Codex routes to (upstream, the /backend-api/ → chatgpt.com
+# split, token refresh) lives in resources/providers/openai.yaml.
+protocol: openai-responses
+provider:
+  default: openai
   credential_file: auth.json
-  shared_config_patch:
+  credential_type: oauth
+  # Codex derives its inference base from the auth mode (codex-rs
+  # model_provider_info::to_api_provider): a ChatGPT-subscription token would
+  # target https://chatgpt.com/backend-api/codex, an API key
+  # https://api.openai.com/v1 — but an explicit ``openai_base_url`` overrides
+  # BOTH.  Since terok must override it (to route via the vault rather than
+  # straight to a firewalled upstream), the override has to match the mode the
+  # user actually authenticated with: ``by_credential_type`` is keyed off the
+  # stored credential's type so an OAuth container lands on the ChatGPT backend
+  # (a subscription token can't use ``/v1`` — no api.responses.write scope → 401
+  # → the blocked auth.openai.com refresh) and an API-key container on ``/v1``.
+  # ``chatgpt_base_url`` (common) routes the auth-manager's account calls.
+  config_patch:
     file: config.toml
     toml_set:
-      openai_base_url: "{vault_url}/v1"
       chatgpt_base_url: "{vault_url}/backend-api/"
+    by_credential_type:
+      oauth:
+        openai_base_url: "{vault_url}/backend-api/codex"
+      api_key:
+        openai_base_url: "{vault_url}/v1"
   # Codex itself reads its bearer from ``auth.json`` + the patched
-  # ``config.toml``, not from env.  These phantom env vars are emitted
-  # for env-var-only consumers (e.g. Pi) so that any other agent in the
-  # same container can route through the vault using the OAuth phantom
-  # token under OpenAI's standard env-var name.
+  # ``config.toml``, not from env.  This phantom env var is emitted for
+  # env-var-only consumers (e.g. Pi) so any other agent in the same
+  # container can route through the vault under OpenAI's standard env-var name.
   token_env:
     _default: OPENAI_API_KEY
-  # OAuth refresh -- endpoint, client_id, and grant shape extracted from the
-  # Codex CLI source (codex-rs/login/src/auth/manager.rs v0.123.0).  The CLI
-  # itself can be redirected at its own refresh attempts via the
-  # CODEX_REFRESH_TOKEN_URL_OVERRIDE env var, but vault-side refresh is what
-  # actually keeps the stored credential fresh across task containers.
-  oauth_refresh:
-    token_url: https://auth.openai.com/oauth/token
-    client_id: app_EMoamEEZ73f0CkXaXp7hrann
 
 auth:
   host_dir: _codex-config
@@ -70,6 +74,9 @@ auth:
     This will set up port forwarding (using socat) and open a browser for authentication.
     After completing authentication, press Ctrl+C to stop the container.
   extra_run_args: ["-p", "127.0.0.1:1455:1455"]
+  # Headless hosts: `terok auth codex --device-auth` shows a code + URL to enter
+  # on another device, so there is no browser callback (and no port to forward).
+  device_auth: true
   api_key_hint: "Get your API key at: https://platform.openai.com/api-keys"
 
 install:
@@ -77,7 +84,11 @@ install:
     RUN set -eux; \
         cp /tmp/terok-scripts/terok-codex-acp /usr/local/bin/terok-codex-acp; \
         cp /tmp/terok-scripts/setup-codex-auth.sh /usr/local/bin/setup-codex-auth.sh; \
-        chmod +x /usr/local/bin/terok-codex-acp /usr/local/bin/setup-codex-auth.sh
+        cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
+        chmod +x /usr/local/bin/terok-codex-acp \
+                 /usr/local/bin/setup-codex-auth.sh \
+                 /usr/local/bin/terok-native-provider; \
+        ln -sf terok-native-provider /usr/local/bin/codex-provider
   run_as_dev: |
     RUN set -eux; \
         npm install -g @openai/codex; \

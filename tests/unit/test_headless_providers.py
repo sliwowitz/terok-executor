@@ -8,10 +8,10 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from terok_executor.provider.providers import (
-    AGENT_PROVIDERS,
-    PROVIDER_NAMES,
-    get_provider,
-    resolve_provider_value,
+    AGENT_NAMES,
+    AGENTS,
+    get_agent,
+    resolve_agent_value,
 )
 from terok_executor.provider.wrappers import (
     INITIAL_PROMPT_CONSUMED_PATH,
@@ -23,18 +23,18 @@ from terok_executor.roster import AgentRoster
 from tests.constants import CONTAINER_INSTRUCTIONS_PATH, CONTAINER_TEROK_DIR
 
 
-def _provider_wrapper(name: str, *, has_agents: bool = False) -> str:
+def _provider_wrapper(name: str) -> str:
     """Generate a wrapper for a provider under test."""
-    return generate_agent_wrapper(AGENT_PROVIDERS[name], has_agents=has_agents)
+    return generate_agent_wrapper(AGENTS[name])
 
 
-def _all_wrappers(*, has_agents: bool = False) -> str:
+def _all_wrappers() -> str:
     """Generate the combined multi-provider wrapper file."""
-    return generate_all_wrappers(has_agents=has_agents)
+    return generate_all_wrappers()
 
 
 class TestAgentProviderRegistry:
-    """Tests for the AGENT_PROVIDERS registry."""
+    """Tests for the AGENTS registry."""
 
     def test_registry_contains_expected_providers(self) -> None:
         """Registry contains exactly the expected set of bundled providers."""
@@ -43,48 +43,45 @@ class TestAgentProviderRegistry:
             "codex",
             "copilot",
             "vibe",
-            "blablador",
             "opencode",
-            "kisski",
-            "openrouter",
             "pi",
         }
-        assert set(AGENT_PROVIDERS.keys()) == expected
+        assert set(AGENTS.keys()) == expected
 
     def test_provider_names_tuple(self) -> None:
-        """PROVIDER_NAMES is a tuple matching registry keys."""
-        assert isinstance(PROVIDER_NAMES, tuple)
-        assert set(PROVIDER_NAMES) == set(AGENT_PROVIDERS.keys())
+        """AGENT_NAMES is a tuple matching registry keys."""
+        assert isinstance(AGENT_NAMES, tuple)
+        assert set(AGENT_NAMES) == set(AGENTS.keys())
 
     def test_providers_are_frozen(self) -> None:
-        """AgentProvider instances are immutable."""
-        provider = AGENT_PROVIDERS["claude"]
+        """Agent instances are immutable."""
+        provider = AGENTS["claude"]
         with pytest.raises(FrozenInstanceError):
             provider.name = "changed"  # type: ignore[misc]
 
 
 class TestGetProvider:
-    """Tests for get_provider() resolution."""
+    """Tests for get_agent() resolution."""
 
     def test_explicit_name(self) -> None:
         """Explicit provider name resolves correctly."""
-        p = get_provider("codex")
+        p = get_agent("codex")
         assert p.name == "codex"
 
     def test_none_falls_back_to_default(self) -> None:
         """None name uses default_agent."""
-        p = get_provider(None, default_agent="copilot")
+        p = get_agent(None, default_agent="copilot")
         assert p.name == "copilot"
 
     def test_none_falls_back_to_claude(self) -> None:
         """None name with no default resolves to claude."""
-        p = get_provider(None, default_agent=None)
+        p = get_agent(None, default_agent=None)
         assert p.name == "claude"
 
     def test_invalid_name_raises_system_exit(self) -> None:
         """Unknown provider name raises SystemExit."""
         with pytest.raises(SystemExit) as ctx:
-            get_provider("nonexistent")
+            get_agent("nonexistent")
         assert "nonexistent" in str(ctx.value)
 
 
@@ -93,7 +90,7 @@ class TestBuildHeadlessCommand:
 
     def test_all_commands_start_with_init(self) -> None:
         """All provider commands start with init-ssh-and-repo.sh."""
-        for _name, p in AGENT_PROVIDERS.items():
+        for _name, p in AGENTS.items():
             cmd = p.build_headless_command(timeout=1800)
             assert cmd.startswith("init-ssh-and-repo.sh")
 
@@ -109,7 +106,7 @@ class TestGenerateAgentWrapper:
 
     def test_generic_wrapper_has_timeout_support(self) -> None:
         """All non-Claude wrappers support --terok-timeout."""
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             if name == "claude":
                 continue
             wrapper = _provider_wrapper(name)
@@ -117,11 +114,30 @@ class TestGenerateAgentWrapper:
 
     def test_session_resume_uses_explicit_id(self) -> None:
         """Providers with session_file use --session/--resume with explicit ID."""
-        for name in ("vibe", "opencode", "blablador", "kisski", "openrouter", "pi"):
-            p = AGENT_PROVIDERS[name]
+        for name in ("vibe", "opencode", "pi"):
+            p = AGENTS[name]
             wrapper = _provider_wrapper(name)
             assert p.resume_flag in wrapper, f"{name} missing resume flag"
             assert f"cat {CONTAINER_TEROK_DIR}/{p.session_file}" in wrapper
+
+    def test_opencode_provider_flag_routes_through_opencode_provider(self) -> None:
+        """`opencode --provider X` swaps the runner for opencode-provider (which
+        writes X's opencode.json); native agents route through their own
+        launchers, while agents outside the feature don't gain the flag."""
+        oc = _provider_wrapper("opencode")
+        assert "--provider) _provider=" in oc
+        assert 'opencode-provider --provider "$_provider"' in oc
+        # Native agents run bare by default (config_patch routes their default);
+        # a selected provider re-points them through their own launcher.
+        assert 'vibe-provider --provider "$_provider"' in _provider_wrapper("vibe")
+        # Harnesses/agents with no provider override stay flag-free.
+        assert "--provider) _provider=" not in _provider_wrapper("pi")
+
+    def test_opencode_provider_defaults_to_container_selection(self) -> None:
+        """`_provider` defaults to ``$TEROK_PROVIDER`` so the container-selected
+        provider applies without an explicit flag (the flag still overrides)."""
+        oc = _provider_wrapper("opencode")
+        assert 'local _provider="${TEROK_PROVIDER:-}"' in oc
 
     def test_vibe_wrapper_has_lazy_model_sync(self) -> None:
         """Vibe wrapper includes lazy Mistral model sync with mtime check."""
@@ -131,7 +147,7 @@ class TestGenerateAgentWrapper:
 
     def test_non_vibe_wrappers_lack_model_sync(self) -> None:
         """Only vibe gets the model sync block."""
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             if name == "vibe":
                 continue
             wrapper = _provider_wrapper(name)
@@ -193,7 +209,7 @@ class TestGenerateAgentWrapper:
         """
         from terok_executor.provider.wrappers import generate_all_wrappers
 
-        all_wrappers = generate_all_wrappers(has_agents=True)
+        all_wrappers = generate_all_wrappers()
         # Definition appears exactly once (no duplicate inlines)…
         assert all_wrappers.count("_terok_trust_workspace_for_vibe()") == 1
         # …and the flock guard is wired up.
@@ -206,7 +222,7 @@ class TestGenerateAgentWrapper:
         ``_vibe_subshell_setup_block`` keeps the rendered wrapper
         unchanged for every other agent.
         """
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             if name == "vibe":
                 continue
             wrapper = _provider_wrapper(name)
@@ -224,7 +240,7 @@ class TestGenerateAgentWrapper:
         The seeded argv shape varies by provider (see
         [`test_initial_prompt_seed_shape_per_provider`][tests.unit.test_headless_providers.TestAgentWrappers.test_initial_prompt_seed_shape_per_provider]).
         """
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             wrapper = _provider_wrapper(name)
             assert INITIAL_PROMPT_PATH in wrapper, f"{name} missing initial-prompt pickup"
             assert INITIAL_PROMPT_CONSUMED_PATH in wrapper, f"{name} missing one-shot rename"
@@ -246,9 +262,6 @@ class TestGenerateAgentWrapper:
         dash_p = f'set -- -p "$(cat {INITIAL_PROMPT_PATH})"'
         expected: dict[str, str] = {
             "opencode": run,
-            "blablador": run,
-            "kisski": run,
-            "openrouter": run,
             "copilot": dash_p,
             "claude": bare,
             "codex": bare,
@@ -258,16 +271,16 @@ class TestGenerateAgentWrapper:
         # Every registered provider must have an explicit decision recorded
         # here — new providers can't sneak in without an audit of their CLI
         # against the seed-shape categories above.
-        missing = set(AGENT_PROVIDERS) - set(expected)
+        missing = set(AGENTS) - set(expected)
         assert not missing, f"missing seed-shape decision for: {sorted(missing)}"
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             wrapper = _provider_wrapper(name)
             assert expected[name] in wrapper, f"{name} should emit `{expected[name]}`"
 
     def test_initial_prompt_skipped_when_session_present(self) -> None:
         """Wrappers with a session_file gate the prompt pickup on no resume."""
-        for name in ("vibe", "opencode", "blablador", "kisski"):
-            p = AGENT_PROVIDERS[name]
+        for name in ("vibe", "opencode"):
+            p = AGENTS[name]
             wrapper = _provider_wrapper(name)
             assert f"[ ! -s {CONTAINER_TEROK_DIR}/{p.session_file} ]" in wrapper, (
                 f"{name} initial-prompt block should defer to session resume"
@@ -275,7 +288,7 @@ class TestGenerateAgentWrapper:
 
     def test_initial_prompt_skipped_in_headless(self) -> None:
         """Pickup block requires `_timeout` empty so headless never picks up the file."""
-        for name in AGENT_PROVIDERS:
+        for name in AGENTS:
             wrapper = _provider_wrapper(name)
             assert '[ -z "$_timeout" ]' in wrapper, f"{name} missing headless guard"
 
@@ -299,28 +312,28 @@ class TestGenerateAgentWrapper:
 
 
 class TestResolveProviderValue:
-    """Tests for resolve_provider_value() config resolution."""
+    """Tests for resolve_agent_value() config resolution."""
 
     def test_flat_string_value(self) -> None:
         """Flat string value is returned for any provider."""
         config = {"model": "opus"}
-        assert resolve_provider_value("model", config, "claude") == "opus"
-        assert resolve_provider_value("model", config, "codex") == "opus"
+        assert resolve_agent_value("model", config, "claude") == "opus"
+        assert resolve_agent_value("model", config, "codex") == "opus"
 
     def test_per_provider_dict(self) -> None:
         """Per-provider dict returns provider-specific value."""
         config = {"model": {"claude": "opus", "codex": "o3"}}
-        assert resolve_provider_value("model", config, "claude") == "opus"
-        assert resolve_provider_value("model", config, "codex") == "o3"
+        assert resolve_agent_value("model", config, "claude") == "opus"
+        assert resolve_agent_value("model", config, "codex") == "o3"
 
     def test_per_provider_dict_with_default(self) -> None:
         """Per-provider dict falls back to _default for unlisted providers."""
         config = {"model": {"claude": "opus", "_default": "fast"}}
-        assert resolve_provider_value("model", config, "codex") == "fast"
+        assert resolve_agent_value("model", config, "codex") == "fast"
 
     def test_missing_key_returns_none(self) -> None:
         """Missing key returns None."""
-        assert resolve_provider_value("model", {}, "claude") is None
+        assert resolve_agent_value("model", {}, "claude") is None
 
 
 class TestApplyProviderConfig:
@@ -328,19 +341,19 @@ class TestApplyProviderConfig:
 
     def test_model_from_config(self) -> None:
         """Model value is read from config when no CLI override."""
-        p = AGENT_PROVIDERS["claude"]
+        p = AGENTS["claude"]
         pcfg = p.apply_config({"model": "opus"})
         assert pcfg.model == "opus"
 
     def test_timeout_default(self) -> None:
         """Missing timeout defaults to 1800."""
-        p = AGENT_PROVIDERS["claude"]
+        p = AGENTS["claude"]
         pcfg = p.apply_config({})
         assert pcfg.timeout == 1800
 
     def test_max_turns_unsupported_injects_prompt(self) -> None:
         """Provider without max_turns_flag gets prompt injection + warning."""
-        p = AGENT_PROVIDERS["codex"]
+        p = AGENTS["codex"]
         pcfg = p.apply_config({"max_turns": 30})
         assert pcfg.max_turns is None
         assert "30 steps" in pcfg.prompt_extra
@@ -352,7 +365,7 @@ class TestGenerateAllWrappers:
     def test_all_providers_in_output(self) -> None:
         """Output contains wrapper functions for all providers."""
         wrapper = _all_wrappers()
-        for name, p in AGENT_PROVIDERS.items():
+        for name, p in AGENTS.items():
             assert f"{p.binary}()" in wrapper, f"Missing wrapper for {name}"
 
     def test_all_wrappers_valid_bash_syntax(self) -> None:
@@ -362,7 +375,7 @@ class TestGenerateAllWrappers:
 
         if shutil.which("bash") is None:
             pytest.skip("bash is required for wrapper syntax validation")
-        wrapper = _all_wrappers(has_agents=True)
+        wrapper = _all_wrappers()
         result = subprocess.run(["bash", "-n"], input=wrapper, capture_output=True, text=True)
         assert result.returncode == 0, f"bash syntax error:\n{result.stderr}"
 

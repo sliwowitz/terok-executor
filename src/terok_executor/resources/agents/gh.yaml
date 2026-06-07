@@ -1,22 +1,21 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+roster_version: 2
 
 kind: tool
 label: GitHub CLI
 binary: gh
 
-vault:
-  route_prefix: gh
-  upstream: https://api.github.com
-  auth_header: Authorization
-  auth_prefix: "token "
+# The GitHub endpoint (api.github.com, token auth) lives in
+# resources/providers/github.yaml.
+provider:
+  default: github
   credential_type: oauth_token
   credential_file: hosts.yml
   token_env:
     _default: GH_TOKEN
-  shared_config_patch:
+  config_patch:
     file: config.yml
     yaml_set: {http_unix_socket: "{vault_socket}"}
 

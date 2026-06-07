@@ -1,43 +1,22 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-roster_version: 1
+# Helmholtz Blablador — a research-institution OpenAI-compatible endpoint.
+# Auth tokens come from the Helmholtz Codebase (read_user scope).
 
-kind: opencode
-label: Blablador
-binary: blablador
+upstream: https://api.helmholtz-blablador.fz-juelich.de
 
-git_identity:
-  name: Blablador
-  email: noreply@hzdr.de
+auth:
+  api_key:
+    header: Authorization
+    prefix: "Bearer "
 
-headless:
-  subcommand: run
-  prompt_flag: ""
+serves:
+  openai-chat: "/v1"
 
-auto_approve:
-  env:
-    OPENCODE_PERMISSION: '{"*":"allow"}'
-
-session:
-  supports_resume: true
-  resume_flag: "--session"
-  continue_flag: "--continue"
-  session_file: blablador-session.txt
-
-capabilities:
-  log_format: plain
-
-vault:
-  route_prefix: blablador
-  upstream: https://api.helmholtz-blablador.fz-juelich.de
-  auth_header: Authorization
-  auth_prefix: "Bearer "
-  credential_type: api_key
-  credential_file: config.json
-  token_env:
-    _default: BLABLADOR_API_KEY
-
+# Driven by the OpenCode harness — a one-word `blablador` command (symlinked to
+# the opencode-provider family) plus the OpenAI-compatible config the wrapper
+# writes into opencode.json.
 opencode:
   display_name: Helmholtz Blablador
   base_url: https://api.helmholtz-blablador.fz-juelich.de/v1
@@ -51,12 +30,7 @@ opencode:
       https://codebase.helmholtz.cloud/-/user_settings/personal_access_tokens
     The token must include the ``read_user`` scope.
 
-# OpenCode runtime mounts are defined in opencode.yaml and deduplicated
-# by the registry — no need to repeat them here.
-
 install:
-  # All blablador wrappers are symlinks to the opencode-provider family;
-  # selecting blablador transitively pulls opencode in.
   depends_on: [opencode]
   run_as_root: |
     RUN set -eux; \

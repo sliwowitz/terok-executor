@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# SonarCloud — the upstream the `sonar` (sonar-scanner) tool authenticates
+# to.  sonarcloud.io serves API + project pages + docs + badges on the same
+# apex, so credential containment (read-only token) carries the weight.
+
+upstream: https://sonarcloud.io
+
+auth:
+  api_key:
+    header: Authorization
+    prefix: "Bearer "
+
+shared_domain: true

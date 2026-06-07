@@ -1,51 +1,22 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prepares agent config directories with wrappers, instructions, and sub-agent definitions.
+"""Prepares agent config directories with wrappers, instructions, and session hooks.
 
-Parses .md frontmatter for sub-agent definitions, converts them to Claude's
-``--agents`` JSON format, and generates the ``terok-executor.sh`` wrapper that
-sets up git identity and CLI flags inside task containers.
+Generates the ``terok-executor.sh`` wrapper that sets up git identity and CLI
+flags inside task containers, writes the per-task instructions file, injects it
+into the shared OpenCode configs, and installs the Claude SessionStart hook.
 """
 
 import json
 import os
 import tempfile
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from terok_util import ensure_dir, ensure_dir_writable, yaml
+from terok_util import ensure_dir, ensure_dir_writable
 
-from .providers import AGENT_PROVIDERS
-
-# TODO: future — support global agent definitions in terok-config.yml (agent.subagents).
-# When implemented, global subagents would be merged with per-project subagents before
-# filtering by default/selected. Use a generic merge approach that can be reused across
-# different agent runtimes (Claude, Codex, OpenCode, etc.).
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# All native Claude agent fields to pass through to --agents JSON.
-_CLAUDE_AGENT_FIELDS = frozenset(
-    {
-        "description",
-        "tools",
-        "disallowedTools",
-        "model",
-        "permissionMode",
-        "mcpServers",
-        "hooks",
-        "maxTurns",
-        "skills",
-        "memory",
-        "background",
-        "isolation",
-    }
-)
+from .providers import OPENCODE_PROVIDERS
 
 # ---------------------------------------------------------------------------
 # Dataclasses / types
@@ -58,27 +29,11 @@ class AgentConfigSpec:
 
     tasks_root: Path
     task_id: str
-    subagents: tuple[dict, ...]
-    selected_agents: tuple[str, ...] | None = None
     prompt: str | None = None
-    provider: str = "claude"
+    agent: str = "claude"
     instructions: str | None = None
     default_agent: str | None = None
     mounts_base: Path | None = None
-
-    def __post_init__(self) -> None:
-        """Coerce mutable sequences to tuples for true immutability.
-
-        Defensive against callers that build the spec from
-        ``json.loads`` / ``yaml.load`` output where the runtime types are
-        ``list`` instead of ``tuple``.  Mypy sees the static annotations
-        and reports the ``isinstance(..., list)`` branches as unreachable;
-        the runtime coercion remains correct.
-        """
-        if isinstance(self.subagents, list):  # type: ignore[unreachable]
-            object.__setattr__(self, "subagents", tuple(self.subagents))  # type: ignore[unreachable]
-        if isinstance(self.selected_agents, list):
-            object.__setattr__(self, "selected_agents", tuple(self.selected_agents))  # type: ignore[unreachable]
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +46,6 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Writes:
     - terok-executor.sh (always) — wrapper functions with git env vars
-    - agents.json (only when provider supports it and sub-agents are non-empty)
     - prompt.txt (if prompt given, headless only)
     - instructions.md (always) — custom instructions or a neutral default
     - <envs>/_claude-config/settings.json — SessionStart hook (Claude only)
@@ -103,30 +57,13 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
 
     Returns the agent_config_dir path.
     """
-    from .providers import get_provider as _get_provider
+    from .providers import get_agent as _get_agent
 
-    resolved = _get_provider(spec.provider, default_agent=spec.default_agent)
+    resolved = _get_agent(spec.agent, default_agent=spec.default_agent)
 
     task_dir = spec.tasks_root / str(spec.task_id)
     agent_config_dir = task_dir / "agent-config"
     ensure_dir(agent_config_dir)
-
-    # Build agents JSON — only for providers that support --agents (Claude)
-    has_agents = False
-    if resolved.supports_agents_json and spec.subagents:
-        agents_json = _subagents_to_json(spec.subagents, spec.selected_agents)
-        agents_dict = json.loads(agents_json)
-        if agents_dict:  # non-empty dict
-            (agent_config_dir / "agents.json").write_text(agents_json, encoding="utf-8")
-            has_agents = True
-    elif spec.subagents or spec.selected_agents:
-        import warnings
-
-        warnings.warn(
-            f"{resolved.label} does not support sub-agents (--agents); "
-            f"sub-agent definitions will be ignored.",
-            stacklevel=2,
-        )
 
     # Write instructions file — always present so opencode.json `instructions`
     # references never point to a missing file.  When no custom instructions
@@ -143,17 +80,16 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     if mounts_base is None:
         raise ValueError("mounts_base is required in AgentConfigSpec")
     _inject_opencode_instructions(mounts_base / "_opencode-config" / "opencode.json")
-    for _p in AGENT_PROVIDERS.values():
-        if _p.opencode_config is not None:
-            _inject_opencode_instructions(
-                mounts_base / f"_{_p.name}-config" / "opencode" / "opencode.json"
-            )
+    for _name in OPENCODE_PROVIDERS:
+        _inject_opencode_instructions(
+            mounts_base / f"_{_name}-config" / "opencode" / "opencode.json"
+        )
 
     # Write shell wrapper functions for ALL providers so interactive CLI users
     # can invoke any agent (each provider gets its own shell function).
     from .wrappers import generate_all_wrappers
 
-    wrapper = generate_all_wrappers(has_agents)
+    wrapper = generate_all_wrappers()
     (agent_config_dir / "terok-executor.sh").write_text(wrapper, encoding="utf-8")
 
     # Write SessionStart hook — only for providers that support it (Claude)
@@ -169,93 +105,9 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     return agent_config_dir
 
 
-def parse_md_agent(file_path: str) -> dict:
-    """Parse a .md file with YAML frontmatter into an agent dict.
-
-    Expected format:
-        ---
-        name: agent-name
-        description: ...
-        tools: [Read, Grep]
-        model: sonnet
-        ---
-        System prompt body...
-    """
-    path = Path(file_path)
-    if not path.is_file():
-        return {}
-    content = path.read_text(encoding="utf-8")
-    # Split YAML frontmatter from body
-    if content.startswith("---"):
-        parts = content.split("---", 2)
-        if len(parts) >= 3:
-            frontmatter = yaml.load(parts[1]) or {}
-            if not isinstance(frontmatter, dict):
-                frontmatter = {}
-            body = parts[2].strip()
-            frontmatter["prompt"] = body
-            return frontmatter
-    # No frontmatter: treat entire file as prompt
-    return {"prompt": content.strip()}
-
-
 # ---------------------------------------------------------------------------
 # Private helpers (in call order)
 # ---------------------------------------------------------------------------
-
-
-def _subagents_to_json(
-    subagents: Sequence[dict[str, Any]],
-    selected_agents: Sequence[str] | None = None,
-) -> str:
-    """Convert sub-agent list to JSON dict string for --agents flag.
-
-    Filters to include agents where default=True plus any agents whose
-    name appears in selected_agents. Output is a JSON dict keyed by
-    agent name (the format expected by Claude's --agents flag).
-
-    - file: refs are parsed from .md YAML frontmatter + body
-    - Inline defs: system_prompt -> prompt, pass through native Claude fields
-    - Strips non-Claude fields: default, name (name becomes the dict key)
-    """
-    result: dict[str, dict] = {}
-    selected = set(selected_agents) if selected_agents else set()
-
-    for sa in subagents:
-        # Resolve file references first
-        if "file" in sa:
-            agent = parse_md_agent(sa["file"])
-            if not agent:
-                continue
-            # Merge the default flag from the YAML definition
-            if "default" in sa:
-                agent["default"] = sa["default"]
-        else:
-            agent = dict(sa)  # shallow copy
-
-        name = agent.get("name")
-        if not name:
-            continue  # skip agents without a name
-
-        # Filter: include if default=True OR if name in selected_agents
-        is_default = agent.get("default", False)
-        if not is_default and name not in selected:
-            continue
-
-        # Build the output entry
-        entry: dict = {}
-        for field in _CLAUDE_AGENT_FIELDS:
-            if field in agent:
-                entry[field] = agent[field]
-        # Map system_prompt -> prompt
-        if "system_prompt" in agent:
-            entry["prompt"] = agent["system_prompt"]
-        elif "prompt" in agent:
-            entry["prompt"] = agent["prompt"]
-
-        result[name] = entry
-
-    return json.dumps(result)
 
 
 def _inject_opencode_instructions(config_path: Path) -> None:

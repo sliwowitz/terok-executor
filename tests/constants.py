@@ -48,6 +48,9 @@ CONTAINER_INSTRUCTIONS_PATH = CONTAINER_TEROK_DIR / "instructions.md"
 CONTAINER_CLAUDE_SESSION_PATH = CONTAINER_TEROK_DIR / "claude-session.txt"
 """Container Claude session file path used by session-hook assertions."""
 
+CONTAINER_AGENTS_MANIFEST_PATH = CONTAINER_TEROK_DIR / "agents.json"
+"""Container readiness manifest path written by the ``terok-agents`` command."""
+
 CONTAINER_CLAUDE_MEMORY_OVERRIDE = "/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
 """Literal shell path used in generated Claude wrapper memory override assertions."""
 

@@ -150,7 +150,8 @@ def test_credentials_default_set(mock_db_cls: MagicMock) -> None:
     db = mock_db_cls.return_value
     db.load_credential.return_value = {"type": "api_key"}
     _pf().check_credentials()
-    db.load_credential.assert_called_once_with("default", "claude")
+    # claude resolves to its default provider (anthropic) for the DB lookup.
+    db.load_credential.assert_called_once_with("default", "anthropic")
 
 
 @patch("terok_executor.integrations.sandbox.SandboxConfig.open_credential_db")
@@ -159,7 +160,7 @@ def test_credentials_custom_set(mock_db_cls: MagicMock) -> None:
     db = mock_db_cls.return_value
     db.load_credential.return_value = {"type": "api_key"}
     _pf(credential_set="my-proj").check_credentials()
-    db.load_credential.assert_called_once_with("my-proj", "claude")
+    db.load_credential.assert_called_once_with("my-proj", "anthropic")
 
 
 def test_fix_credentials_threads_mounts_dir_to_authenticator() -> None:

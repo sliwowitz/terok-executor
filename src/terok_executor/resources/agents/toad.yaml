@@ -3,9 +3,9 @@
 
 # Toad multi-agent TUI — shared config dir for theme and launcher state.
 # Not an agent or tool — a runtime component installed in L1.
-roster_version: 1
+roster_version: 2
 
-kind: runtime
+kind: frontend
 label: Toad
 binary: toad
 

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from terok_executor.container.build import (
     render_l0,
     render_l1,
     render_l1_sidecar,
+    stage_agent_protocols,
     stage_help_fragments,
     stage_scripts,
     stage_tmux_config,
@@ -553,6 +555,12 @@ class TestTemplateRendering:
         assert "opencode.ai/install" in content
         assert 'LABEL ai.terok.agents="blablador,opencode"' in content
 
+    def test_l1_installs_readiness_check(self) -> None:
+        # The agent→protocol map and the terok-agents command must ship in L1.
+        content = render_l1("terok-l0:test", family="deb")
+        assert "COPY agent-protocols.json /usr/local/share/terok/agent-protocols.json" in content
+        assert "cp /tmp/terok-scripts/terok-agents.py /usr/local/bin/terok-agents" in content
+
     def test_l1_banner_targets_family_specific_bashrc(self) -> None:
         # Debian patches bash to source /etc/bash.bashrc; Fedora's bash never
         # reads that path and instead sources /etc/bashrc.  Wiring the help
@@ -784,11 +792,22 @@ class TestStageScripts:
         assert (dest / "opencode-provider-acp").is_file()
         assert (dest / "opencode-toad").is_file()
 
+    def test_stages_native_provider(self, tmp_path: Path) -> None:
+        """The shared launcher codex/vibe symlink to is staged into the image."""
+        dest = tmp_path / "scripts"
+        stage_scripts(dest)
+        assert (dest / "terok-native-provider").is_file()
+
     def test_stages_toad_and_hilfe(self, tmp_path: Path) -> None:
         dest = tmp_path / "scripts"
         stage_scripts(dest)
         assert (dest / "toad").is_file()
         assert (dest / "hilfe").is_file()
+
+    def test_stages_readiness_generator(self, tmp_path: Path) -> None:
+        dest = tmp_path / "scripts"
+        stage_scripts(dest)
+        assert (dest / "terok-agents.py").is_file()
 
     def test_stages_auth_and_sync(self, tmp_path: Path) -> None:
         dest = tmp_path / "scripts"
@@ -910,6 +929,37 @@ class TestStageHelpFragments:
 
         # bytes(s, "utf-8").decode("unicode_escape") would produce 'Ã¤' here.
         assert _decode_label_escapes(r"\033[36m→ ähnlich\033[0m") == ("\x1b[36m→ ähnlich\x1b[0m")
+
+
+class TestStageAgentProtocols:
+    """Verify the baked agent→wire-protocol map for the readiness check."""
+
+    def test_bakes_protocol_speaking_agents(self, tmp_path: Path) -> None:
+        dest = tmp_path / "agent-protocols.json"
+        stage_agent_protocols(dest, ("claude", "codex", "vibe"))
+        baked = json.loads(dest.read_text())
+        assert baked == {
+            "claude": "anthropic-messages",
+            "codex": "openai-responses",
+            "vibe": "openai-chat",
+        }
+
+    def test_omits_agents_without_protocol(self, tmp_path: Path) -> None:
+        # Tools carry no fixed protocol → absent.  Harnesses now declare the
+        # protocol their adapters speak (opencode → openai-chat) so the readiness
+        # manifest can surface them paired with compatible providers.
+        dest = tmp_path / "agent-protocols.json"
+        stage_agent_protocols(dest, ("claude", "gh", "opencode"))
+        assert json.loads(dest.read_text()) == {
+            "claude": "anthropic-messages",
+            "opencode": "openai-chat",
+        }
+
+    def test_writes_empty_object_for_no_protocol_agents(self, tmp_path: Path) -> None:
+        # Always write a file so the Dockerfile COPY always has a source.
+        dest = tmp_path / "agent-protocols.json"
+        stage_agent_protocols(dest, ("gh",))
+        assert json.loads(dest.read_text()) == {}
 
 
 # ---------------------------------------------------------------------------

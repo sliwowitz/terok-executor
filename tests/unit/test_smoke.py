@@ -27,12 +27,12 @@ class TestPackageImport:
         assert len(__version__) > 0
 
     def test_agent_providers_registry(self) -> None:
-        """AGENT_PROVIDERS registry contains expected agents."""
-        from terok_executor import AGENT_PROVIDERS
+        """AGENTS registry contains expected agents."""
+        from terok_executor import AGENTS
 
-        assert len(AGENT_PROVIDERS) >= 7
-        assert "claude" in AGENT_PROVIDERS
-        assert "codex" in AGENT_PROVIDERS
+        assert len(AGENTS) >= 6
+        assert "claude" in AGENTS
+        assert "codex" in AGENTS
 
     def test_auth_providers_registry(self) -> None:
         """AUTH_PROVIDERS registry contains expected providers."""
@@ -42,18 +42,18 @@ class TestPackageImport:
         assert "codex" in AUTH_PROVIDERS
 
     def test_get_provider_resolves(self) -> None:
-        """get_provider resolves explicit name."""
-        from terok_executor import get_provider
+        """get_agent resolves explicit name."""
+        from terok_executor import get_agent
 
-        p = get_provider("claude")
+        p = get_agent("claude")
         assert p.name == "claude"
         assert p.binary == "claude"
 
     def test_get_provider_default_fallback(self) -> None:
-        """get_provider falls back to claude when no default set."""
-        from terok_executor import get_provider
+        """get_agent falls back to claude when no default set."""
+        from terok_executor import get_agent
 
-        p = get_provider(None)
+        p = get_agent(None)
         assert p.name == "claude"
 
     def test_config_stack_resolve(self) -> None:
@@ -68,18 +68,18 @@ class TestPackageImport:
         assert result["timeout"] == 60
 
     def test_resolve_provider_value_flat(self) -> None:
-        """resolve_provider_value returns flat values."""
-        from terok_executor import resolve_provider_value
+        """resolve_agent_value returns flat values."""
+        from terok_executor import resolve_agent_value
 
-        assert resolve_provider_value("model", {"model": "opus"}, "claude") == "opus"
+        assert resolve_agent_value("model", {"model": "opus"}, "claude") == "opus"
 
     def test_resolve_provider_value_per_provider(self) -> None:
-        """resolve_provider_value picks provider-specific values."""
-        from terok_executor import resolve_provider_value
+        """resolve_agent_value picks provider-specific values."""
+        from terok_executor import resolve_agent_value
 
         config = {"model": {"claude": "opus", "codex": "o3"}}
-        assert resolve_provider_value("model", config, "claude") == "opus"
-        assert resolve_provider_value("model", config, "codex") == "o3"
+        assert resolve_agent_value("model", config, "claude") == "opus"
+        assert resolve_agent_value("model", config, "codex") == "o3"
 
     def test_bundled_instructions(self) -> None:
         """Bundled default instructions are loadable and non-empty."""

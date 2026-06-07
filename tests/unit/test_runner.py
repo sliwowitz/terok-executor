@@ -200,6 +200,38 @@ class TestAgentRunner:
         assert "init-ssh-and-repo.sh" in cmd_str
         assert "__CLI_READY__" in cmd_str
 
+    def test_direct_credential_keys_by_default_provider(self) -> None:
+        """A tool with a default provider loads its credential by the provider key."""
+        db = Mock()
+        db.load_credential.side_effect = lambda cs, key: (
+            {"key": "ghp_x"} if key == "github" else None
+        )
+        sandbox = Mock()
+        sandbox.config.open_credential_db.return_value = db
+        roster = Mock()
+        roster.get_sidecar_spec.return_value = Mock(env_map={"GITHUB_TOKEN": "key"})
+        roster.auth_providers = {"gh": Mock(credential_provider="github")}
+        runner = AgentRunner(sandbox=sandbox, roster=roster)
+
+        assert runner._direct_credential_env("gh") == {"GITHUB_TOKEN": "ghp_x"}
+        db.load_credential.assert_called_once_with("default", "github")
+
+    def test_direct_credential_falls_back_to_tool_name(self) -> None:
+        """A tool with no provider binding keys its credential under its own name."""
+        db = Mock()
+        db.load_credential.side_effect = lambda cs, key: (
+            {"key": "tok"} if key == "coderabbit" else None
+        )
+        sandbox = Mock()
+        sandbox.config.open_credential_db.return_value = db
+        roster = Mock()
+        roster.get_sidecar_spec.return_value = Mock(env_map={"CODERABBIT_API_KEY": "key"})
+        roster.auth_providers = {}  # no provider binding for this tool
+        runner = AgentRunner(sandbox=sandbox, roster=roster)
+
+        assert runner._direct_credential_env("coderabbit") == {"CODERABBIT_API_KEY": "tok"}
+        db.load_credential.assert_called_once_with("default", "coderabbit")
+
     def test_run_web_publishes_port(self, tmp_path: Path) -> None:
         """Web mode includes port publishing in extra_args."""
         sandbox = _mock_sandbox()

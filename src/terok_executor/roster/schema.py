@@ -4,11 +4,12 @@
 """Pydantic v2 schema for agent-roster YAML files.
 
 Each ``resources/agents/*.yaml`` (and any user override under
-``~/.config/terok/agent/agents/*.yaml``) is parsed into [`RawAgentYaml`][terok_executor.roster.schema.RawAgentYaml]
-before being projected onto the runtime dataclasses
-([`AgentProvider`][terok_executor.provider.providers.AgentProvider],
-[`AuthProvider`][terok_executor.credentials.auth.AuthProvider],
-[`VaultRoute`][terok_executor.roster.types.VaultRoute], …).
+``~/.config/terok/agent/agents/*.yaml``) is parsed into [`RawAgentYaml`][terok_executor.roster.schema.RawAgentYaml];
+each ``resources/providers/*.yaml`` into [`RawProvider`][terok_executor.roster.schema.RawProvider].
+These project onto the runtime dataclasses
+([`Agent`][terok_executor.provider.providers.Agent],
+[`Provider`][terok_executor.roster.types.Provider],
+[`AuthProvider`][terok_executor.credentials.auth.AuthProvider], …).
 
 Validation guarantees:
 
@@ -18,7 +19,7 @@ Validation guarantees:
 - **Type-checked values**: ``modes`` only accepts ``oauth``/``api_key``,
   ``credential_type`` only accepts the four known kinds, ``help.section``
   only accepts ``agent``/``dev_tool``.
-- **Required fields**: ``vault.route_prefix``, ``vault.upstream``,
+- **Required fields**: ``provider.upstream``, ``provider.auth`` (≥1 mode),
   ``auth.host_dir``, ``auth.container_mount`` raise on missing.
 - **Coercions**: ``install.depends_on`` accepts a single string or a list.
 
@@ -33,12 +34,21 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
-from terok_executor.provider.providers import AgentProvider, OpenCodeProviderConfig
+from terok_executor.provider.providers import Agent, ProviderBinding
 
-from .types import HELP_SECTIONS, HelpSection, HelpSpec, InstallSpec, SidecarSpec, VaultRoute
+from .types import (
+    HELP_SECTIONS,
+    HelpSection,
+    HelpSpec,
+    InstallSpec,
+    OpenCodeProviderConfig,
+    Provider,
+    ProviderAuth,
+    SidecarSpec,
+)
 
 # ── Reusable building blocks ──────────────────────────────────────────────
 
@@ -113,7 +123,6 @@ class RawSession(StrictModel):
 class RawCapabilities(StrictModel):
     """``capabilities:`` — agent-specific feature toggles."""
 
-    agents_json: bool = False
     add_dir: bool = False
     log_format: Literal["plain", "claude-stream-json"] = "plain"
 
@@ -140,7 +149,7 @@ class RawOpenCode(StrictModel):
     )
 
     def to_dataclass(self) -> OpenCodeProviderConfig:
-        """Project to the runtime [`OpenCodeProviderConfig`][terok_executor.provider.providers.OpenCodeProviderConfig]."""
+        """Project to the runtime [`OpenCodeProviderConfig`][terok_executor.roster.types.OpenCodeProviderConfig]."""
         return OpenCodeProviderConfig(
             display_name=self.display_name,
             base_url=self.base_url,
@@ -149,6 +158,7 @@ class RawOpenCode(StrictModel):
             env_var_prefix=self.env_var_prefix,
             config_dir=self.config_dir,
             auth_key_url=self.auth_key_url,
+            api_key_hint=self.api_key_hint or "",
         )
 
 
@@ -179,6 +189,10 @@ class RawAuth(StrictModel):
     extra_run_args: list[str] = Field(default_factory=list)
     modes: list[Literal["oauth", "api_key"]] = Field(
         default_factory=lambda: ["api_key"]  # type: ignore[arg-type]
+    )
+    device_auth: bool = Field(
+        default=False,
+        description="OAuth flow has a headless device-code variant, offered in the auth prompt",
     )
     api_key_hint: str = ""
     post_capture_state: PostCaptureState = Field(
@@ -216,6 +230,7 @@ class RawAuth(StrictModel):
             banner_hint=self.banner_hint,
             extra_run_args=tuple(self.extra_run_args),
             modes=tuple(self.modes),
+            device_auth=self.device_auth,
             api_key_hint=self.api_key_hint,
             post_capture_state=dict(self.post_capture_state),
         )
@@ -227,59 +242,6 @@ class RawOAuthRefresh(StrictModel):
     token_url: str
     client_id: str
     scope: str | None = None
-
-
-class RawVault(StrictModel):
-    """``vault:`` — proxy route + credential-injection rules."""
-
-    route_prefix: str = Field(description="Path prefix in the proxy (e.g. ``claude``)")
-    upstream: str = Field(description="Upstream API base URL")
-    path_upstreams: dict[str, str] = Field(default_factory=dict)
-    oauth_extra_headers: dict[str, str] = Field(default_factory=dict)
-    auth_header: str = "Authorization"
-    auth_prefix: str = "Bearer "
-    credential_type: Literal["api_key", "oauth", "oauth_token", "pat"] = "api_key"
-    credential_file: str = ""
-    token_env: dict[str, str] = Field(default_factory=dict)
-    base_url_env: str = ""
-    socket_env: str = ""
-    shared_config_patch: dict | None = None
-    """Free-form dict consumed by the post-auth config patcher (TOML/YAML set ops)."""
-    oauth_refresh: RawOAuthRefresh | None = None
-    shared_domain: bool = Field(
-        default=False,
-        description=(
-            "True when ``upstream`` host also serves non-API traffic "
-            "(docs, dashboards, ``git push``…); terok's auth-protect "
-            "layer skips host-level denies for these providers."
-        ),
-    )
-
-    def to_dataclass(self, *, provider: str) -> VaultRoute:
-        """Project to a runtime [`VaultRoute`][terok_executor.roster.types.VaultRoute]."""
-        refresh: dict[str, str] | None = None
-        if self.oauth_refresh is not None:
-            r = self.oauth_refresh
-            refresh = {"token_url": r.token_url, "client_id": r.client_id}
-            if r.scope is not None:
-                refresh["scope"] = r.scope
-        return VaultRoute(
-            provider=provider,
-            route_prefix=self.route_prefix,
-            upstream=self.upstream,
-            path_upstreams=dict(self.path_upstreams),
-            oauth_extra_headers=dict(self.oauth_extra_headers),
-            auth_header=self.auth_header,
-            auth_prefix=self.auth_prefix,
-            credential_type=self.credential_type,
-            credential_file=self.credential_file,
-            token_env=dict(self.token_env),
-            base_url_env=self.base_url_env,
-            socket_env=self.socket_env,
-            shared_config_patch=self.shared_config_patch,
-            oauth_refresh=refresh,
-            shared_domain=self.shared_domain,
-        )
 
 
 class RawSidecar(StrictModel):
@@ -358,11 +320,138 @@ class VaultRouteEntry(StrictModel):
     )
 
 
+# ── Provider schema (resources/providers/*.yaml) ──────────────────────────
+
+
+class RawProviderAuthMode(StrictModel):
+    """One ``auth.api_key`` / ``auth.oauth`` sub-block — the wire attachment for a mode."""
+
+    header: str = Field(description="HTTP header carrying the credential (e.g. ``Authorization``)")
+    prefix: str = Field(default="", description='Token prefix (e.g. ``"Bearer "``)')
+    extra_headers: dict[str, str] = Field(
+        default_factory=dict, description="Headers added only for this mode"
+    )
+
+    def to_dataclass(self) -> ProviderAuth:
+        """Project to a runtime [`ProviderAuth`][terok_executor.roster.types.ProviderAuth]."""
+        return ProviderAuth(
+            header=self.header, prefix=self.prefix, extra_headers=dict(self.extra_headers)
+        )
+
+
+class RawProviderAuth(StrictModel):
+    """``auth:`` — at least one of ``api_key`` / ``oauth`` must be present.
+
+    Declaring both with *different* headers is how a provider expresses the
+    OAuth-or-API-key header switch (Anthropic); the projection collapses that
+    to the ``auth_header: dynamic`` wire sentinel
+    (see [`Provider.wire_auth`][terok_executor.roster.types.Provider.wire_auth]).
+    """
+
+    api_key: RawProviderAuthMode | None = None
+    oauth: RawProviderAuthMode | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_mode(self) -> RawProviderAuth:
+        """Reject a provider with no auth mode — a route with no credential is meaningless."""
+        if self.api_key is None and self.oauth is None:
+            raise ValueError("provider auth must declare at least one of 'api_key' / 'oauth'")
+        return self
+
+
+class RawProvider(StrictModel):
+    """Full schema for one ``resources/providers/*.yaml`` file.
+
+    The file's stem (``anthropic.yaml`` → ``"anthropic"``) supplies the provider
+    name; the YAML never repeats it.  Strict keys reject typos
+    (``upstreams:``, ``oath:``) the same way the agent schema does.
+    """
+
+    upstream: str = Field(description="Upstream API base URL")
+    auth: RawProviderAuth
+    path_upstreams: dict[str, str] = Field(default_factory=dict)
+    oauth_refresh: RawOAuthRefresh | None = None
+    shared_domain: bool = False
+    serves: dict[str, str] = Field(
+        default_factory=dict,
+        description="Wire protocol → container-facing base path (LLM providers only)",
+    )
+    opencode: RawOpenCode | None = Field(
+        default=None,
+        description="OpenCode wrapper config for a harness-driven provider (Blablador, …)",
+    )
+    install: RawInstall | None = Field(
+        default=None, description="Pinned-alias install fragment for a harness-driven provider"
+    )
+    help: RawHelp | None = Field(default=None, description="Help-listing entry for the command")
+
+    def to_dataclass(self, *, name: str) -> Provider:
+        """Project to a runtime [`Provider`][terok_executor.roster.types.Provider]."""
+        refresh: dict[str, str] | None = None
+        if self.oauth_refresh is not None:
+            r = self.oauth_refresh
+            refresh = {"token_url": r.token_url, "client_id": r.client_id}
+            if r.scope is not None:
+                refresh["scope"] = r.scope
+        return Provider(
+            name=name,
+            upstream=self.upstream,
+            api_key_auth=self.auth.api_key.to_dataclass() if self.auth.api_key else None,
+            oauth_auth=self.auth.oauth.to_dataclass() if self.auth.oauth else None,
+            path_upstreams=dict(self.path_upstreams),
+            oauth_refresh=refresh,
+            shared_domain=self.shared_domain,
+            serves=dict(self.serves),
+            opencode_config=self.opencode.to_dataclass() if self.opencode else None,
+            install_spec=self.install.to_dataclass() if self.install else None,
+            help_spec=self.help.to_dataclass() if self.help else None,
+        )
+
+
+class RawProviderBinding(StrictModel):
+    """``provider:`` — how an agent routes to (delivers) a provider.
+
+    The *delivery* concern lifted out of the agent ``vault:`` block: which
+    provider this agent uses (``default``) plus the per-agent env-var /
+    config-patch plumbing.  The *endpoint* concern (upstream, wire auth) lives
+    in the named [`RawProvider`][terok_executor.roster.schema.RawProvider].
+    """
+
+    default: str | None = Field(
+        default=None, description="Provider name this agent routes to (None for harnesses)"
+    )
+    token_env: dict[str, str] = Field(default_factory=dict)
+    base_url_env: str = ""
+    socket_env: str = ""
+    credential_file: str = ""
+    credential_type: Literal["api_key", "oauth", "oauth_token", "pat"] = "api_key"
+    config_patch: dict | None = None
+
+    def to_dataclass(self) -> ProviderBinding:
+        """Project to a runtime [`ProviderBinding`][terok_executor.provider.providers.ProviderBinding]."""
+        return ProviderBinding(
+            default=self.default,
+            token_env=dict(self.token_env),
+            base_url_env=self.base_url_env,
+            socket_env=self.socket_env,
+            credential_file=self.credential_file,
+            credential_type=self.credential_type,
+            config_patch=self.config_patch,
+        )
+
+
 # ── Top-level model ───────────────────────────────────────────────────────
 
 
-AgentKind = Literal["native", "opencode", "bridge", "tool", "runtime"]
-"""Kind of roster entry: agents (native/opencode/bridge), tools, or runtime helpers."""
+AgentKind = Literal["native", "harness", "frontend", "tool", "infra"]
+"""Kind of roster entry, chosen to predict behaviour:
+
+- ``native`` — a CLI with a fixed protocol + default provider (claude, codex, vibe, copilot)
+- ``harness`` — a multi-provider driver, provider supplied at runtime (opencode, pi)
+- ``frontend`` — drives co-installed agents in-container (toad)
+- ``tool`` — a non-LLM API client (gh, glab, sonar, coderabbit)
+- ``infra`` — a support service, not user-invoked (caddy)
+"""
 
 
 # Default sub-section instances reused for agents that omit a section —
@@ -397,9 +486,12 @@ class RawAgentYaml(StrictModel):
     session: RawSession | None = None
     capabilities: RawCapabilities | None = None
     wrapper: RawWrapper | None = None
-    opencode: RawOpenCode | None = None
     auth: RawAuth | None = None
-    vault: RawVault | None = None
+    protocol: str | None = Field(
+        default=None,
+        description="Wire protocol the agent speaks (anthropic-messages / openai-chat / …)",
+    )
+    provider: RawProviderBinding | None = None
     sidecar: RawSidecar | None = None
     install: RawInstall | None = None
     help: RawHelp | None = None
@@ -414,15 +506,15 @@ class RawAgentYaml(StrictModel):
         """Return ``label`` or fall back to *name*."""
         return self.label or name
 
-    def to_agent_provider(self, name: str) -> AgentProvider:
-        """Project to a runtime [`AgentProvider`][terok_executor.provider.providers.AgentProvider]."""
+    def to_agent(self, name: str) -> Agent:
+        """Project to a runtime [`Agent`][terok_executor.provider.providers.Agent]."""
         hl = self.headless or _DEFAULT_HEADLESS
         aa = self.auto_approve or _DEFAULT_AUTO_APPROVE
         sess = self.session or _DEFAULT_SESSION
         caps = self.capabilities or _DEFAULT_CAPABILITIES
         wrap = self.wrapper or _DEFAULT_WRAPPER
         gi = self.git_identity or _DEFAULT_GIT_IDENTITY
-        return AgentProvider(
+        return Agent(
             name=name,
             label=self.resolve_label(name),
             binary=self.binary or name,
@@ -440,28 +532,12 @@ class RawAgentYaml(StrictModel):
             resume_flag=sess.resume_flag,
             continue_flag=sess.continue_flag,
             session_file=sess.session_file,
-            supports_agents_json=caps.agents_json,
             supports_session_hook=sess.supports_hook,
             supports_add_dir=caps.add_dir,
             log_format=caps.log_format,
-            opencode_config=self.opencode.to_dataclass() if self.opencode else None,
             refuse_subcommands=tuple(wrap.refuse_subcommands),
-        )
-
-    def derive_opencode_auth(self, name: str) -> AuthProvider | None:
-        """Auto-derive an [`AuthProvider`][terok_executor.credentials.auth.AuthProvider] for OpenCode-based agents."""
-        if self.opencode is None:
-            return None
-        hint = self.opencode.api_key_hint or f"Get your API key at: {self.opencode.auth_key_url}"
-        return AuthProvider(
-            name=name,
-            label=self.resolve_label(name),
-            host_dir_name=f"_{name}-config",
-            container_mount=f"/home/dev/{self.opencode.config_dir}",
-            command=[],
-            banner_hint="",
-            modes=("api_key",),
-            api_key_hint=hint,
+            protocol=self.protocol,
+            provider_binding=self.provider.to_dataclass() if self.provider else None,
         )
 
 
@@ -480,9 +556,12 @@ __all__ = [
     "RawMountSpec",
     "RawOAuthRefresh",
     "RawOpenCode",
+    "RawProvider",
+    "RawProviderAuth",
+    "RawProviderAuthMode",
+    "RawProviderBinding",
     "RawSession",
     "RawSidecar",
-    "RawVault",
     "RawWrapper",
     "VaultRouteEntry",
 ]

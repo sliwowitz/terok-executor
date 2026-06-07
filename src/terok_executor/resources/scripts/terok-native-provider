@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
+
+"""Launch a native agent against a runtime-selected provider, via flags/env only.
+
+When a task selects a provider (``TEROK_PROVIDER`` at the container level, or an
+explicit ``--provider`` on the command line), a native agent that speaks a
+compatible wire protocol can talk to that provider instead of its built-in
+default.  The override is delivered in each agent's own runtime dialect — codex
+takes ``-c`` config overrides, vibe takes a ``VIBE_PROVIDERS`` env entry — so
+**no config file is written**: the agents already accept these at launch.
+
+The agent keeps routing through the vault.  The selected provider's phantom
+bearer token lives in ``TEROK_PROVIDER_<NAME>_TOKEN``; the override only ever
+names that variable (codex's ``env_key``, vibe's ``api_key_env_var``), so the
+secret is read by the agent itself and never copied onto a command line.
+
+The launcher is invoked under the agent's name plus a ``-provider`` suffix
+(``codex-provider``, ``vibe-provider``) only when a provider is selected — an
+explicit ``--provider`` or the container's ``TEROK_PROVIDER``.  It resolves the
+override and execs the agent against that provider's vault endpoint.  With no
+selection the agent runs directly (the wrapper never invokes the launcher): its
+own config_patch already points its default provider at the vault, so the
+launcher is never in that path.  When the chosen provider does not serve the
+agent's protocol, the agent is launched unchanged on its default endpoint.
+
+The ACP adapters exec a different binary (``codex-acp``) than the agent, so
+they cannot be launched through this script.  They obtain the same override via
+``terok-native-provider --emit <agent>``, which prints the selected provider's
+launch flags (NUL-separated) instead of exec'ing, and prepend them themselves.
+
+Self-contained (stdlib only) because it runs inside task containers where terok
+is not installed.
+
+Usage:
+  codex-provider [--provider NAME] <agent args...>
+  vibe-provider  [--provider NAME] <agent args...>
+  terok-native-provider --emit <agent>
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+
+_LAUNCHER_SUFFIX = "-provider"
+"""Trailing fragment of the invoked command that names the launcher itself."""
+
+_PROVIDER_ENV = "TEROK_PROVIDER"
+"""Container-level env var naming the provider to route to when no ``--provider`` is given."""
+
+_VIBE_ACTIVE_PROVIDER = "mistral"
+"""Name of the ``providers`` entry Vibe's default active model resolves to.
+
+Re-pointing this entry (rather than adding a new one) keeps Vibe's active-model
+selection intact; mirrors ``vibe.yaml``'s ``config_patch.toml_match``."""
+
+
+def main(argv: list[str]) -> int:
+    """Apply the agent's provider override, then exec it (or emit it for ACP).
+
+    ``terok-native-provider --emit <agent>`` prints the override flags for an
+    external launcher; every other invocation execs the agent named by argv0's
+    ``<agent>-provider`` symlink.
+    """
+    if argv[1:2] == ["--emit"]:
+        return _emit(argv[2:])
+    agent = _resolve_agent(_invoked_agent(argv[0]))
+    provider, agent_args = _split_provider_flag(argv[1:])
+    extra_args, extra_env = _override(agent, provider) if provider else ([], {})
+    return _exec(agent.binary, [*extra_args, *agent_args], extra_env)
+
+
+def _emit(args: list[str]) -> int:
+    """Print *agent*'s provider-override args (NUL-separated), instead of exec'ing.
+
+    The ACP adapters exec their own binary (``codex-acp``) rather than the
+    agent, so they read the override here and prepend it themselves.  The
+    provider is the container's ``TEROK_PROVIDER``; with none selected nothing is
+    emitted and the adapter routes through its config_patch'd default endpoint.
+
+    Only the argv-form override is emitted (codex's ``-c`` flags); an env-only
+    agent (vibe routes via the ``VIBE_PROVIDERS`` env) would yield nothing, which
+    is fine for the codex ACP adapter — its only caller.
+    """
+    agent = _resolve_agent(args[0] if args else "")
+    provider = os.environ.get(_PROVIDER_ENV)
+    if not provider:
+        return 0
+    extra_args, _ = _override(agent, provider)
+    sys.stdout.write("\0".join(extra_args))
+    return 0
+
+
+# ── Provider selection ───────────────────────────────────────────────────────
+
+
+def _resolve_agent(name: str) -> NativeAgent:
+    """Look *name* up in the registry, or exit with the set of valid launchers."""
+    agent = _NATIVE_AGENTS.get(name)
+    if agent is None:
+        known = ", ".join(f"{n}{_LAUNCHER_SUFFIX}" for n in sorted(_NATIVE_AGENTS))
+        raise SystemExit(f"terok-native-provider: invoke as one of: {known}")
+    return agent
+
+
+def _invoked_agent(argv0: str) -> str:
+    """Return the agent name from the invoked command (``codex-provider`` → ``codex``)."""
+    return os.path.basename(argv0).removesuffix(_LAUNCHER_SUFFIX)
+
+
+def _split_provider_flag(args: list[str]) -> tuple[str, list[str]]:
+    """Peel a leading ``--provider NAME`` off the agent's own arguments.
+
+    The agent wrapper always passes ``--provider`` first; a bare invocation
+    falls back to the ``TEROK_PROVIDER`` the container environment carries.
+    Returns the selected provider (empty when none) and the forwarded arguments.
+    """
+    if args and args[0] == "--provider":
+        if len(args) < 2:
+            raise SystemExit("--provider requires a provider name")
+        return args[1], args[2:]
+    return os.environ.get(_PROVIDER_ENV, ""), args
+
+
+def _override(agent: NativeAgent, provider: str) -> tuple[list[str], dict[str, str]]:
+    """Resolve *provider*'s vault endpoint and render *agent*'s launch override.
+
+    A provider is usable only when it serves the agent's wire protocol — i.e.
+    when the env builder materialized a ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>``
+    handle.  When it does not, an empty override leaves the agent on its default
+    endpoint and a note is written to stderr.  Returns ``(extra_args, extra_env)``
+    to prepend / overlay when exec'ing the agent.
+    """
+    key = provider.upper()
+    proto = agent.protocol.upper().replace("-", "_")
+    base_url = os.environ.get(f"TEROK_PROVIDER_{key}_BASE_{proto}")
+    if not base_url:
+        print(
+            f"terok: provider {provider!r} does not serve {agent.protocol}; "
+            f"running {agent.binary} on its default endpoint.",
+            file=sys.stderr,
+        )
+        return [], {}
+    token_var = f"TEROK_PROVIDER_{key}_TOKEN"
+    return agent.deliver(provider, base_url, token_var)
+
+
+# ── Per-agent override deliveries ─────────────────────────────────────────────
+
+
+def _deliver_codex(
+    provider: str, base_url: str, token_var: str
+) -> tuple[list[str], dict[str, str]]:
+    """Codex ``-c`` overrides defining a custom model provider and selecting it.
+
+    Codex parses each ``-c`` value as TOML and reads the bearer from the env var
+    named by ``env_key`` — pointing that at the existing phantom-token variable
+    routes through the vault with no token on the command line and no config
+    file touched.
+    """
+    pid = f"terok-{provider}"
+    settings = {
+        "model_provider": _toml_str(pid),
+        f"model_providers.{pid}.name": _toml_str(provider),
+        f"model_providers.{pid}.base_url": _toml_str(base_url),
+        f"model_providers.{pid}.env_key": _toml_str(token_var),
+        f"model_providers.{pid}.wire_api": _toml_str("responses"),
+    }
+    args: list[str] = []
+    for key, value in settings.items():
+        args += ["-c", f"{key}={value}"]
+    return args, {}
+
+
+def _deliver_vibe(provider: str, base_url: str, token_var: str) -> tuple[list[str], dict[str, str]]:
+    """Vibe ``VIBE_PROVIDERS`` env entry re-pointing its active provider.
+
+    Vibe (pydantic-settings, ``VIBE_`` prefix) merges this JSON entry over the
+    config's providers by ``name``; ``api_key_env_var`` names the phantom-token
+    variable Vibe reads, so traffic routes through the vault.  The endpoint is
+    carried by *base_url* / *token_var*; the entry keeps Vibe's active-provider
+    name.
+    """
+    del provider  # carried entirely by base_url / token_var
+    entry = [{"name": _VIBE_ACTIVE_PROVIDER, "api_base": base_url, "api_key_env_var": token_var}]
+    return [], {"VIBE_PROVIDERS": json.dumps(entry)}
+
+
+def _toml_str(value: str) -> str:
+    """Quote *value* as a TOML basic string (codex parses ``-c`` values as TOML)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+@dataclass(frozen=True)
+class NativeAgent:
+    """How one native agent receives a runtime provider override at launch."""
+
+    binary: str
+    """Agent executable to exec once the override is rendered."""
+
+    protocol: str
+    """Wire protocol the agent speaks — matched against a provider's ``serves``."""
+
+    deliver: Callable[[str, str, str], tuple[list[str], dict[str, str]]]
+    """Render ``(provider, base_url, token_var)`` into ``(extra_args, extra_env)``."""
+
+
+_NATIVE_AGENTS: dict[str, NativeAgent] = {
+    "codex": NativeAgent("codex", "openai-responses", _deliver_codex),
+    "vibe": NativeAgent("vibe", "openai-chat", _deliver_vibe),
+}
+"""Registry of agents this launcher can re-point, keyed by name."""
+
+
+# ── Launch ───────────────────────────────────────────────────────────────────
+
+
+def _exec(binary: str, args: list[str], extra_env: dict[str, str]) -> int:
+    """Replace this process with *binary*; raise with a clear hint if absent."""
+    env = {**os.environ, **extra_env}
+    try:
+        os.execvpe(binary, [binary, *args], env)
+    except FileNotFoundError:
+        raise SystemExit(f"{binary} not found. Rebuild the L1 CLI image to install it.") from None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

@@ -157,6 +157,7 @@ depends_on = [
 path = "terok_executor.container.env"
 depends_on = [
     "terok_executor._util",
+    "terok_executor.credentials.extractors",
     "terok_executor.credentials.vault_commands",
     "terok_executor.credentials.vault_config",
     "terok_executor.integrations.sandbox",
