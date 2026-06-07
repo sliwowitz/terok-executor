@@ -3434,7 +3434,7 @@ terok_util = {url = "https://github.com/terok-ai/terok-util/releases/download/v0
 type = "git"
 url = "https://github.com/terok-ai/terok-sandbox.git"
 reference = "refs/pull/374/head"
-resolved_reference = "2b2a61c8a0c890284170367acb11e573e22f4ca1"
+resolved_reference = "477469df237b937c0a50cec1a84aedd5e381a94d"
 
 [[package]]
 name = "terok-shield"

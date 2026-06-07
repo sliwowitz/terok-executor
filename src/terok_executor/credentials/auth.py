@@ -72,6 +72,15 @@ class AuthProvider:
     modes: tuple[str, ...] = ("api_key",)
     """Supported auth modes: ``"oauth"`` (container), ``"api_key"`` (fast path)."""
 
+    device_auth: bool = False
+    """Whether the OAuth flow has a headless device-code variant.
+
+    When set, the auth prompt offers a device-code method alongside the normal
+    OAuth login: it runs ``<command> --device-auth`` with the normal flow's
+    port-forwarding (``extra_run_args``) dropped — the device-code flow polls a
+    remote endpoint and needs no localhost callback, so it works where the
+    operator can't complete the forwarded-port login."""
+
     api_key_hint: str = ""
     """Hint shown when prompting for an API key (URL to get one)."""
 
@@ -109,6 +118,11 @@ class AuthProvider:
     def supports_api_key(self) -> bool:
         """Whether this provider supports direct API key entry."""
         return "api_key" in self.modes
+
+    @property
+    def supports_device_auth(self) -> bool:
+        """Whether this provider offers a headless device-code login variant."""
+        return self.device_auth
 
 
 @dataclass(frozen=True)
@@ -176,7 +190,8 @@ class Authenticator:
 
         Mirrors the parameters of the underlying ``authenticate`` free
         function — instance-bound ``self.provider`` replaces the old
-        positional ``provider`` arg.
+        positional ``provider`` arg.  The device-code login is offered as a
+        method in that flow's prompt, so it needs no parameter here.
         """
         authenticate(
             project_id,
@@ -196,6 +211,7 @@ class Authenticator:
         image: str,
         expose_token: bool = False,
         credential_set: str = "default",
+        device_auth: bool = False,
     ) -> AuthSession:
         """Build an [`AuthSession`][terok_executor.AuthSession] without running it.
 
@@ -205,6 +221,9 @@ class Authenticator:
         ``session.argv`` however they like, then call ``session.capture()``
         on success.  The CLI's blocking ``authenticate`` path is just
         another such caller — see ``_run_auth_container``.
+
+        With *device_auth*, the session runs the provider's headless
+        device-code login (see [`prepare_oauth_session`][terok_executor.prepare_oauth_session]).
         """
         info = AUTH_PROVIDERS.get(self.provider)
         if not info:
@@ -214,6 +233,8 @@ class Authenticator:
             raise SystemExit(
                 f"Provider {self.provider!r} does not support OAuth — use store_api_key() instead."
             )
+        if device_auth and not info.supports_device_auth:
+            raise SystemExit(f"Provider {self.provider!r} has no device-auth login.")
         return prepare_oauth_session(
             info,
             project_id,
@@ -221,6 +242,7 @@ class Authenticator:
             image=image,
             expose_token=expose_token,
             credential_set=credential_set,
+            device_auth=device_auth,
         )
 
 
@@ -236,13 +258,12 @@ def authenticate(
 ) -> None:
     """Run the auth flow for *provider*, optionally scoped to a project.
 
-    Dispatches based on the *effective* mode set — what the provider
-    declares in the roster (``modes:``) intersected with what the
-    caller has actually permitted via *oauth_enabled*:
-
-    - **api_key only** (or OAuth disabled by gate): prompt for key, store directly
-    - **oauth only**: launch container with vendor CLI
-    - **both**: ask the user to choose, then dispatch accordingly
+    Offers every auth method the provider supports — OAuth (vendor CLI in a
+    container), the OAuth device-code variant (for providers that declare
+    ``device_auth``), and a direct API key — as the *effective* mode set: what
+    the roster declares (``modes:``, ``device_auth``) intersected with what the
+    caller permits via *oauth_enabled*.  One method runs straight through; two or
+    more prompt the user to choose.
 
     Args:
         project_id: Project identifier used for container naming and the
@@ -292,18 +313,10 @@ def authenticate(
     has_oauth = info.supports_oauth and oauth_enabled
     has_api_key = info.supports_api_key
 
-    if has_oauth and has_api_key:
-        # Both modes — let the user choose first; only resolve the image
-        # (and trigger any on-demand L1 build) if the user picks OAuth.
-        print(f"Authenticate {info.label}:\n")
-        print("  1. OAuth / interactive login (launches container)")
-        print("  2. API key (paste key, no container needed)")
-        print()
-        choice = input("Choose [1/2]: ").strip()
-        if choice == "2":
-            key = _prompt_api_key(info)
-            store_api_key(provider, key, credential_set=credential_set)
-            return
+    # OAuth (and its device-code variant) run the vendor CLI in a container; the
+    # image is resolved lazily so the OAuth-or-API-key prompt never pays the L1
+    # build cost when the user picks the container-free API-key path.
+    def _oauth(*, device: bool) -> None:
         _run_auth_container(
             project_id,
             info,
@@ -311,27 +324,23 @@ def authenticate(
             image=_resolve_image(image, provider),
             expose_token=expose_token,
             credential_set=credential_set,
+            device_auth=device,
         )
 
-    elif has_api_key:
-        # API key only — fast path, no container, image never resolved.
-        # Reaches here either because the provider declares only api_key,
-        # or because the OAuth gate is closed.
-        key = _prompt_api_key(info)
-        store_api_key(provider, key, credential_set=credential_set)
+    def _api_key() -> None:
+        store_api_key(provider, _prompt_api_key(info), credential_set=credential_set)
 
-    elif has_oauth:
-        # OAuth only — image is required.
-        _run_auth_container(
-            project_id,
-            info,
-            mounts_dir=mounts_dir,
-            image=_resolve_image(image, provider),
-            expose_token=expose_token,
-            credential_set=credential_set,
-        )
+    methods: list[tuple[str, Callable[[], None]]] = []
+    if has_oauth:
+        methods.append(("OAuth login", lambda: _oauth(device=False)))
+        if info.supports_device_auth:
+            # Same OAuth credential, obtained via a device code the operator
+            # enters on a second device instead of a forwarded callback port.
+            methods.append(("OAuth login — device code", lambda: _oauth(device=True)))
+    if has_api_key:
+        methods.append(("API key", _api_key))
 
-    else:
+    if not methods:
         # Provider declares only OAuth and the caller's gate is closed.
         raise SystemExit(
             f"Auth for {provider!r} requires OAuth, but it is disabled by "
@@ -339,6 +348,23 @@ def authenticate(
             f"the experimental flag and/or the provider-specific "
             f"allow_oauth/expose_oauth_token config keys are unset."
         )
+
+    if len(methods) == 1:
+        methods[0][1]()
+        return
+
+    print(f"Authenticate {info.label}:\n")
+    for i, (label, _) in enumerate(methods, 1):
+        print(f"  {i}. {label}")
+    print()
+    choice = input(f"Choose [1-{len(methods)}] (default 1): ").strip() or "1"
+    try:
+        index = int(choice) - 1
+        if not 0 <= index < len(methods):
+            raise ValueError
+    except ValueError:
+        raise SystemExit(f"Invalid choice: {choice!r}") from None
+    methods[index][1]()
 
 
 def _resolve_image(image: str | Callable[[], str] | None, provider: str) -> str:
@@ -534,6 +560,7 @@ def prepare_oauth_session(
     image: str,
     expose_token: bool = False,
     credential_set: str = "default",
+    device_auth: bool = False,
 ) -> AuthSession:
     """Build an [`AuthSession`][terok_executor.AuthSession] without running it.
 
@@ -544,6 +571,10 @@ def prepare_oauth_session(
 
     The temp dir uses a clean slate so the vendor auth flow re-runs end
     to end — no stale config, no cached sessions.
+
+    With *device_auth*, the command gains ``--device-auth`` and the
+    port-forwarding ``extra_run_args`` are dropped: the device-code flow
+    polls a remote endpoint, so there is no localhost callback to forward.
     """
     _check_podman()
 
@@ -557,13 +588,16 @@ def prepare_oauth_session(
     container_name = f"{name_prefix}-auth-{provider.name}"
     _cleanup_existing_container(container_name)
 
+    command = [*provider.command, "--device-auth"] if device_auth else list(provider.command)
+    run_args = () if device_auth else provider.extra_run_args
+
     cmd = ["podman", "run", "--rm", *podman_userns_args(), "-it"]
-    if provider.extra_run_args:
-        cmd.extend(provider.extra_run_args)
+    if run_args:
+        cmd.extend(run_args)
     cmd.extend(["-v", f"{host_dir}:{provider.container_mount}:Z"])
     cmd.extend(["--name", container_name])
     cmd.append(image)
-    cmd.extend(provider.command)
+    cmd.extend(command)
 
     scope = f"for project: {project_id}" if project_id else "(host-wide)"
     banner_lines = [
@@ -597,6 +631,7 @@ def _run_auth_container(
     image: str,
     credential_set: str = "default",
     expose_token: bool = False,
+    device_auth: bool = False,
 ) -> None:
     """Synchronous CLI helper: prepare a session, run it inline, capture.
 
@@ -612,6 +647,7 @@ def _run_auth_container(
         image=image,
         expose_token=expose_token,
         credential_set=credential_set,
+        device_auth=device_auth,
     ) as session:
         print(session.banner)
         try:

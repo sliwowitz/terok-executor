@@ -391,7 +391,14 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
         p = roster.agents.get(name)
         auth = roster.auth_providers.get(name)
         label = p.label if p else (auth.label if auth else name)
-        kind = raw.get(name, {}).get("kind", "native")
+        provider = roster.providers.get(name)
+        if name in raw:
+            kind = raw[name].get("kind", "native")
+        elif provider is not None and provider.opencode_config is not None:
+            # A harness-driven provider (Blablador, …) — no agent YAML of its own.
+            kind = "harness"
+        else:
+            kind = "native"
         rows.append((name, label, kind))
 
     w_name = max(len("NAME"), max(len(r[0]) for r in rows))

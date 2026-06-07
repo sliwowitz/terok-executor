@@ -28,7 +28,6 @@ session:
   supports_hook: true
 
 capabilities:
-  agents_json: true
   add_dir: true
   log_format: claude-stream-json
 

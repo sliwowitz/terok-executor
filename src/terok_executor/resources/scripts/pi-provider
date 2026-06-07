@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+# terok:container — this file is deployed into task containers, not used on the host.
+
+"""Launch Pi with terok-managed provider scoping.
+
+Pi lists *every* registered provider in its picker — its own built-ins plus the
+ones terok's vault-routing extension adds — and ``--provider`` only sets the
+active model, it doesn't narrow the picker.  terok owns the ``--provider`` flag
+for Pi, so this launcher gives it terok semantics:
+
+- **Explicit ``--provider X``** scopes Pi to X: we validate X against the
+  providers actually usable in this container and export ``TEROK_PI_PROVIDER``,
+  which the extension reads to register *only* that provider.  An unknown or
+  unusable X is rejected here with a clear error rather than failing obscurely
+  inside Pi.
+- **No flag, but a container ``TEROK_PROVIDER`` default** opens Pi *on* that
+  default (prepending ``--provider``) so it doesn't land on whichever provider
+  sorts first alphabetically — while still listing them all.  A missing or
+  unusable default is ignored (Pi keeps its own default); only the explicit flag
+  is strict.
+
+It also injects terok's per-task system instructions: Pi's
+``--append-system-prompt`` reads file contents when its value is an existing
+path, so the launcher hands it ``instructions.md`` directly (the same file
+Claude's wrapper feeds its own ``--append-system-prompt``).  This is the only
+mechanism that doesn't write the shared ``~/.pi`` mount or the workspace — Pi's
+``SYSTEM.md`` / ``APPEND_SYSTEM.md`` files would land in one or the other.
+
+Everything here is per-process: ``TEROK_PI_PROVIDER`` rides in the env and the
+overrides are CLI flags, so nothing is written to the shared ``~/.pi`` mount that
+sibling containers share.
+
+Self-contained (stdlib only) because it runs inside task containers where terok
+is not installed.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+
+_PROVIDER_ENV = "TEROK_PROVIDER"
+"""Container-level default provider (set from ``default_provider``)."""
+
+_SCOPE_ENV = "TEROK_PI_PROVIDER"
+"""Per-invocation scope the vault-routing extension reads to register only one provider."""
+
+_BASE_VAR = re.compile(r"^TEROK_PROVIDER_([A-Za-z0-9]+)_BASE_")
+"""Materialized handle ``TEROK_PROVIDER_<NAME>_BASE_<PROTO>`` — one per usable provider."""
+
+_INSTRUCTIONS_PATH = "/home/dev/.terok/instructions.md"
+"""Container path of the resolved terok per-task system instructions."""
+
+
+def instruction_args(path: str) -> list[str]:
+    """Return Pi's ``--append-system-prompt`` args for the per-task instructions.
+
+    Pi reads file contents when the flag's value is an existing path, so the path
+    is handed over verbatim.  Gated on existence: a non-existent path would be
+    injected as literal prompt text rather than ignored.
+    """
+    return ["--append-system-prompt", path] if os.path.isfile(path) else []
+
+
+def usable_providers(env: dict[str, str]) -> set[str]:
+    """Return the provider names Pi can actually use in this container.
+
+    A provider is usable when the env builder materialized a handle for it
+    (``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>``).  Both vault-routed and
+    exposed-credential providers are materialized this way, so the set is uniform.
+    """
+    return {m.group(1).lower() for k in env if (m := _BASE_VAR.match(k))}
+
+
+def peel_provider(argv: list[str]) -> str | None:
+    """Return the value of an explicit ``--provider`` in *argv*, or ``None``.
+
+    Pi consumes the flag itself, so this only peeks — *argv* is forwarded intact.
+    """
+    for i, arg in enumerate(argv):
+        if arg == "--provider":
+            return argv[i + 1] if i + 1 < len(argv) else ""
+        if arg.startswith("--provider="):
+            return arg[len("--provider=") :]
+    return None
+
+
+def main(argv: list[str]) -> int:
+    """Resolve Pi's provider scope from *argv* + env, then exec Pi."""
+    env = dict(os.environ)
+    usable = usable_providers(env)
+    explicit = peel_provider(argv)
+
+    if explicit is not None:
+        if explicit.lower() not in usable:
+            avail = ", ".join(sorted(usable)) or "(none authenticated)"
+            raise SystemExit(
+                f"terok: provider {explicit!r} is not available to pi here.\n"
+                f"Available providers: {avail}"
+            )
+        env[_SCOPE_ENV] = explicit
+        args = argv
+    else:
+        default = env.get(_PROVIDER_ENV, "")
+        # A usable container default opens Pi on it; an absent/unusable one is
+        # ignored so a misconfigured default never breaks a bare ``pi``.
+        args = ["--provider", default, *argv] if default.lower() in usable else argv
+
+    instr = instruction_args(_INSTRUCTIONS_PATH)
+    try:
+        os.execvpe("pi", ["pi", *instr, *args], env)
+    except FileNotFoundError:
+        raise SystemExit("pi not found. Rebuild the L1 CLI image to install it.") from None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

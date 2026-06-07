@@ -3,11 +3,13 @@
 
 # CodeRabbit — the upstream the `coderabbit` tool authenticates to.  Runs in
 # a sidecar with the real key (see the agent's `sidecar:` block); the route
-# exists so any phantom-token consumer can reach it through the vault.
+# exists so any phantom-token consumer can reach it through the vault.  The
+# API lives on api.coderabbit.ai (app.coderabbit.ai is the dashboard) and
+# authenticates with a custom header, not Authorization: Bearer.
 
-upstream: https://app.coderabbit.ai
+upstream: https://api.coderabbit.ai
 
 auth:
   api_key:
-    header: Authorization
-    prefix: "Bearer "
+    header: x-coderabbitai-api-key
+    prefix: ""

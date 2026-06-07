@@ -10,6 +10,14 @@
 
 set -e
 
+# Device-code login (terok auth codex --device-auth): the flow shows a code +
+# URL to enter on another device and polls a remote endpoint, so there is no
+# localhost browser callback — skip socat/port-forwarding and run it directly.
+if [[ "${1:-}" == "--device-auth" ]]; then
+  echo '>> Starting codex device-code login (no browser callback needed)...'
+  exec codex login --device-auth
+fi
+
 SOCAT_PID=""
 cleanup() { [ -n "$SOCAT_PID" ] && kill "$SOCAT_PID" 2>/dev/null || true; }
 trap cleanup EXIT

@@ -23,14 +23,14 @@ from terok_executor.roster import AgentRoster
 from tests.constants import CONTAINER_INSTRUCTIONS_PATH, CONTAINER_TEROK_DIR
 
 
-def _provider_wrapper(name: str, *, has_agents: bool = False) -> str:
+def _provider_wrapper(name: str) -> str:
     """Generate a wrapper for a provider under test."""
-    return generate_agent_wrapper(AGENTS[name], has_agents=has_agents)
+    return generate_agent_wrapper(AGENTS[name])
 
 
-def _all_wrappers(*, has_agents: bool = False) -> str:
+def _all_wrappers() -> str:
     """Generate the combined multi-provider wrapper file."""
-    return generate_all_wrappers(has_agents=has_agents)
+    return generate_all_wrappers()
 
 
 class TestAgentProviderRegistry:
@@ -43,10 +43,7 @@ class TestAgentProviderRegistry:
             "codex",
             "copilot",
             "vibe",
-            "blablador",
             "opencode",
-            "kisski",
-            "openrouter",
             "pi",
         }
         assert set(AGENTS.keys()) == expected
@@ -117,11 +114,30 @@ class TestGenerateAgentWrapper:
 
     def test_session_resume_uses_explicit_id(self) -> None:
         """Providers with session_file use --session/--resume with explicit ID."""
-        for name in ("vibe", "opencode", "blablador", "kisski", "openrouter", "pi"):
+        for name in ("vibe", "opencode", "pi"):
             p = AGENTS[name]
             wrapper = _provider_wrapper(name)
             assert p.resume_flag in wrapper, f"{name} missing resume flag"
             assert f"cat {CONTAINER_TEROK_DIR}/{p.session_file}" in wrapper
+
+    def test_opencode_provider_flag_routes_through_opencode_provider(self) -> None:
+        """`opencode --provider X` swaps the runner for opencode-provider (which
+        writes X's opencode.json); native agents route through their own
+        launchers, while agents outside the feature don't gain the flag."""
+        oc = _provider_wrapper("opencode")
+        assert "--provider) _provider=" in oc
+        assert 'opencode-provider --provider "$_provider"' in oc
+        # Native agents run bare by default (config_patch routes their default);
+        # a selected provider re-points them through their own launcher.
+        assert 'vibe-provider --provider "$_provider"' in _provider_wrapper("vibe")
+        # Harnesses/agents with no provider override stay flag-free.
+        assert "--provider) _provider=" not in _provider_wrapper("pi")
+
+    def test_opencode_provider_defaults_to_container_selection(self) -> None:
+        """`_provider` defaults to ``$TEROK_PROVIDER`` so the container-selected
+        provider applies without an explicit flag (the flag still overrides)."""
+        oc = _provider_wrapper("opencode")
+        assert 'local _provider="${TEROK_PROVIDER:-}"' in oc
 
     def test_vibe_wrapper_has_lazy_model_sync(self) -> None:
         """Vibe wrapper includes lazy Mistral model sync with mtime check."""
@@ -193,7 +209,7 @@ class TestGenerateAgentWrapper:
         """
         from terok_executor.provider.wrappers import generate_all_wrappers
 
-        all_wrappers = generate_all_wrappers(has_agents=True)
+        all_wrappers = generate_all_wrappers()
         # Definition appears exactly once (no duplicate inlines)…
         assert all_wrappers.count("_terok_trust_workspace_for_vibe()") == 1
         # …and the flock guard is wired up.
@@ -246,9 +262,6 @@ class TestGenerateAgentWrapper:
         dash_p = f'set -- -p "$(cat {INITIAL_PROMPT_PATH})"'
         expected: dict[str, str] = {
             "opencode": run,
-            "blablador": run,
-            "kisski": run,
-            "openrouter": run,
             "copilot": dash_p,
             "claude": bare,
             "codex": bare,
@@ -266,7 +279,7 @@ class TestGenerateAgentWrapper:
 
     def test_initial_prompt_skipped_when_session_present(self) -> None:
         """Wrappers with a session_file gate the prompt pickup on no resume."""
-        for name in ("vibe", "opencode", "blablador", "kisski"):
+        for name in ("vibe", "opencode"):
             p = AGENTS[name]
             wrapper = _provider_wrapper(name)
             assert f"[ ! -s {CONTAINER_TEROK_DIR}/{p.session_file} ]" in wrapper, (
@@ -362,7 +375,7 @@ class TestGenerateAllWrappers:
 
         if shutil.which("bash") is None:
             pytest.skip("bash is required for wrapper syntax validation")
-        wrapper = _all_wrappers(has_agents=True)
+        wrapper = _all_wrappers()
         result = subprocess.run(["bash", "-n"], input=wrapper, capture_output=True, text=True)
         assert result.returncode == 0, f"bash syntax error:\n{result.stderr}"
 

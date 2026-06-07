@@ -184,6 +184,55 @@ class SidecarSpec:
 
 
 @dataclass(frozen=True)
+class OpenCodeProviderConfig:
+    """OpenAI-compatible endpoint config for an OpenCode-driven provider.
+
+    Carried by a [`Provider`][terok_executor.roster.types.Provider] that a
+    harness (OpenCode, Pi) drives rather than a native CLI — the curated
+    research endpoints (Blablador, KISSKI) and the OpenRouter aggregator.
+    Supplies the display name, model defaults and per-provider config dir the
+    ``opencode-provider`` wrapper writes into an ``opencode.json`` when that
+    provider is selected at runtime.
+    """
+
+    display_name: str
+    """Human-readable display name (e.g. ``"Helmholtz Blablador"``)."""
+
+    base_url: str
+    """Base URL for the OpenAI-compatible API (e.g. ``".../v1"``)."""
+
+    preferred_model: str
+    """Preferred model ID (e.g. ``"alias-huge"``)."""
+
+    fallback_model: str
+    """Fallback model ID used when the preferred one is unavailable."""
+
+    env_var_prefix: str
+    """API-key env-var prefix (e.g. ``"BLABLADOR"`` → ``BLABLADOR_API_KEY``)."""
+
+    config_dir: str
+    """Per-provider config directory name (e.g. ``".blablador"``)."""
+
+    auth_key_url: str
+    """URL where users obtain an API key (documentation / auth hint)."""
+
+    api_key_hint: str = ""
+    """Custom API-key prompt hint; falls back to ``auth_key_url`` when empty."""
+
+    def to_env(self, name: str) -> dict[str, str]:
+        """Return the ``TEROK_OC_{NAME}_*`` env vars for container injection."""
+        prefix = f"TEROK_OC_{name.upper()}_"
+        return {
+            f"{prefix}BASE_URL": self.base_url,
+            f"{prefix}PREFERRED_MODEL": self.preferred_model,
+            f"{prefix}FALLBACK_MODEL": self.fallback_model,
+            f"{prefix}DISPLAY_NAME": self.display_name,
+            f"{prefix}ENV_VAR_PREFIX": self.env_var_prefix,
+            f"{prefix}CONFIG_DIR": self.config_dir,
+        }
+
+
+@dataclass(frozen=True)
 class ProviderAuth:
     """How a provider attaches the real credential to an upstream request.
 
@@ -247,6 +296,19 @@ class Provider:
     when resolving an agent×provider combo; not part of the ``routes.json``
     contract.
     """
+
+    opencode_config: OpenCodeProviderConfig | None = None
+    """OpenCode wrapper config when a harness drives this provider (Blablador,
+    KISSKI, OpenRouter).  ``None`` for native LLM providers and tool providers,
+    which are reached through their own CLI or a native protocol binding."""
+
+    install_spec: InstallSpec | None = None
+    """Dockerfile install fragment when this provider ships its own pinned-alias
+    command (the curated harness providers symlink ``blablador`` → the OpenCode
+    wrapper family).  ``None`` for providers reached only through an agent."""
+
+    help_spec: HelpSpec | None = None
+    """Help-listing entry when this provider ships a command; ``None`` otherwise."""
 
     def wire_auth(self) -> tuple[str, str, dict[str, str]]:
         """Resolve the ``routes.json`` ``(auth_header, auth_prefix, oauth_extra_headers)``.

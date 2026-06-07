@@ -65,13 +65,64 @@ class VaultLocation:
     """Filesystem path for a Unix-socket-speaking HTTP client."""
 
 
-def write_vault_config(name: str) -> None:
+def _credential_type_overlay(patch: dict, credential_type: str | None) -> dict:
+    """Fold ``by_credential_type[credential_type]`` over the base ``toml_set``.
+
+    A provider whose vault endpoint depends on *how* it was authenticated — codex
+    routes OAuth/ChatGPT-subscription traffic to the ChatGPT backend but an API
+    key to the ``/v1`` API — declares the mode-specific keys under
+    ``by_credential_type``.  This merges the entry for the actually stored
+    credential type into ``toml_set``.  Returns *patch* unchanged when it carries
+    no overlay or the type has no entry (the base ``toml_set`` then applies).
+    """
+    overlays = patch.get("by_credential_type")
+    if not overlays or credential_type not in overlays:
+        return patch
+    return {**patch, "toml_set": {**patch.get("toml_set", {}), **overlays[credential_type]}}
+
+
+def _stored_credential_type(credential_set: str, cred_key: str) -> str | None:
+    """Return the ``type`` of the credential stored for *cred_key*, or ``None``.
+
+    Reads the vault credential DB the way token injection does; soft-fails to
+    ``None`` so the caller can fall back to the route's declared default.
+    """
+    from terok_executor.integrations.sandbox import SandboxConfig
+
+    try:
+        db = SandboxConfig().open_credential_db()
+    except Exception:
+        _logger.warning("Vault DB unavailable for credential-type config overlay")
+        return None
+    try:
+        record = db.load_credential(credential_set, cred_key)
+    finally:
+        db.close()
+    return record.get("type") if record else None
+
+
+def _resolve_patch(patch: dict, route: Any, cred_key: str, credential_set: str) -> dict:
+    """Resolve *patch* against the stored credential type when it has an overlay.
+
+    *cred_key* is the credential's DB key (the route's ``credential_provider``).
+    Falls back to the route's declared ``credential_type`` if the stored type
+    can't be read, so the endpoint is never left unset.
+    """
+    if "by_credential_type" not in patch:
+        return patch
+    ctype = _stored_credential_type(credential_set, cred_key) or route.credential_type
+    return _credential_type_overlay(patch, ctype)
+
+
+def write_vault_config(name: str, credential_set: str = "default") -> None:
     """Apply an entry's ``provider.config_patch`` from the YAML roster after auth.
 
     Patches a TOML or YAML config file in the entry's shared config dir to
     redirect API traffic through the vault.  *name* is the auth-provider name
     (agent OR tool — e.g. ``gh``); the patch rides on the entry's vault route
     (sourced from its ``provider:`` binding).  No provider-specific code needed.
+    *credential_set* selects which stored credential's type drives a
+    ``by_credential_type`` overlay (codex's ChatGPT-backend vs ``/v1`` routing).
     """
     from terok_executor.roster import AgentRoster
 
@@ -79,10 +130,12 @@ def write_vault_config(name: str) -> None:
     auth_info = roster.auth_providers.get(name)
     if not auth_info:
         return
-    route = roster.vault_routes.get(auth_info.credential_provider or name)
+    cred_key = auth_info.credential_provider or name
+    route = roster.vault_routes.get(cred_key)
     patch = route.shared_config_patch if route else None
     if not patch:
         return
+    patch = _resolve_patch(patch, route, cred_key, credential_set)
 
     from terok_executor.integrations.sandbox import SandboxConfig
     from terok_executor.paths import mounts_dir
@@ -111,6 +164,7 @@ def apply_shared_config_patches(
     *,
     providers: frozenset[str] | None = None,
     disabled_providers: frozenset[str] | None = None,
+    credential_set: str = "default",
 ) -> None:
     """Reconcile ``shared_config_patch`` for enabled and disabled providers.
 
@@ -155,7 +209,10 @@ def apply_shared_config_patches(
         if disabled_providers and name in disabled_providers
     }
     patched = {
-        name: spec for name, spec in all_patches.items() if providers is None or name in providers
+        name: spec
+        for name, spec in all_patches.items()
+        if (providers is None or name in providers)
+        and not (disabled_providers and name in disabled_providers)
     }
 
     for name, (host_dir, _patch) in disabled.items():
@@ -178,6 +235,10 @@ def apply_shared_config_patches(
 
     for name, (host_dir, patch) in patched.items():
         try:
+            cred_key = roster.auth_providers[name].credential_provider or name
+            route = roster.vault_routes.get(cred_key)
+            if route is not None:
+                patch = _resolve_patch(patch, route, cred_key, credential_set)
             shared_dir = mounts_base / host_dir
             shared_dir.mkdir(parents=True, exist_ok=True)
             config_path = _safe_config_path(shared_dir, patch["file"])

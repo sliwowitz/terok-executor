@@ -35,13 +35,15 @@ L1 is roster-driven: each agent's install steps live in its YAML file
 (``install.run_as_root`` / ``install.run_as_dev``), and the L1 template
 loops over the resolved selection.  Build emits an OCI label
 ``ai.terok.agents=<csv>``, an in-container manifest
-``/etc/terok/installed.env``, and pre-rendered ``hilfe`` help fragments —
-all derived from the same selection.
+``/etc/terok/installed.env``, pre-rendered ``hilfe`` help fragments, and a
+baked agent→wire-protocol map (``agent-protocols.json``) that the
+in-container readiness check consumes — all derived from the same selection.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shlex
 import shutil
@@ -66,6 +68,15 @@ AGENTS_LABEL = "ai.terok.agents"
 
 INSTALLED_ENV_PATH = "/etc/terok/installed.env"
 """In-container env file that scripts source to learn what's installed."""
+
+AGENT_PROTOCOLS_PATH = "/usr/local/share/terok/agent-protocols.json"
+"""In-container map of each installed agent to the wire protocol it speaks.
+
+The readiness check (``terok-agents``) needs each agent's wire protocol to
+decide which authenticated providers it can talk to, and that mapping is the
+one piece of roster knowledge the container environment does not already
+carry.  Baked at L1 build time the same way the ``hilfe`` help fragments are,
+and read back by the in-container manifest generator."""
 
 _HELP_SECTION_FILES: dict[str, str] = {"agent": "agents.txt", "dev_tool": "dev-tools.txt"}
 """Maps each [`HelpSection`][terok_executor.roster.loader.HelpSection] to its fragment filename."""
@@ -497,6 +508,7 @@ def build_base_images(
         try:
             prepare_build_context(context)
             stage_help_fragments(context / "help.d", selected)
+            stage_agent_protocols(context / "agent-protocols.json", selected)
 
             # Single timestamp for both render and build-arg consistency
             cache_bust = str(int(time.time()))
@@ -728,6 +740,7 @@ def render_l1(
             "installed_agents_csv": ",".join(selected),
             "agents_label": AGENTS_LABEL,
             "installed_env_path": INSTALLED_ENV_PATH,
+            "agent_protocols_path": AGENT_PROTOCOLS_PATH,
         },
     )
 
@@ -829,6 +842,31 @@ def stage_help_fragments(dest: Path, agents: tuple[str, ...]) -> None:
     for section, lines in by_section.items():
         decoded = "".join(_decode_label_escapes(line) + "\n" for line in lines)
         (dest / _HELP_SECTION_FILES[section]).write_text(decoded, encoding="utf-8")
+
+
+def stage_agent_protocols(dest_file: Path, agents: tuple[str, ...]) -> None:
+    """Bake the agent→wire-protocol map for *agents* into *dest_file* as JSON.
+
+    Records the wire protocol of every selected entry that speaks one — the
+    LLM-backed agents (claude, codex, vibe).  Tools and harnesses are left
+    out: they carry no fixed protocol, so the in-container readiness check has
+    nothing to match them against a provider on.  This map is the only roster
+    fact that check cannot reconstruct from the container environment, so it
+    travels into the image the same way the ``hilfe`` help fragments do.
+
+    The file is always written — an empty object when nothing in the selection
+    speaks a protocol — so the Dockerfile ``COPY`` always has a source.
+    """
+    from terok_executor.roster import AgentRoster
+
+    agents_by_name = AgentRoster.shared().agents
+    protocols = {
+        name: agents_by_name[name].protocol
+        for name in agents
+        if name in agents_by_name and agents_by_name[name].protocol
+    }
+    dest_file.parent.mkdir(parents=True, exist_ok=True)
+    dest_file.write_text(json.dumps(protocols, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def stage_tmux_config(dest: Path) -> None:

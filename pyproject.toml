@@ -149,6 +149,13 @@ disallow_incomplete_defs = true
 pretty = true
 show_error_codes = true
 
+# ``resources/`` holds container-side scripts (run inside task containers, not
+# part of the host import graph — the same reason mypy excludes it).  Tests
+# exercise them by path-loading (``SourceFileLoader``), which coverage.py can't
+# attribute, so they report 0%; omit them rather than chase phantom misses.
+[tool.coverage.run]
+omit = ["*/terok_executor/resources/*"]
+
 [tool.poetry-dynamic-versioning]
 enable = true
 vcs = "git"

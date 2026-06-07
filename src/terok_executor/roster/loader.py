@@ -35,7 +35,15 @@ from terok_executor.integrations.sandbox import DoctorCheck, SandboxConfig
 from terok_executor.provider.providers import Agent
 
 from .schema import RawAgentYaml, RawProvider, RawProviderBinding, VaultRouteEntry
-from .types import HelpSpec, InstallSpec, MountDef, Provider, SidecarSpec, VaultRoute
+from .types import (
+    HelpSpec,
+    InstallSpec,
+    MountDef,
+    OpenCodeProviderConfig,
+    Provider,
+    SidecarSpec,
+    VaultRoute,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,6 +51,7 @@ from .types import HelpSpec, InstallSpec, MountDef, Provider, SidecarSpec, Vault
 
 _USER_AGENTS_DIR_NAME = "agents"
 _USER_PROVIDERS_DIR_NAME = "providers"
+_YAML_SUFFIX = ".yaml"
 
 ROSTER_VERSION = 2
 """Schema version of the agent-roster YAML format.
@@ -254,29 +263,18 @@ class AgentRoster:
     def generate_routes_json(self) -> str:
         """Generate the ``routes.json`` content for the sandbox vault server.
 
-        Returns a JSON object mapping provider name → [`VaultRouteEntry`][terok_executor.roster.schema.VaultRouteEntry]
-        with empty/absent optional fields stripped.
+        Emits one entry per **provider** — keyed by its clean name — so the
+        vault can route to any authenticated provider, not just the one some
+        agent binds by default.  This is what lets a harness (opencode, pi)
+        reach a provider no agent owns, and what keeps a provider routable
+        after its shim agent is collapsed away.  Empty/absent optional fields
+        are stripped.
         """
         from pydantic import TypeAdapter
 
-        routes: dict[str, VaultRouteEntry] = {}
-        prefix_owners: dict[str, str] = {}
-        for route in self._vault_routes.values():
-            existing = prefix_owners.get(route.route_prefix)
-            if existing is not None:
-                raise ValueError(
-                    f"Duplicate route prefix {route.route_prefix!r}: "
-                    f"providers {existing!r} and {route.provider!r}"
-                )
-            prefix_owners[route.route_prefix] = route.provider
-            routes[route.provider] = VaultRouteEntry(
-                upstream=route.upstream,
-                auth_header=route.auth_header,
-                auth_prefix=route.auth_prefix,
-                path_upstreams=route.path_upstreams or None,
-                oauth_extra_headers=route.oauth_extra_headers or None,
-                oauth_refresh=route.oauth_refresh or None,
-            )
+        routes = {
+            name: _provider_route_entry(provider) for name, provider in self._providers.items()
+        }
         return (
             TypeAdapter(dict[str, VaultRouteEntry])
             .dump_json(routes, indent=2, exclude_none=True)
@@ -297,9 +295,9 @@ class AgentRoster:
         return merged
 
     def collect_opencode_provider_env(self) -> dict[str, str]:
-        """Collect env vars for all OpenCode-based providers."""
+        """Collect the ``TEROK_OC_{NAME}_*`` env vars for all OpenCode-driven providers."""
         env: dict[str, str] = {}
-        for p in self._agents.values():
+        for p in self._providers.values():
             if p.opencode_config is not None:
                 env.update(p.opencode_config.to_env(p.name))
         return env
@@ -482,9 +480,9 @@ def load_roster() -> AgentRoster:
             raise ValueError(f"Agent {name!r}: invalid roster YAML\n{exc}") from exc
 
         label = spec.resolve_label(name)
-        is_agent_kind = spec.kind not in ("tool", "runtime")
+        is_agent_kind = spec.kind not in ("tool", "frontend", "infra")
 
-        if spec.kind != "runtime":
+        if spec.kind not in ("frontend", "infra"):
             all_names.append(name)
         if is_agent_kind:
             agent_names.append(name)
@@ -492,13 +490,12 @@ def load_roster() -> AgentRoster:
 
         credential_file = spec.provider.credential_file if spec.provider else ""
 
-        auth_prov: AuthProvider | None
-        if spec.auth is not None:
-            auth_prov = spec.auth.to_dataclass(name=name, label=label)
-        elif is_agent_kind:
-            auth_prov = spec.derive_opencode_auth(name)
-        else:
-            auth_prov = None
+        # Agents capture credentials only through an explicit ``auth:`` block;
+        # the harness-driven providers' API-key capture is synthesized from
+        # their OpenCode config in the provider loop below.
+        auth_prov: AuthProvider | None = (
+            spec.auth.to_dataclass(name=name, label=label) if spec.auth is not None else None
+        )
 
         if auth_prov is not None:
             # Stamp the provider the captured credential is keyed under (claude →
@@ -551,6 +548,35 @@ def load_roster() -> AgentRoster:
         if spec.web_ingress:
             web_ingress_names.add(name)
 
+    # Curated harness providers (Blablador, KISSKI, OpenRouter) carry their own
+    # endpoint + OpenCode config instead of riding an agent binding.  Synthesize
+    # the delivery route, API-key capture, mount, install and help the (now
+    # removed) shim agents used to contribute, so phantom-token routing and
+    # ``terok build/auth <provider>`` keep working without a duplicate agent.
+    for pname, provider in providers.items():
+        oc = provider.opencode_config
+        if oc is None:
+            continue
+        if pname not in vault_routes:
+            vault_routes[pname] = _opencode_provider_route(provider, oc)
+        if pname not in auth_providers:
+            auth_prov = replace(_opencode_provider_auth(pname, oc), credential_provider=pname)
+            auth_providers[pname] = auth_prov
+            if auth_prov.host_dir_name not in seen_mounts:
+                seen_mounts[auth_prov.host_dir_name] = MountDef(
+                    host_dir=auth_prov.host_dir_name,
+                    container_path=auth_prov.container_mount,
+                    label=f"{auth_prov.label} config",
+                    credential_file=_OPENCODE_CREDENTIAL_FILE,
+                    provider=pname,
+                )
+        if provider.install_spec is not None and pname not in installs:
+            installs[pname] = provider.install_spec
+        if provider.help_spec is not None and pname not in helps:
+            helps[pname] = provider.help_spec
+        if pname not in all_names:
+            all_names.append(pname)
+
     return AgentRoster(
         _agents=agents,
         _providers=providers,
@@ -595,9 +621,9 @@ def _load_raw_yaml_dir(pkg_or_path: object, *, label: str) -> dict[str, dict]:
     out: dict[str, dict] = {}
     items = pkg_or_path.iterdir() if hasattr(pkg_or_path, "iterdir") else []
     for item in items:
-        if not hasattr(item, "name") or not item.name.endswith(".yaml"):
+        if not hasattr(item, "name") or not item.name.endswith(_YAML_SUFFIX):
             continue
-        name = item.name.removesuffix(".yaml")
+        name = item.name.removesuffix(_YAML_SUFFIX)
         try:
             data = _load_yaml(item.read_text(encoding="utf-8"))
         except Exception as exc:
@@ -690,14 +716,68 @@ def _vault_route_from_binding(
     )
 
 
+_OPENCODE_CREDENTIAL_FILE = "config.json"
+"""File under the provider's config mount that holds the captured API key —
+the read-only credential shadow (terok-ai/terok#873) is layered over it."""
+
+
+def _opencode_provider_route(provider: Provider, oc: OpenCodeProviderConfig) -> VaultRoute:
+    """Build the in-container delivery route for a harness-driven provider.
+
+    The endpoint half comes from *provider*; the delivery half is derived from
+    its OpenCode config (*oc*) — the phantom API key lands in
+    ``{env_var_prefix}_API_KEY`` (e.g. ``BLABLADOR_API_KEY``), the var the
+    ``opencode-provider`` wrapper reads.  This reconstructs the route the shim
+    agent's binding used to supply, now that the agent is gone.
+    """
+    auth_header, auth_prefix, oauth_extra_headers = provider.wire_auth()
+    return VaultRoute(
+        provider=provider.name,
+        route_prefix=provider.name,
+        upstream=provider.upstream,
+        path_upstreams=dict(provider.path_upstreams),
+        oauth_extra_headers=oauth_extra_headers,
+        auth_header=auth_header,
+        auth_prefix=auth_prefix,
+        credential_type="api_key",
+        credential_file=_OPENCODE_CREDENTIAL_FILE,
+        token_env={"_default": f"{oc.env_var_prefix}_API_KEY"},
+        base_url_env="",
+        socket_env="",
+        shared_config_patch=None,
+        oauth_refresh=provider.oauth_refresh,
+        shared_domain=provider.shared_domain,
+    )
+
+
+def _opencode_provider_auth(name: str, oc: OpenCodeProviderConfig) -> AuthProvider:
+    """Synthesize the API-key capture for a harness-driven provider.
+
+    Mirrors the (now removed) shim agent's ``derive_opencode_auth`` so
+    ``terok auth <provider>`` prompts for an OpenAI-compatible key and lands it
+    in the provider's OpenCode config dir.
+    """
+    hint = oc.api_key_hint or f"Get your API key at: {oc.auth_key_url}"
+    return AuthProvider(
+        name=name,
+        label=oc.display_name,
+        host_dir_name=f"_{name}-config",
+        container_mount=f"/home/dev/{oc.config_dir}",
+        command=[],
+        banner_hint="",
+        modes=("api_key",),
+        api_key_hint=hint,
+    )
+
+
 def _load_bundled_agents() -> dict[str, dict]:
     """Load all ``*.yaml`` files from the bundled ``resources/agents/`` package."""
     agents: dict[str, dict] = {}
     pkg = importlib.resources.files("terok_executor.resources.agents")
     for item in pkg.iterdir():
-        if not hasattr(item, "name") or not item.name.endswith(".yaml"):
+        if not hasattr(item, "name") or not item.name.endswith(_YAML_SUFFIX):
             continue
-        name = item.name.removesuffix(".yaml")
+        name = item.name.removesuffix(_YAML_SUFFIX)
         try:
             data = _load_yaml(item.read_text(encoding="utf-8"))
         except Exception as exc:

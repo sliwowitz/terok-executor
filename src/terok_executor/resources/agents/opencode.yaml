@@ -3,9 +3,15 @@
 
 roster_version: 2
 
-kind: bridge
+kind: harness
 label: OpenCode
 binary: opencode
+
+# Harnesses have no fixed endpoint, but they consume openai-chat-compatible
+# providers (opencode-provider configures @ai-sdk/openai-compatible).  Declaring
+# it surfaces opencode in the in-container readiness manifest paired with every
+# authenticated openai-chat provider — the universal cross-provider path.
+protocol: openai-chat
 
 git_identity:
   name: OpenCode

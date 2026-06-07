@@ -13,3 +13,30 @@ auth:
 
 serves:
   openai-chat: "/v1"
+
+# Driven by the OpenCode harness — a one-word `blablador` command (symlinked to
+# the opencode-provider family) plus the OpenAI-compatible config the wrapper
+# writes into opencode.json.
+opencode:
+  display_name: Helmholtz Blablador
+  base_url: https://api.helmholtz-blablador.fz-juelich.de/v1
+  preferred_model: alias-huge
+  fallback_model: alias-code
+  env_var_prefix: BLABLADOR
+  config_dir: .blablador
+  auth_key_url: https://codebase.helmholtz.cloud/-/user_settings/personal_access_tokens
+  api_key_hint: |-
+    Create a personal access token at:
+      https://codebase.helmholtz.cloud/-/user_settings/personal_access_tokens
+    The token must include the ``read_user`` scope.
+
+install:
+  depends_on: [opencode]
+  run_as_root: |
+    RUN set -eux; \
+        ln -sf opencode-provider     /usr/local/bin/blablador; \
+        ln -sf opencode-provider-acp /usr/local/bin/blablador-acp; \
+        ln -sf opencode-toad         /usr/local/bin/blablatoad
+
+help:
+  label: '  \033[36mblablador\033[0m  - OpenCode with Helmholtz Blablador'

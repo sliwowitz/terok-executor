@@ -52,8 +52,7 @@ class TestAgentsListCommand:
     def test_agents_shows_kind_types(self) -> None:
         out, _, _ = _run_cli("agents", "list", "--all")
         assert "native" in out
-        assert "opencode" in out
-        assert "bridge" in out
+        assert "harness" in out
         assert "tool" in out
 
     def test_agents_has_header(self) -> None:

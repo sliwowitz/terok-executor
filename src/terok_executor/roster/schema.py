@@ -37,13 +37,14 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
-from terok_executor.provider.providers import Agent, OpenCodeProviderConfig, ProviderBinding
+from terok_executor.provider.providers import Agent, ProviderBinding
 
 from .types import (
     HELP_SECTIONS,
     HelpSection,
     HelpSpec,
     InstallSpec,
+    OpenCodeProviderConfig,
     Provider,
     ProviderAuth,
     SidecarSpec,
@@ -122,7 +123,6 @@ class RawSession(StrictModel):
 class RawCapabilities(StrictModel):
     """``capabilities:`` — agent-specific feature toggles."""
 
-    agents_json: bool = False
     add_dir: bool = False
     log_format: Literal["plain", "claude-stream-json"] = "plain"
 
@@ -149,7 +149,7 @@ class RawOpenCode(StrictModel):
     )
 
     def to_dataclass(self) -> OpenCodeProviderConfig:
-        """Project to the runtime [`OpenCodeProviderConfig`][terok_executor.provider.providers.OpenCodeProviderConfig]."""
+        """Project to the runtime [`OpenCodeProviderConfig`][terok_executor.roster.types.OpenCodeProviderConfig]."""
         return OpenCodeProviderConfig(
             display_name=self.display_name,
             base_url=self.base_url,
@@ -158,6 +158,7 @@ class RawOpenCode(StrictModel):
             env_var_prefix=self.env_var_prefix,
             config_dir=self.config_dir,
             auth_key_url=self.auth_key_url,
+            api_key_hint=self.api_key_hint or "",
         )
 
 
@@ -188,6 +189,10 @@ class RawAuth(StrictModel):
     extra_run_args: list[str] = Field(default_factory=list)
     modes: list[Literal["oauth", "api_key"]] = Field(
         default_factory=lambda: ["api_key"]  # type: ignore[arg-type]
+    )
+    device_auth: bool = Field(
+        default=False,
+        description="OAuth flow has a headless device-code variant, offered in the auth prompt",
     )
     api_key_hint: str = ""
     post_capture_state: PostCaptureState = Field(
@@ -225,6 +230,7 @@ class RawAuth(StrictModel):
             banner_hint=self.banner_hint,
             extra_run_args=tuple(self.extra_run_args),
             modes=tuple(self.modes),
+            device_auth=self.device_auth,
             api_key_hint=self.api_key_hint,
             post_capture_state=dict(self.post_capture_state),
         )
@@ -370,6 +376,14 @@ class RawProvider(StrictModel):
         default_factory=dict,
         description="Wire protocol → container-facing base path (LLM providers only)",
     )
+    opencode: RawOpenCode | None = Field(
+        default=None,
+        description="OpenCode wrapper config for a harness-driven provider (Blablador, …)",
+    )
+    install: RawInstall | None = Field(
+        default=None, description="Pinned-alias install fragment for a harness-driven provider"
+    )
+    help: RawHelp | None = Field(default=None, description="Help-listing entry for the command")
 
     def to_dataclass(self, *, name: str) -> Provider:
         """Project to a runtime [`Provider`][terok_executor.roster.types.Provider]."""
@@ -388,6 +402,9 @@ class RawProvider(StrictModel):
             oauth_refresh=refresh,
             shared_domain=self.shared_domain,
             serves=dict(self.serves),
+            opencode_config=self.opencode.to_dataclass() if self.opencode else None,
+            install_spec=self.install.to_dataclass() if self.install else None,
+            help_spec=self.help.to_dataclass() if self.help else None,
         )
 
 
@@ -426,8 +443,15 @@ class RawProviderBinding(StrictModel):
 # ── Top-level model ───────────────────────────────────────────────────────
 
 
-AgentKind = Literal["native", "opencode", "bridge", "tool", "runtime"]
-"""Kind of roster entry: agents (native/opencode/bridge), tools, or runtime helpers."""
+AgentKind = Literal["native", "harness", "frontend", "tool", "infra"]
+"""Kind of roster entry, chosen to predict behaviour:
+
+- ``native`` — a CLI with a fixed protocol + default provider (claude, codex, vibe, copilot)
+- ``harness`` — a multi-provider driver, provider supplied at runtime (opencode, pi)
+- ``frontend`` — drives co-installed agents in-container (toad)
+- ``tool`` — a non-LLM API client (gh, glab, sonar, coderabbit)
+- ``infra`` — a support service, not user-invoked (caddy)
+"""
 
 
 # Default sub-section instances reused for agents that omit a section —
@@ -462,7 +486,6 @@ class RawAgentYaml(StrictModel):
     session: RawSession | None = None
     capabilities: RawCapabilities | None = None
     wrapper: RawWrapper | None = None
-    opencode: RawOpenCode | None = None
     auth: RawAuth | None = None
     protocol: str | None = Field(
         default=None,
@@ -509,30 +532,12 @@ class RawAgentYaml(StrictModel):
             resume_flag=sess.resume_flag,
             continue_flag=sess.continue_flag,
             session_file=sess.session_file,
-            supports_agents_json=caps.agents_json,
             supports_session_hook=sess.supports_hook,
             supports_add_dir=caps.add_dir,
             log_format=caps.log_format,
-            opencode_config=self.opencode.to_dataclass() if self.opencode else None,
             refuse_subcommands=tuple(wrap.refuse_subcommands),
             protocol=self.protocol,
             provider_binding=self.provider.to_dataclass() if self.provider else None,
-        )
-
-    def derive_opencode_auth(self, name: str) -> AuthProvider | None:
-        """Auto-derive an [`AuthProvider`][terok_executor.credentials.auth.AuthProvider] for OpenCode-based agents."""
-        if self.opencode is None:
-            return None
-        hint = self.opencode.api_key_hint or f"Get your API key at: {self.opencode.auth_key_url}"
-        return AuthProvider(
-            name=name,
-            label=self.resolve_label(name),
-            host_dir_name=f"_{name}-config",
-            container_mount=f"/home/dev/{self.opencode.config_dir}",
-            command=[],
-            banner_hint="",
-            modes=("api_key",),
-            api_key_hint=hint,
         )
 
 

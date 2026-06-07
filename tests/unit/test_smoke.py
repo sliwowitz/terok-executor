@@ -30,7 +30,7 @@ class TestPackageImport:
         """AGENTS registry contains expected agents."""
         from terok_executor import AGENTS
 
-        assert len(AGENTS) >= 7
+        assert len(AGENTS) >= 6
         assert "claude" in AGENTS
         assert "codex" in AGENTS
 

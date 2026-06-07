@@ -12,5 +12,42 @@ auth:
     header: Authorization
     prefix: "Bearer "
 
+# OpenRouter mounts its OpenAI-compatible API under /api/v1 and its
+# Anthropic-Messages skin under /api.  The paths are deliberately asymmetric:
+# an OpenAI client appends /chat/completions to the base, so it needs
+# /api/v1; Claude Code appends the full /v1/messages itself, so its base must
+# stop at /api (OpenRouter's own Claude-Code guide warns that a /v1 suffix
+# 404s with model-not-found).
 serves:
-  openai-chat: "/v1"
+  openai-chat: "/api/v1"
+  anthropic-messages: "/api"
+
+# Driven by the OpenCode harness — a one-word `openrouter` command (symlinked
+# to the opencode-provider family) plus the OpenAI-compatible config the
+# wrapper writes into opencode.json.  The endpoint above is the routed path;
+# this base_url is the direct one the wrapper falls back to.
+opencode:
+  display_name: OpenRouter
+  base_url: https://openrouter.ai/api/v1
+  preferred_model: anthropic/claude-sonnet-4.5
+  fallback_model: anthropic/claude-3.5-sonnet
+  env_var_prefix: OPENROUTER
+  config_dir: .openrouter
+  auth_key_url: https://openrouter.ai/keys
+  api_key_hint: |-
+    Create an API key at:
+      https://openrouter.ai/keys
+    OpenRouter is an OpenAI-compatible aggregator covering models from
+    Anthropic, OpenAI, Google, Meta, DeepSeek and others; usage is
+    billed against your OpenRouter credits.
+
+install:
+  depends_on: [opencode]
+  run_as_root: |
+    RUN set -eux; \
+        ln -sf opencode-provider     /usr/local/bin/openrouter; \
+        ln -sf opencode-provider-acp /usr/local/bin/openrouter-acp; \
+        ln -sf opencode-toad         /usr/local/bin/openroutertoad
+
+help:
+  label: '  \033[36mopenrouter\033[0m - OpenCode with OpenRouter'

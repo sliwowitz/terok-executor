@@ -69,10 +69,7 @@ class TestLoadBundledAgents:
             "copilot",
             "gh",
             "glab",
-            "blablador",
-            "kisski",
             "opencode",
-            "openrouter",
             "pi",
             "sonar",
             "toad",
@@ -81,14 +78,14 @@ class TestLoadBundledAgents:
         assert set(agents.keys()) == expected
 
     def test_each_agent_has_kind(self) -> None:
-        valid_kinds = {"native", "opencode", "bridge", "tool", "runtime"}
+        valid_kinds = {"native", "harness", "frontend", "tool", "infra"}
         for name, data in _load_bundled_agents().items():
             assert "kind" in data, f"{name}.yaml missing 'kind' field"
             assert data["kind"] in valid_kinds, f"{name}.yaml has invalid kind={data['kind']!r}"
 
     def test_agents_have_required_sections(self) -> None:
         for name, data in _load_bundled_agents().items():
-            if data["kind"] in ("tool", "runtime"):
+            if data["kind"] in ("tool", "frontend", "infra"):
                 continue
             assert "label" in data, f"{name}: missing label"
             assert "binary" in data, f"{name}: missing binary"
@@ -247,11 +244,9 @@ class TestDeserializeProvider:
         assert p.resume_flag == "--resume"
         assert p.continue_flag is None
         assert p.session_file is None
-        assert p.supports_agents_json is True
         assert p.supports_session_hook is True
         assert p.supports_add_dir is True
         assert p.log_format == "claude-stream-json"
-        assert p.opencode_config is None
 
     def test_codex_subcommand_and_flags(self) -> None:
         agents = _load_bundled_agents()
@@ -263,13 +258,14 @@ class TestDeserializeProvider:
         assert p.supports_session_resume is False
 
     def test_blablador_opencode_config(self) -> None:
-        agents = _load_bundled_agents()
-        p = _agent_provider("blablador", agents["blablador"])
+        # Blablador is a provider, not an agent — its OpenCode config drives the
+        # opencode-provider wrapper the `blablador` command symlinks to.
+        provider = load_roster().providers["blablador"]
 
-        assert p.opencode_config is not None
-        assert p.opencode_config.display_name == "Helmholtz Blablador"
-        assert p.opencode_config.env_var_prefix == "BLABLADOR"
-        assert p.opencode_config.config_dir == ".blablador"
+        assert provider.opencode_config is not None
+        assert provider.opencode_config.display_name == "Helmholtz Blablador"
+        assert provider.opencode_config.env_var_prefix == "BLABLADOR"
+        assert provider.opencode_config.config_dir == ".blablador"
 
     def test_vibe_session_support(self) -> None:
         agents = _load_bundled_agents()
@@ -405,10 +401,7 @@ class TestLoadRegistry:
             "codex",
             "copilot",
             "vibe",
-            "blablador",
-            "kisski",
             "opencode",
-            "openrouter",
             "pi",
         }
         assert set(reg.agent_names) == expected_agents
@@ -723,7 +716,7 @@ class TestRegistryBehavior:
     def test_opencode_providers_have_complete_config(self) -> None:
         """Providers with opencode config have all required fields populated."""
         reg = load_roster()
-        for name, p in reg.agents.items():
+        for name, p in reg.providers.items():
             if p.opencode_config is None:
                 continue
             oc = p.opencode_config

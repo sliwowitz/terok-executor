@@ -38,11 +38,26 @@ provider:
   default: openai
   credential_file: auth.json
   credential_type: oauth
+  # Codex derives its inference base from the auth mode (codex-rs
+  # model_provider_info::to_api_provider): a ChatGPT-subscription token would
+  # target https://chatgpt.com/backend-api/codex, an API key
+  # https://api.openai.com/v1 — but an explicit ``openai_base_url`` overrides
+  # BOTH.  Since terok must override it (to route via the vault rather than
+  # straight to a firewalled upstream), the override has to match the mode the
+  # user actually authenticated with: ``by_credential_type`` is keyed off the
+  # stored credential's type so an OAuth container lands on the ChatGPT backend
+  # (a subscription token can't use ``/v1`` — no api.responses.write scope → 401
+  # → the blocked auth.openai.com refresh) and an API-key container on ``/v1``.
+  # ``chatgpt_base_url`` (common) routes the auth-manager's account calls.
   config_patch:
     file: config.toml
     toml_set:
-      openai_base_url: "{vault_url}/v1"
       chatgpt_base_url: "{vault_url}/backend-api/"
+    by_credential_type:
+      oauth:
+        openai_base_url: "{vault_url}/backend-api/codex"
+      api_key:
+        openai_base_url: "{vault_url}/v1"
   # Codex itself reads its bearer from ``auth.json`` + the patched
   # ``config.toml``, not from env.  This phantom env var is emitted for
   # env-var-only consumers (e.g. Pi) so any other agent in the same
@@ -59,6 +74,9 @@ auth:
     This will set up port forwarding (using socat) and open a browser for authentication.
     After completing authentication, press Ctrl+C to stop the container.
   extra_run_args: ["-p", "127.0.0.1:1455:1455"]
+  # Headless hosts: `terok auth codex --device-auth` shows a code + URL to enter
+  # on another device, so there is no browser callback (and no port to forward).
+  device_auth: true
   api_key_hint: "Get your API key at: https://platform.openai.com/api-keys"
 
 install:
@@ -66,7 +84,11 @@ install:
     RUN set -eux; \
         cp /tmp/terok-scripts/terok-codex-acp /usr/local/bin/terok-codex-acp; \
         cp /tmp/terok-scripts/setup-codex-auth.sh /usr/local/bin/setup-codex-auth.sh; \
-        chmod +x /usr/local/bin/terok-codex-acp /usr/local/bin/setup-codex-auth.sh
+        cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
+        chmod +x /usr/local/bin/terok-codex-acp \
+                 /usr/local/bin/setup-codex-auth.sh \
+                 /usr/local/bin/terok-native-provider; \
+        ln -sf terok-native-provider /usr/local/bin/codex-provider
   run_as_dev: |
     RUN set -eux; \
         npm install -g @openai/codex; \

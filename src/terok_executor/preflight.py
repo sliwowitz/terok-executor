@@ -421,7 +421,7 @@ def _fix_credentials(
     except SystemExit:
         return False
 
-    write_vault_config(provider)
+    write_vault_config(provider, credential_set=credential_set)
     return True
 
 

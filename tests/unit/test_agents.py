@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for agent configuration: parsing, filtering, wrapper generation, and config dir."""
+"""Tests for agent configuration: wrapper generation, session hooks, and config dir."""
 
 from __future__ import annotations
 
@@ -14,9 +14,7 @@ from pathlib import Path
 from terok_executor.provider.agents import (
     AgentConfigSpec,
     _inject_opencode_instructions,
-    _subagents_to_json,
     _write_session_hook,
-    parse_md_agent,
     prepare_agent_config_dir,
 )
 from terok_executor.provider.providers import AGENTS
@@ -25,110 +23,7 @@ from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,
     CONTAINER_INSTRUCTIONS_PATH,
-    NONEXISTENT_AGENT_PATH,
-    NONEXISTENT_FILE_PATH,
 )
-
-
-class TestSubagentsToJson:
-    """Tests for _subagents_to_json (dict output keyed by agent name)."""
-
-    def test_inline_definition_default_true(self) -> None:
-        """Inline sub-agent with default=True is included, output is dict keyed by name."""
-        subagents = [
-            {
-                "name": "reviewer",
-                "description": "Code reviewer",
-                "tools": ["Read", "Grep"],
-                "model": "sonnet",
-                "default": True,
-                "system_prompt": "You are a code reviewer.",
-            }
-        ]
-        result = json.loads(_subagents_to_json(subagents))
-        assert isinstance(result, dict)
-        assert "reviewer" in result
-        assert result["reviewer"]["prompt"] == "You are a code reviewer."
-        assert result["reviewer"]["description"] == "Code reviewer"
-        assert "system_prompt" not in result["reviewer"]
-        assert "name" not in result["reviewer"]
-        assert "default" not in result["reviewer"]
-
-    def test_default_false_excluded_without_selection(self) -> None:
-        """Agents with default=False are excluded when not selected."""
-        subagents = [
-            {"name": "debugger", "default": False, "model": "sonnet", "system_prompt": "Debug."},
-        ]
-        assert json.loads(_subagents_to_json(subagents)) == {}
-
-    def test_selected_agents_included(self) -> None:
-        """Non-default agents are included when passed in selected_agents."""
-        subagents = [
-            {"name": "debugger", "default": False, "model": "sonnet", "system_prompt": "Debug."},
-        ]
-        result = json.loads(_subagents_to_json(subagents, selected_agents=["debugger"]))
-        assert "debugger" in result
-
-    def test_mixed_default_and_selected(self) -> None:
-        """Default agents + selected non-default agents are both included."""
-        subagents = [
-            {"name": "reviewer", "default": True, "model": "sonnet", "system_prompt": "Review."},
-            {"name": "debugger", "default": False, "model": "opus", "system_prompt": "Debug."},
-            {"name": "planner", "default": False, "model": "haiku", "system_prompt": "Plan."},
-        ]
-        result = json.loads(_subagents_to_json(subagents, selected_agents=["debugger"]))
-        assert "reviewer" in result
-        assert "debugger" in result
-        assert "planner" not in result
-
-    def test_file_reference_with_default(self) -> None:
-        """File references with default flag are handled correctly."""
-        with tempfile.TemporaryDirectory() as td:
-            md_file = Path(td) / "reviewer.md"
-            md_file.write_text(
-                "---\nname: reviewer\ndescription: Code reviewer\n"
-                "tools: [Read, Grep]\nmodel: sonnet\n---\n"
-                "You are a code reviewer.\n",
-                encoding="utf-8",
-            )
-            subagents = [{"file": str(md_file), "default": True}]
-            result = json.loads(_subagents_to_json(subagents))
-            assert "reviewer" in result
-
-    def test_missing_file_skipped(self) -> None:
-        """Missing file references are skipped."""
-        subagents = [{"file": str(NONEXISTENT_AGENT_PATH), "default": True}]
-        assert json.loads(_subagents_to_json(subagents)) == {}
-
-    def test_agent_without_name_skipped(self) -> None:
-        """Agents without a name are skipped."""
-        subagents = [{"default": True, "model": "sonnet", "system_prompt": "No name."}]
-        assert json.loads(_subagents_to_json(subagents)) == {}
-
-
-class TestParseMdAgent:
-    """Tests for parse_md_agent."""
-
-    def test_parse_with_frontmatter(self) -> None:
-        """Parses YAML frontmatter + body from .md file."""
-        with tempfile.TemporaryDirectory() as td:
-            md = Path(td) / "test.md"
-            md.write_text("---\nname: test\ntools: [Read]\n---\nPrompt body.", encoding="utf-8")
-            result = parse_md_agent(str(md))
-            assert result["name"] == "test"
-            assert result["prompt"] == "Prompt body."
-
-    def test_parse_without_frontmatter(self) -> None:
-        """File without frontmatter is treated as raw prompt."""
-        with tempfile.TemporaryDirectory() as td:
-            md = Path(td) / "test.md"
-            md.write_text("Just a prompt.", encoding="utf-8")
-            result = parse_md_agent(str(md))
-            assert result["prompt"] == "Just a prompt."
-
-    def test_nonexistent_file(self) -> None:
-        """Nonexistent file returns empty dict."""
-        assert parse_md_agent(str(NONEXISTENT_FILE_PATH)) == {}
 
 
 class TestGenerateClaudeWrapper:
@@ -140,11 +35,12 @@ class TestGenerateClaudeWrapper:
         assert "claude()" in wrapper
         assert '--add-dir "/"' in wrapper
         assert "_terok_apply_git_identity Claude noreply@anthropic.com" in wrapper
-        assert "agents.json" not in wrapper
 
-    def test_wrapper_with_agents(self) -> None:
-        """Wrapper includes agents.json reference when has_agents=True."""
-        assert "agents.json" in generate_agent_wrapper(AGENTS["claude"], has_agents=True)
+    def test_wrapper_does_not_synthesize_agents_flag(self) -> None:
+        """terok no longer injects --agents; native .claude/agents/ is discovered by Claude."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        assert "agents.json" not in wrapper
+        assert "--agents" not in wrapper
 
     def test_wrapper_includes_append_system_prompt(self) -> None:
         """Wrapper injects --append-system-prompt via a runtime file guard."""
@@ -177,6 +73,48 @@ class TestGenerateClaudeWrapper:
         assert "/home/dev/.terok/initial-prompt.consumed.txt" in wrapper
         # Resume always wins — pickup is skipped if the session file is present.
         assert f"[ ! -s {CONTAINER_CLAUDE_SESSION_PATH} ]" in wrapper
+
+
+class TestRuntimeProviderWrappers:
+    """Wrappers honor a runtime-selected provider (TEROK_PROVIDER / --provider)."""
+
+    def test_claude_routes_via_environment(self) -> None:
+        """Claude resolves the provider's vault endpoint and exports it."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        assert 'local _provider="${TEROK_PROVIDER:-}"' in wrapper
+        assert "--provider) _provider=" in wrapper
+        # Var name is built from Claude's own protocol; bearer is its oauth var.
+        assert "TEROK_PROVIDER_${_pu}_BASE_ANTHROPIC_MESSAGES" in wrapper
+        assert 'export ANTHROPIC_BASE_URL="$_prov_base"' in wrapper
+        assert 'export CLAUDE_CODE_OAUTH_TOKEN="$_prov_token"' in wrapper
+
+    def test_codex_runs_bare_until_a_provider_is_selected(self) -> None:
+        """Codex runs its binary by default (its config_patch routes the default);
+        a selected provider re-points it through codex-provider."""
+        wrapper = generate_agent_wrapper(AGENTS["codex"])
+        assert 'local _provider="${TEROK_PROVIDER:-}"' in wrapper
+        assert "_runner=(codex)" in wrapper
+        assert "_runner=(codex-provider)" not in wrapper
+        assert '_runner=(codex-provider --provider "$_provider")' in wrapper
+
+    def test_vibe_runs_bare_until_a_provider_is_selected(self) -> None:
+        """Vibe runs its binary by default (its config_patch routes mistral);
+        a selected provider re-points it through vibe-provider."""
+        wrapper = generate_agent_wrapper(AGENTS["vibe"])
+        assert "_runner=(vibe)" in wrapper
+        assert "_runner=(vibe-provider)" not in wrapper
+        assert '_runner=(vibe-provider --provider "$_provider")' in wrapper
+
+    def test_opencode_launcher_unchanged(self) -> None:
+        """OpenCode keeps routing through its existing launcher (regression)."""
+        wrapper = generate_agent_wrapper(AGENTS["opencode"])
+        assert '_runner=(opencode-provider --provider "$_provider")' in wrapper
+
+    def test_harnesses_declare_manifest_protocol(self) -> None:
+        """opencode/pi declare openai-chat so the readiness manifest surfaces them
+        paired with openai-chat providers — the universal cross-provider path."""
+        assert AGENTS["opencode"].protocol == "openai-chat"
+        assert AGENTS["pi"].protocol == "openai-chat"
 
 
 class TestWriteSessionHook:
@@ -252,7 +190,6 @@ class TestPrepareAgentConfigDir:
         return AgentConfigSpec(
             tasks_root=tasks_root,
             task_id=task_id,
-            subagents=[],
             default_agent=None,
             mounts_base=kwargs.pop("mounts_base", None),
             instructions=kwargs.pop("instructions", None),

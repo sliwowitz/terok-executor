@@ -23,44 +23,6 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class OpenCodeProviderConfig:
-    """Immutable descriptor for an OpenCode-based provider wrapper."""
-
-    display_name: str
-    """Human-readable display name (e.g., 'Helmholtz Blablador')."""
-
-    base_url: str
-    """Base URL for the OpenAI-compatible API (e.g., 'https://api.helmholtz-blablador.fz-juelich.de/v1')."""
-
-    preferred_model: str
-    """Preferred model ID (e.g., 'alias-huge')."""
-
-    fallback_model: str
-    """Fallback model ID if preferred is unavailable (e.g., 'alias-code')."""
-
-    env_var_prefix: str
-    """Environment variable prefix for API key (e.g., 'BLABLADOR' → BLABLADOR_API_KEY)."""
-
-    config_dir: str
-    """Configuration directory name (e.g., '.blablador')."""
-
-    auth_key_url: str
-    """URL where users can obtain API keys for documentation."""
-
-    def to_env(self, name: str) -> dict[str, str]:
-        """Return env vars for container injection, keyed by TEROK_OC_{NAME}_*."""
-        prefix = f"TEROK_OC_{name.upper()}_"
-        return {
-            f"{prefix}BASE_URL": self.base_url,
-            f"{prefix}PREFERRED_MODEL": self.preferred_model,
-            f"{prefix}FALLBACK_MODEL": self.fallback_model,
-            f"{prefix}DISPLAY_NAME": self.display_name,
-            f"{prefix}ENV_VAR_PREFIX": self.env_var_prefix,
-            f"{prefix}CONFIG_DIR": self.config_dir,
-        }
-
-
-@dataclass(frozen=True)
 class AgentRunConfig:
     """Resolved per-run config for a headless provider.
 
@@ -270,9 +232,6 @@ class Agent:
 
     # -- Claude-specific capabilities --
 
-    supports_agents_json: bool
-    """Whether the agent supports ``--agents`` JSON (Claude only)."""
-
     supports_session_hook: bool
     """Whether the agent supports SessionStart hooks (Claude only)."""
 
@@ -283,14 +242,6 @@ class Agent:
 
     log_format: str
     """Log format identifier: ``"claude-stream-json"`` or ``"plain"``."""
-
-    opencode_config: OpenCodeProviderConfig | None = None
-    """Configuration for OpenCode-based providers (Blablador, KISSKI, etc.).
-
-    When set, this provider uses OpenCode with a custom OpenAI-compatible API.
-    The configuration includes API endpoints, model preferences, and provider-specific
-    settings that are injected into the container environment.
-    """
 
     refuse_subcommands: tuple[str, ...] = ()
     """Subcommands the in-container wrapper refuses with a friendly error.
@@ -314,8 +265,13 @@ class Agent:
 
     @property
     def uses_opencode_instructions(self) -> bool:
-        """Whether the provider uses OpenCode's instruction system."""
-        return self.opencode_config is not None or self.name == "opencode"
+        """Whether the agent uses OpenCode's instruction system.
+
+        Only the OpenCode harness itself; the curated OpenCode-driven providers
+        (Blablador, KISSKI, OpenRouter) are no longer agents — they run through
+        the same ``opencode`` wrapper, which already carries this behaviour.
+        """
+        return self.name == "opencode"
 
     # ── Headless behaviour ───────────────────────────────────────────
 
@@ -367,14 +323,6 @@ class Agent:
             else (int(cfg_timeout) if cfg_timeout is not None else 1800)
         )
 
-        # --- Subagents (warning only — filtering is handled elsewhere) ---
-        subagents = config.get("subagents")
-        if subagents and not self.supports_agents_json:
-            warnings.append(
-                f"{self.label} does not support sub-agents (--agents); "
-                f"sub-agent definitions will be ignored"
-            )
-
         # --- Instructions ---
         # Claude receives instructions via --append-system-prompt in the wrapper.
         # Codex receives instructions via -c model_instructions_file=... in the wrapper.
@@ -414,8 +362,8 @@ class Agent:
 
         Returns a bash command string suitable for ``["bash", "-lc", cmd]``.
         Dispatches to provider-specific assembly: Claude routes through the
-        shell wrapper (which adds ``--add-dir``, ``--agents``, git env);
-        everything else uses the generic shape with subcommand + flags.
+        shell wrapper (which adds ``--add-dir``, git env); everything else
+        uses the generic shape with subcommand + flags.
         """
         if self.name == "claude":
             return self._build_claude_command(timeout=timeout, model=model, max_turns=max_turns)
@@ -431,7 +379,7 @@ class Agent:
         """Build the headless command for Claude using the wrapper function.
 
         Claude uses the ``claude()`` wrapper from ``terok-executor.sh`` which
-        handles ``--add-dir``, ``--agents``, git env, and timeout.
+        handles ``--add-dir``, git env, and timeout.
         """
         flags = ""
         if model:
@@ -511,6 +459,12 @@ AGENTS: dict[str, Agent] = {}
 
 AGENT_NAMES: tuple[str, ...] = ()
 
+OPENCODE_PROVIDERS: dict[str, str] = {}
+"""OpenCode-driven provider name → config-dir, for the curated harness providers
+(Blablador, KISSKI, OpenRouter).  Populated from the roster's providers at load
+time so this layer can drive per-provider config injection without importing the
+roster (which would cycle)."""
+
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -540,17 +494,3 @@ def get_agent(name: str | None, *, default_agent: str | None = None) -> Agent:
     Convenience wrapper around [`resolve_agent`][terok_executor.provider.providers.resolve_agent].
     """
     return resolve_agent(AGENTS, name, default_agent=default_agent)
-
-
-def collect_opencode_provider_env() -> dict[str, str]:
-    """Collect environment variables for all OpenCode-based providers.
-
-    Returns a dictionary of environment variables that will be injected into containers
-    to configure OpenCode-based providers. Each provider with opencode_config set
-    contributes variables prefixed with TEROK_OC_{PROVIDER_NAME}_*.
-    """
-    env: dict[str, str] = {}
-    for agent in AGENTS.values():
-        if agent.opencode_config is not None:
-            env.update(agent.opencode_config.to_env(agent.name))
-    return env

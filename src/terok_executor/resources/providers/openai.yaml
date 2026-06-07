@@ -22,3 +22,6 @@ oauth_refresh:
 
 serves:
   openai-responses: "/v1"
+  # OpenAI also exposes chat-completions at /v1, so openai-chat harnesses
+  # (opencode, pi) and vibe can route to it too — not just codex (responses).
+  openai-chat: "/v1"

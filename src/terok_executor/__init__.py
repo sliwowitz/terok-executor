@@ -74,7 +74,7 @@ from .credentials.vault_commands import VAULT_COMMANDS, scan_leaked_credentials
 from .krun import KrunHost, KrunHostKeypair, ensure_krun_host_keypair
 
 # -- Provider (descriptor + headless behaviour, instructions, agent config) ----
-from .provider.agents import AgentConfigSpec, parse_md_agent, prepare_agent_config_dir
+from .provider.agents import AgentConfigSpec, prepare_agent_config_dir
 from .provider.instructions import bundled_default_instructions, resolve_instructions
 from .provider.providers import (
     AGENT_NAMES,
@@ -109,6 +109,13 @@ def _bootstrap_roster() -> None:
     AGENTS.update(roster.agents)
     AUTH_PROVIDERS.update(roster.auth_providers)
     AGENT_NAMES = _reg.AGENT_NAMES = roster.agent_names
+    _reg.OPENCODE_PROVIDERS.update(
+        {
+            p.name: p.opencode_config.config_dir
+            for p in roster.providers.values()
+            if p.opencode_config
+        }
+    )
 
 
 _bootstrap_roster()
@@ -128,7 +135,6 @@ __all__ = [
     "resolve_agent_value",
     # Agent config preparation
     "AgentConfigSpec",
-    "parse_md_agent",
     "prepare_agent_config_dir",
     # Auth
     "AUTH_PROVIDERS",

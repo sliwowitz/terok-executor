@@ -1047,6 +1047,11 @@ class AgentRunner:
         have no agent code that could leak it.
         """
         spec = self.roster.get_sidecar_spec(tool_name)
+        # A tool's credential is stored under its default provider when it has
+        # one (``gh`` → ``github``), mirroring how an agent keys to its provider;
+        # a tool without a provider binding keys under its own name.
+        auth_info = self.roster.auth_providers.get(tool_name)
+        provider_key = (auth_info.credential_provider if auth_info else "") or tool_name
         cfg = self.sandbox.config
         try:
             db = cfg.open_credential_db()
@@ -1057,7 +1062,7 @@ class AgentRunner:
             )
             return {}
         try:
-            cred = db.load_credential("default", tool_name)
+            cred = db.load_credential("default", provider_key)
         finally:
             db.close()
 
@@ -1101,7 +1106,6 @@ class AgentRunner:
         spec = AgentConfigSpec(
             tasks_root=task_dir.parent,
             task_id=task_id,
-            subagents=(),
             prompt=prompt,
             agent=agent,
             instructions=resolved_instructions,

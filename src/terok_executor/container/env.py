@@ -160,6 +160,16 @@ class ContainerEnvSpec:
     manages its own token.
     """
 
+    # -- Provider selection ------------------------------------------------
+
+    provider: str | None = None
+    """LLM endpoint provider the agent routes to at runtime (→ ``TEROK_PROVIDER``).
+
+    ``None`` leaves the agent on its own default endpoint.  When set, harness
+    wrappers (OpenCode today) select this provider unless overridden by an
+    explicit ``--provider`` flag.  The per-provider credentials/URLs are
+    materialized separately as ``TEROK_PROVIDER_{NAME}_*``."""
+
     # -- Permissions -------------------------------------------------------
 
     unrestricted: bool = True
@@ -269,6 +279,11 @@ def assemble_container_env(
     if tz := spec.timezone or detect_host_timezone():
         env["TZ"] = tz
 
+    # 1c. Selected provider — harness wrappers default their runtime --provider
+    # to this when no explicit flag is passed (see agent-wrappers.sh.j2).
+    if spec.provider:
+        env["TEROK_PROVIDER"] = spec.provider
+
     # 2. OpenCode provider env
     env.update(roster.collect_opencode_provider_env())
 
@@ -318,6 +333,7 @@ def assemble_container_env(
         mounts_base,
         providers=spec.enabled_vault_patch_providers,
         disabled_providers=spec.disabled_vault_patch_providers,
+        credential_set=spec.credential_set,
     )
 
     # 9. Vault
@@ -337,11 +353,16 @@ def assemble_container_env(
     # 9b. Leaked credential scan (runs regardless of caller_manages_vault —
     #     the shared mounts exist either way)
     if spec.scan_leaked_creds:
-        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+        _warn_leaked_credentials(mounts_base)
 
-        leaked = scan_leaked_credentials(mounts_base)
-        for provider, path in leaked:
-            _logger.warning("Real credential in shared mount: %s: %s", provider, path)
+    # 9c. Materialize exposed-credential providers into the same generic handle
+    #     as vault-routed ones, so harnesses (pi) select them uniformly via
+    #     --provider — no consumer special-cases the exposed set.  Runs regardless
+    #     of caller_manages_vault (exposed creds bypass the vault either way).
+    if spec.expose_credential_providers:
+        env.update(
+            _materialize_exposed_providers(roster, mounts_base, spec.expose_credential_providers)
+        )
 
     # 10. Agent config mount
     if spec.agent_config_dir:
@@ -367,6 +388,14 @@ def assemble_container_env(
 
 
 # ── Private helpers ──
+
+
+def _warn_leaked_credentials(mounts_base: Path) -> None:
+    """Log a warning for each real credential found in a shared mount."""
+    from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+    for provider, path in scan_leaked_credentials(mounts_base):
+        _logger.warning("Real credential in shared mount: %s: %s", provider, path)
 
 
 def _resolve_git_identity(spec: ContainerEnvSpec, roster: AgentRoster) -> dict[str, str]:
@@ -435,6 +464,61 @@ def _shared_config_mounts(
         specs.append(VolumeSpec(host_file, container_file, read_only=True))
 
     return specs
+
+
+def _set_provider_handle(
+    env: dict[str, str],
+    provider: str,
+    token: str,
+    base_prefix: str,
+    serves: dict[str, str],
+) -> None:
+    """Materialize the generic ``TEROK_PROVIDER_<NAME>_*`` handle a harness reads
+    to select *provider* at runtime via ``--provider``.
+
+    Writes the bearer token plus a per-protocol base URL (``base_prefix`` + the
+    provider's served path).  Routed providers pass the vault loopback as
+    *base_prefix* and a phantom *token*; exposed providers pass the upstream
+    directly and the real token — same handle shape either way, so a consumer
+    treats both uniformly.
+    """
+    handle = provider.upper()
+    env[f"TEROK_PROVIDER_{handle}_TOKEN"] = token
+    for proto, path in serves.items():
+        proto_var = proto.upper().replace("-", "_")
+        env[f"TEROK_PROVIDER_{handle}_BASE_{proto_var}"] = f"{base_prefix}{path}"
+
+
+def _materialize_exposed_providers(
+    roster: AgentRoster, mounts_base: Path, expose_credential_providers: frozenset[str]
+) -> dict[str, str]:
+    """Materialize ``TEROK_PROVIDER_<NAME>_*`` handles for exposed providers.
+
+    Exposed mode bypasses the vault: the real token is written only to the
+    provider's credential mount.  Read it (host-side) and emit the same handle a
+    vault-routed provider gets — real token, base pointing at the upstream
+    directly — so a harness selects exposed and proxied providers uniformly.
+    Missing or unreadable credentials are skipped.
+    """
+    from terok_executor.credentials.extractors import extract_credential
+
+    env: dict[str, str] = {}
+    for entry in expose_credential_providers:
+        auth_info = roster.auth_providers.get(entry)
+        if not auth_info:
+            continue
+        provider_name = auth_info.credential_provider or entry
+        provider = roster.providers.get(provider_name)
+        if not (provider and provider.serves):
+            continue
+        try:
+            cred = extract_credential(entry, mounts_base / auth_info.host_dir_name)
+        except ValueError:
+            continue
+        token = cred.get("access_token") or cred.get("token") or cred.get("key")
+        if token:
+            _set_provider_handle(env, provider_name, token, provider.upstream, provider.serves)
+    return env
 
 
 def _inject_vault_tokens(
@@ -543,10 +627,21 @@ def _inject_vault_tokens(
         if route.base_url_env:
             env[route.base_url_env] = location.url
 
-        # OpenCode base URL override for proxied providers.
-        agent = roster.agents.get(name)
-        if agent and agent.opencode_config:
-            env[f"TEROK_OC_{name.upper()}_BASE_URL"] = f"{location.url}/v1"
+        # OpenCode base URL override for proxied providers — point the wrapper
+        # at the vault loopback (with the provider's served path) instead of
+        # its direct endpoint.  Using the served path is what gets OpenRouter's
+        # mandatory ``/api`` segment right (``/api/v1``, not ``/v1``).
+        provider = roster.providers.get(name)
+        if provider and provider.opencode_config:
+            oc_path = provider.serves.get("openai-chat", "/v1")
+            env[f"TEROK_OC_{name.upper()}_BASE_URL"] = f"{location.url}{oc_path}"
+
+        # Materialize a generic per-provider handle so a harness (opencode, pi)
+        # can select ANY authenticated, protocol-compatible provider at runtime
+        # via --provider — not just its bound default.  Routed providers go
+        # through the vault, so the base is the loopback plus the served path.
+        if provider and provider.serves:
+            _set_provider_handle(env, name, tokens[name], location.url, provider.serves)
         # The gitlab provider (glab CLI) uses its own host+protocol split; in
         # socket mode it rides the same in-container loopback bridge as every
         # other HTTP-only client.

@@ -6,7 +6,7 @@
 # Not an agent or tool: pulled in via ``install.depends_on: [caddy]``.
 roster_version: 2
 
-kind: runtime
+kind: infra
 label: Caddy
 
 install:

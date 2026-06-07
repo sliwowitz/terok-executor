@@ -40,11 +40,23 @@ CONTAINER_WORKSPACE = "/workspace"
 
 _TEMPLATE_NAME = "agent-wrappers.sh.j2"
 
+_PROVIDER_LAUNCHERS: dict[str, str] = {
+    "opencode": "opencode-provider",
+    "codex": "codex-provider",
+    "vibe": "vibe-provider",
+}
+"""Agents whose wrapper routes a runtime-selected provider through a launcher script.
+
+A selected provider (``TEROK_PROVIDER`` or an explicit ``--provider``) is handed
+to the named ``*-provider`` script, which rewrites the agent's config to point
+at that provider before launching it.  Claude takes its override as plain
+environment instead (see the ``claude`` wrapper) and so is absent here."""
+
 
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
-def generate_all_wrappers(has_agents: bool) -> str:
+def generate_all_wrappers() -> str:
     """Render ``terok-executor.sh``: a shell wrapper function for every agent.
 
     The output file contains a shell function per agent (``claude()``,
@@ -52,16 +64,12 @@ def generate_all_wrappers(has_agents: bool) -> str:
     support, and session-resume logic, plus the two shared helper functions
     they call.  This lets interactive CLI users invoke any agent regardless of
     which agent was configured as default.
-
-    Args:
-        has_agents: Whether an ``agents.json`` was written — adds Claude's
-            ``--agents`` flag to the ``claude()`` wrapper.
     """
     agents = [_wrapper_context(a) for a in AGENTS.values()]
-    return _env().from_string(_template_source()).render(agents=agents, has_agents=has_agents)
+    return _env().from_string(_template_source()).render(agents=agents)
 
 
-def generate_agent_wrapper(agent: Agent, has_agents: bool = False) -> str:
+def generate_agent_wrapper(agent: Agent) -> str:
     """Render a single agent's wrapper function, without the shared helpers.
 
     Used to inspect one agent's wrapper in isolation; the full file (with
@@ -74,7 +82,7 @@ def generate_agent_wrapper(agent: Agent, has_agents: bool = False) -> str:
     # attributes (claude_wrapper / generic_wrapper) are not statically known.
     macros: Any = _env().from_string(_template_source()).module
     if ctx["is_claude"]:
-        return str(macros.claude_wrapper(ctx, has_agents))
+        return str(macros.claude_wrapper(ctx))
     return str(macros.generic_wrapper(ctx))
 
 
@@ -97,12 +105,26 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         if session_path and agent.resume_flag
         else ""
     )
+    # Agents with a launcher run through a ``_runner`` array so a runtime
+    # provider selection can swap the binary for ``<launcher> --provider NAME``
+    # (which rewrites the agent's config before launching).  Every other agent
+    # runs its binary verbatim.
+    provider_launcher = _PROVIDER_LAUNCHERS.get(agent.name, "")
+    cmd = '"${_runner[@]}"' if provider_launcher else binary
+    if agent.name == "pi":
+        # Pi has no config-rewriting launcher; instead it runs through
+        # ``pi-provider``, which peeks/validates ``--provider``, scopes the picker
+        # via ``TEROK_PI_PROVIDER``, and opens Pi on the container default.
+        cmd = "pi-provider"
     return {
         "name": agent.name,
         "binary": binary,
         "is_claude": agent.name == "claude",
         "is_vibe": agent.name == "vibe",
         "is_codex": agent.name == "codex",
+        "is_opencode": agent.name == "opencode",
+        "provider_launcher": provider_launcher,
+        **_claude_provider_context(agent),
         "author_name": shlex.quote(agent.git_author_name),
         "author_email": shlex.quote(agent.git_author_email),
         "refuse_pattern": "|".join(agent.refuse_subcommands),
@@ -111,8 +133,32 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         "session_path": session_path,
         "resume_flag": agent.resume_flag or "",
         "seed_prefix": _seed_prefix(agent),
-        "headless_cmd": f'{wrap}timeout "$_timeout" {binary}{extra} "$@"',
-        "interactive_cmd": f'{wrap}command {binary}{extra} "$@"',
+        "headless_cmd": f'{wrap}timeout "$_timeout" {cmd}{extra} "$@"',
+        "interactive_cmd": f'{wrap}command {cmd}{extra} "$@"',
+    }
+
+
+def _claude_provider_context(agent: Agent) -> dict[str, str]:
+    """Resolve the env-var names Claude's wrapper uses to honor a selected provider.
+
+    Claude takes a runtime provider override as plain environment: the wrapper
+    points its base-URL and bearer vars at the selected provider's materialized
+    ``TEROK_PROVIDER_<NAME>_*`` handles.  The var names come straight from
+    Claude's roster entry so they cannot drift from its default routing.  Empty
+    strings for agents without a binding, which leave the block unrendered.
+    """
+    binding = agent.provider_binding
+    protocol = agent.protocol or ""
+    bearer_env = ""
+    base_url_env = ""
+    if binding is not None:
+        bearer_env = binding.token_env.get("oauth") or binding.token_env.get("_default") or ""
+        base_url_env = binding.base_url_env
+    return {
+        "provider_protocol": protocol,
+        "provider_protocol_var": protocol.upper().replace("-", "_"),
+        "provider_base_url_env": base_url_env,
+        "provider_bearer_env": bearer_env,
     }
 
 
@@ -129,11 +175,13 @@ def _extra_args_expansion(agent: Agent, session_path: str) -> str:
 
 
 def _opencode_plugin_dir(agent: Agent) -> str:
-    """Return the OpenCode session-plugin directory, or ``""`` when not applicable."""
+    """Return the OpenCode session-plugin directory, or ``""`` when not applicable.
+
+    Only the ``opencode`` harness itself carries this — the curated
+    OpenCode-driven providers run through its wrapper, not their own.
+    """
     if not (agent.session_file and agent.uses_opencode_instructions):
         return ""
-    if agent.opencode_config is not None:
-        return f"$HOME/{agent.opencode_config.config_dir}/opencode/plugins"
     return "$HOME/.config/opencode/plugins"
 
 

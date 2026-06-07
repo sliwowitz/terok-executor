@@ -23,6 +23,16 @@ _AGENT_NAME="Codex"
 _AGENT_EMAIL="noreply@openai.com"
 . /usr/local/share/terok/terok-acp-env.sh
 
+# With no provider selected the adapter routes through codex's config.toml,
+# which terok's config_patch already points at the vault (chatgpt_base_url → the
+# /backend-api/ split → chatgpt.com).  A selected provider (TEROK_PROVIDER)
+# re-points the adapter onto it: the same -c overrides the codex wrapper applies,
+# rendered here because codex-acp execs a different binary than the agent.
+_prov_args=()
+if [[ -n "${TEROK_PROVIDER:-}" ]] && command -v terok-native-provider >/dev/null 2>&1; then
+    mapfile -t -d '' _prov_args < <(terok-native-provider --emit codex)
+fi
+
 _args=()
 if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
     _args+=(-c approval_policy=never -c sandbox_mode=danger-full-access)
@@ -31,4 +41,4 @@ if [[ -f /home/dev/.terok/instructions.md ]]; then
     _args+=(-c 'model_instructions_file="/home/dev/.terok/instructions.md"')
 fi
 
-exec npx @zed-industries/codex-acp "${_args[@]}" "$@"
+exec npx @zed-industries/codex-acp "${_prov_args[@]}" "${_args[@]}" "$@"

@@ -19,6 +19,7 @@ and reads TEROK_OC_{NAME}_* environment variables for configuration.
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -47,15 +48,23 @@ _FALLBACK_PROVIDERS = {
 }
 
 
-def _resolve_provider_config() -> dict[str, str]:
-    """Resolve provider configuration from environment variables or fallbacks."""
-    name = os.path.basename(sys.argv[0])
+def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
+    """Resolve provider configuration from environment variables or fallbacks.
+
+    *name* selects the provider — the basename of ``argv[0]`` (the symlinked
+    command) by default, or an explicit ``--provider`` override.  A curated
+    provider carries full ``TEROK_OC_{NAME}_*`` config; any other authenticated
+    provider the host materialized exposes a generic
+    ``TEROK_PROVIDER_{NAME}_BASE_OPENAI_CHAT`` handle, in which case models are
+    discovered from the API rather than pinned.
+    """
+    if name is None:
+        name = os.path.basename(sys.argv[0])
     prefix = f"TEROK_OC_{name.upper()}_"
 
-    # Try to read from environment variables first
+    # Curated provider — full TEROK_OC_* config injected by the host.
     base_url = os.environ.get(f"{prefix}BASE_URL")
     if base_url:
-        # Environment variables present - use them
         return {
             "name": name,
             "display_name": os.environ.get(f"{prefix}DISPLAY_NAME", name),
@@ -64,6 +73,20 @@ def _resolve_provider_config() -> dict[str, str]:
             "fallback_model": os.environ.get(f"{prefix}FALLBACK_MODEL", ""),
             "env_var_prefix": os.environ.get(f"{prefix}ENV_VAR_PREFIX", name.upper()),
             "config_dir": os.environ.get(f"{prefix}CONFIG_DIR", f".{name}"),
+        }
+
+    # Generic provider — any authenticated, openai-chat-compatible provider
+    # the host materialized via TEROK_PROVIDER_{NAME}_*.  No pinned models.
+    generic_base = os.environ.get(f"TEROK_PROVIDER_{name.upper()}_BASE_OPENAI_CHAT")
+    if generic_base:
+        return {
+            "name": name,
+            "display_name": name,
+            "base_url": generic_base,
+            "preferred_model": "",
+            "fallback_model": "",
+            "env_var_prefix": name.upper(),
+            "config_dir": f".{name}",
         }
 
     # Fallback to hardcoded defaults for manual invocation
@@ -84,7 +107,16 @@ def _config_path(config: dict[str, str]) -> Path:
 
 
 def _load_api_key(config: dict[str, str]) -> str | None:
-    """Load API key from environment or config file."""
+    """Load API key from environment or config file.
+
+    Generic providers carry their phantom key in ``TEROK_PROVIDER_{NAME}_TOKEN``;
+    curated ones also expose it under ``{PREFIX}_API_KEY``.  Both hold the same
+    vault token, so either is fine — the generic var is checked first so an
+    arbitrary ``--provider`` selection works without a curated prefix.
+    """
+    token = os.environ.get(f"TEROK_PROVIDER_{config['name'].upper()}_TOKEN")
+    if token:
+        return token
     env_var = config["env_var_prefix"] + "_API_KEY"
     api_key = os.environ.get(env_var)
     if api_key:
@@ -284,7 +316,16 @@ def _write_opencode_config(config: dict[str, str], content: dict) -> Path:
 
 def main() -> int:
     """Main entry point for the unified provider launcher."""
-    config = _resolve_provider_config()
+    # The provider comes from either the invoked command name (a symlink like
+    # ``blablador``) or an explicit ``--provider`` (what the ``opencode`` wrapper
+    # passes for a runtime selection).  Resolve it *before* building the full
+    # parser, whose help text embeds the resolved provider's config — otherwise
+    # ``opencode-provider --provider X`` would resolve the literal command name
+    # ``opencode-provider`` and fail with "Unknown provider".
+    _pre = argparse.ArgumentParser(add_help=False)
+    _pre.add_argument("--provider", default=None)
+    _selected, _ = _pre.parse_known_args()
+    config = _resolve_provider_config(_selected.provider)
 
     parser = argparse.ArgumentParser(
         prog=config["name"],
@@ -303,8 +344,16 @@ def main() -> int:
         default=None,
         help=f"Override API base URL (default: {config['base_url']})",
     )
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="Run against a specific authenticated provider (overrides the command name)",
+    )
 
     args, opencode_args = parser.parse_known_args()
+    # ``config`` is already resolved from ``--provider`` (or argv[0]) above; the
+    # full parse here just keeps ``--provider`` out of the args forwarded to
+    # opencode.
 
     # Load and validate API key
     api_key = _load_api_key(config)
@@ -380,10 +429,45 @@ def main() -> int:
     cmd = ["opencode"] + opencode_args
     env = {**os.environ, "OPENCODE_CONFIG": str(_opencode_config_path(config))}
 
+    # Pinned-alias commands (e.g. ``blablador``) symlink straight to this
+    # launcher, bypassing the generated shell wrapper that applies the task's
+    # git authorship — so re-apply it here.  The wrapper-driven ``--provider``
+    # path (invoked as ``opencode-provider``) has already set the identity.
+    if os.path.basename(sys.argv[0]) != "opencode-provider":
+        return _launch_with_git_identity(config["name"], cmd, env)
+
     try:
         return subprocess.call(cmd, env=env)
     except FileNotFoundError:
         raise SystemExit("opencode not found. Rebuild the L1 CLI image to install it.")
+
+
+_GIT_IDENTITY_HELPER = "/usr/local/share/terok/terok-env-git-identity.sh"
+"""Shell helper defining ``_terok_apply_git_identity`` — the single source of the
+container's git author/committer policy (staged by the L1 Dockerfile)."""
+
+
+def _launch_with_git_identity(provider_name: str, cmd: list[str], env: dict[str, str]) -> int:
+    """Run *cmd* after applying the task's git authorship for *provider_name*.
+
+    Sources the shared shell helper so a pinned-alias launch commits under the
+    same author/committer the generated wrappers would have set — the provider
+    name doubles as the agent display name (``blablador`` → ``Blablador``),
+    matching the ACP wrapper.  Falls back to a plain launch when the helper is
+    absent (standalone images).
+    """
+    if not os.path.exists(_GIT_IDENTITY_HELPER):
+        return subprocess.call(cmd, env=env)
+    agent_name = provider_name[:1].upper() + provider_name[1:]
+    agent_email = f"noreply@{provider_name}.localhost"
+    shim = (
+        f". {shlex.quote(_GIT_IDENTITY_HELPER)} && "
+        '_terok_apply_git_identity "$1" "$2" && shift 2 && exec "$@"'
+    )
+    try:
+        return subprocess.call(["bash", "-c", shim, "bash", agent_name, agent_email, *cmd], env=env)
+    except FileNotFoundError:
+        raise SystemExit("bash not found; cannot apply git identity for the pinned alias.")
 
 
 if __name__ == "__main__":

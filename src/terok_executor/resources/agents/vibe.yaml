@@ -71,9 +71,12 @@ install:
         cp /tmp/terok-scripts/terok-vibe-acp /usr/local/bin/terok-vibe-acp; \
         cp /tmp/terok-scripts/vibe-model-sync.sh /usr/local/bin/vibe-model-sync; \
         cp /tmp/terok-scripts/mistral-model-sync.py /usr/local/bin/mistral-model-sync.py; \
+        cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
         chmod +x /usr/local/bin/terok-vibe-acp \
                  /usr/local/bin/vibe-model-sync \
-                 /usr/local/bin/mistral-model-sync.py; \
+                 /usr/local/bin/mistral-model-sync.py \
+                 /usr/local/bin/terok-native-provider; \
+        ln -sf terok-native-provider /usr/local/bin/vibe-provider; \
         pipx install mistral-vibe; \
         pipx inject mistral-vibe mistralai
 
