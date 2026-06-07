@@ -37,7 +37,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
-from terok_executor.provider.providers import Agent, ProviderBinding
+from terok_executor.provider.providers import Agent, Launcher, ProviderBinding
 
 from .types import (
     HELP_SECTIONS,
@@ -127,10 +127,22 @@ class RawCapabilities(StrictModel):
     log_format: Literal["plain", "claude-stream-json"] = "plain"
 
 
+class RawLauncher(StrictModel):
+    """``wrapper.launcher:`` — the per-task launcher script and when it runs."""
+
+    script: str
+    mode: Literal["on_provider_select", "always"]
+
+    def to_dataclass(self) -> Launcher:
+        """Project to a runtime [`Launcher`][terok_executor.provider.providers.Launcher]."""
+        return Launcher(script=self.script, mode=self.mode)
+
+
 class RawWrapper(StrictModel):
     """``wrapper:`` — in-container shell-wrapper behavior."""
 
     refuse_subcommands: list[str] = Field(default_factory=list)
+    launcher: RawLauncher | None = None
 
 
 class RawOpenCode(StrictModel):
@@ -538,6 +550,7 @@ class RawAgentYaml(StrictModel):
             refuse_subcommands=tuple(wrap.refuse_subcommands),
             protocol=self.protocol,
             provider_binding=self.provider.to_dataclass() if self.provider else None,
+            launcher=wrap.launcher.to_dataclass() if wrap.launcher else None,
         )
 
 
@@ -555,6 +568,7 @@ __all__ = [
     "RawInstall",
     "RawMountSpec",
     "RawOAuthRefresh",
+    "RawLauncher",
     "RawOpenCode",
     "RawProvider",
     "RawProviderAuth",

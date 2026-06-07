@@ -150,6 +150,36 @@ class ProviderBinding:
     """Optional shared-config patch applied after auth (e.g. Codex/Vibe config.toml)."""
 
 
+LAUNCHER_ON_PROVIDER_SELECT = "on_provider_select"
+"""Launcher mode: run only when a provider override is selected (default = bare binary)."""
+
+LAUNCHER_ALWAYS = "always"
+"""Launcher mode: run on every invocation (the launcher does per-run prep)."""
+
+
+@dataclass(frozen=True)
+class Launcher:
+    """How an agent's wrapper hands off to a per-task launcher script.
+
+    A launcher script preps the agent — rewrites provider config, scopes a
+    picker, injects instructions — before exec-ing the binary.  ``mode`` decides
+    when the wrapper routes through it:
+
+    - [`LAUNCHER_ON_PROVIDER_SELECT`][terok_executor.provider.providers.LAUNCHER_ON_PROVIDER_SELECT]
+      — only when a provider override is selected; the default path runs the bare
+      binary (a config-rewriting launcher has nothing to do without a selection).
+    - [`LAUNCHER_ALWAYS`][terok_executor.provider.providers.LAUNCHER_ALWAYS] —
+      every invocation (the launcher does per-run prep the bare binary can't,
+      such as instruction injection).
+    """
+
+    script: str
+    """Launcher script name on PATH (e.g. ``"pi-provider"``)."""
+
+    mode: str
+    """When the launcher runs — one of the ``LAUNCHER_*`` modes."""
+
+
 @dataclass(frozen=True)
 class Agent:
     """Describes how to run one AI coding agent (all modes: interactive + headless)."""
@@ -262,6 +292,12 @@ class Agent:
     """How this agent routes to a provider — see [`ProviderBinding`][terok_executor.provider.providers.ProviderBinding].
 
     ``None`` for entries with no vault route of their own (harnesses, copilot)."""
+
+    launcher: Launcher | None = None
+    """Per-task launcher the wrapper hands off to — see [`Launcher`][terok_executor.provider.providers.Launcher].
+
+    ``None`` runs the bare binary (any provider override arriving via env instead,
+    e.g. Claude)."""
 
     @property
     def uses_opencode_instructions(self) -> bool:

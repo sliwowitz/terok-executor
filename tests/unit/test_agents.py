@@ -110,6 +110,12 @@ class TestRuntimeProviderWrappers:
         wrapper = generate_agent_wrapper(AGENTS["opencode"])
         assert '_runner=(opencode-provider --provider "$_provider")' in wrapper
 
+    def test_pi_always_routes_through_its_launcher(self) -> None:
+        """Pi (launcher mode ``always``) runs pi-provider every launch, no _runner array."""
+        wrapper = generate_agent_wrapper(AGENTS["pi"])
+        assert "pi-provider" in wrapper
+        assert "_runner=(" not in wrapper
+
     def test_harnesses_declare_manifest_protocol(self) -> None:
         """opencode/pi declare openai-chat so the readiness manifest surfaces them
         paired with openai-chat providers — the universal cross-provider path."""
