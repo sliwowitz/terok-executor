@@ -553,6 +553,7 @@ def _inject_vault_tokens(
     gates DB-level failure handling: a hard failure (terok project mode)
     versus a soft-fail to an empty dict (standalone default).
     """
+    from terok_executor.credentials.extractors import credential_type
     from terok_executor.integrations.sandbox import SandboxConfig
 
     cfg = SandboxConfig()
@@ -581,7 +582,7 @@ def _inject_vault_tokens(
         tokens: dict[str, str] = {}
         for name in routed:
             cred = db.load_credential(credential_set, name)
-            credential_types[name] = (cred.get("type") if cred else None) or "api_key"
+            credential_types[name] = credential_type(cred)
             tokens[name] = db.create_token(scope, task_id, credential_set, name)
 
         # Per-container port if the caller allocated one (production
