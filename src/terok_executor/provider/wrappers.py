@@ -24,7 +24,7 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment
 
-from .providers import AGENTS, Agent
+from .providers import AGENTS, LAUNCHER_ALWAYS, LAUNCHER_ON_PROVIDER_SELECT, Agent
 
 INITIAL_PROMPT_PATH = "/home/dev/.terok/initial-prompt.txt"
 """Container path of the per-task initial prompt the TUI/CLI writes at launch."""
@@ -39,18 +39,6 @@ CONTAINER_WORKSPACE = "/workspace"
 """Container path the host-side repo is bind-mounted at (see container/env.py)."""
 
 _TEMPLATE_NAME = "agent-wrappers.sh.j2"
-
-_PROVIDER_LAUNCHERS: dict[str, str] = {
-    "opencode": "opencode-provider",
-    "codex": "codex-provider",
-    "vibe": "vibe-provider",
-}
-"""Agents whose wrapper routes a runtime-selected provider through a launcher script.
-
-A selected provider (``TEROK_PROVIDER`` or an explicit ``--provider``) is handed
-to the named ``*-provider`` script, which rewrites the agent's config to point
-at that provider before launching it.  Claude takes its override as plain
-environment instead (see the ``claude`` wrapper) and so is absent here."""
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -105,17 +93,23 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         if session_path and agent.resume_flag
         else ""
     )
-    # Agents with a launcher run through a ``_runner`` array so a runtime
-    # provider selection can swap the binary for ``<launcher> --provider NAME``
-    # (which rewrites the agent's config before launching).  Every other agent
-    # runs its binary verbatim.
-    provider_launcher = _PROVIDER_LAUNCHERS.get(agent.name, "")
-    cmd = '"${_runner[@]}"' if provider_launcher else binary
-    if agent.name == "pi":
-        # Pi has no config-rewriting launcher; instead it runs through
-        # ``pi-provider``, which peeks/validates ``--provider``, scopes the picker
-        # via ``TEROK_PI_PROVIDER``, and opens Pi on the container default.
-        cmd = "pi-provider"
+    # The agent's launcher (declared in its YAML ``wrapper.launcher``) decides
+    # how the command is built.  ``on_provider_select`` agents run through a
+    # ``_runner`` array so a runtime selection can swap the bare binary for
+    # ``<launcher> --provider NAME`` (which rewrites their config); the
+    # ``provider_launcher`` value drives that array in the template.  ``always``
+    # agents run their launcher on every invocation (it does per-run prep, e.g.
+    # picker scoping + instruction injection).  No launcher → the bare binary.
+    launcher = agent.launcher
+    if launcher is not None and launcher.mode == LAUNCHER_ALWAYS:
+        provider_launcher = ""
+        cmd = launcher.script
+    elif launcher is not None and launcher.mode == LAUNCHER_ON_PROVIDER_SELECT:
+        provider_launcher = launcher.script
+        cmd = '"${_runner[@]}"'
+    else:
+        provider_launcher = ""
+        cmd = binary
     return {
         "name": agent.name,
         "binary": binary,

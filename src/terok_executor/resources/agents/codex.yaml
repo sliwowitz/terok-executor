@@ -30,6 +30,9 @@ capabilities:
 # instead; the egress firewall blocks the OAuth handshake either way.
 wrapper:
   refuse_subcommands: [login, logout]
+  launcher:
+    script: codex-provider
+    mode: on_provider_select
 
 # The endpoint Codex routes to (upstream, the /backend-api/ → chatgpt.com
 # split, token refresh) lives in resources/providers/openai.yaml.

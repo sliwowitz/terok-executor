@@ -20,6 +20,15 @@ binary: pi
 # with every authenticated openai-chat provider (see pi-vault-routes.ts).
 protocol: openai-chat
 
+# Pi runs through pi-provider on every launch (mode: always): it scopes the
+# picker to the selected/default provider and injects the per-task instructions,
+# work the bare binary can't do.  The other launchers route only on an explicit
+# provider selection; Pi needs its prep unconditionally.
+wrapper:
+  launcher:
+    script: pi-provider
+    mode: always
+
 git_identity:
   name: Pi
   email: noreply@earendil.works

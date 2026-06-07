@@ -13,6 +13,11 @@ binary: opencode
 # authenticated openai-chat provider — the universal cross-provider path.
 protocol: openai-chat
 
+wrapper:
+  launcher:
+    script: opencode-provider
+    mode: on_provider_select
+
 git_identity:
   name: OpenCode
   email: noreply@opencode.ai

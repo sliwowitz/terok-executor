@@ -7,6 +7,11 @@ kind: native
 label: Mistral Vibe
 binary: vibe
 
+wrapper:
+  launcher:
+    script: vibe-provider
+    mode: on_provider_select
+
 git_identity:
   name: Vibe
   email: noreply@mistral.ai
