@@ -708,7 +708,7 @@ def _capture_credentials(
     is **not** stored in the vault DB — Claude manages its own token lifecycle
     directly, and vault-side refresh would invalidate the exposed token.
     """
-    from .extractors import extract_credential
+    from .extractors import CRED_TYPE_OAUTH, credential_type, extract_credential
 
     try:
         cred_data = extract_credential(provider_name, auth_dir)
@@ -730,7 +730,7 @@ def _capture_credentials(
                 print(f"  {f}")
         return
 
-    is_oauth = cred_data.get("type") == "oauth"
+    is_oauth = credential_type(cred_data) == CRED_TYPE_OAUTH
     post_capture = _OAUTH_MOUNT_WRITERS.get(provider_name) if is_oauth else None
     # Tier 3 bypass: the host-side vault never refreshes the token, so the
     # container must own its lifecycle.  Storing in the DB would let the

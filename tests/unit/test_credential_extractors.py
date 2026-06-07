@@ -11,6 +11,9 @@ from pathlib import Path
 import pytest
 
 from terok_executor.credentials.extractors import (
+    CRED_TYPE_API_KEY,
+    CRED_TYPE_OAUTH,
+    credential_type,
     extract_api_key_env,
     extract_claude_oauth,
     extract_codex_oauth,
@@ -19,6 +22,19 @@ from terok_executor.credentials.extractors import (
     extract_glab_token,
     extract_json_api_key,
 )
+
+
+class TestCredentialType:
+    """``credential_type`` reads the stored type, defaulting to api-key."""
+
+    def test_reads_stored_type(self) -> None:
+        assert credential_type({"type": CRED_TYPE_OAUTH}) == CRED_TYPE_OAUTH
+
+    def test_absent_field_defaults_to_api_key(self) -> None:
+        assert credential_type({"key": "sk-x"}) == CRED_TYPE_API_KEY
+
+    def test_none_record_defaults_to_api_key(self) -> None:
+        assert credential_type(None) == CRED_TYPE_API_KEY
 
 
 class TestClaudeOAuth:

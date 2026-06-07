@@ -33,6 +33,24 @@ from .vendor_files import (
 )
 
 # ---------------------------------------------------------------------------
+# Stored credential type (the ``type`` annotation terok keeps beside the token)
+# ---------------------------------------------------------------------------
+
+CRED_TYPE_KEY = "type"
+CRED_TYPE_OAUTH = "oauth"
+CRED_TYPE_API_KEY = "api_key"
+
+
+def credential_type(cred: dict | None) -> str:
+    """Return a stored credential's ``type``, defaulting to api-key.
+
+    Centralises the ``type``/``api_key`` literals the token-injection and
+    post-auth paths share; a missing record or absent field reads as an API key.
+    """
+    return (cred or {}).get(CRED_TYPE_KEY) or CRED_TYPE_API_KEY
+
+
+# ---------------------------------------------------------------------------
 # Individual extractors (scannable catalog entries)
 # ---------------------------------------------------------------------------
 
