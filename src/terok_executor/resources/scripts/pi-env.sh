@@ -17,15 +17,20 @@ export PI_OFFLINE=1
 # Pi reaches Anthropic (and the rest) without an env alias or a credential-file
 # read in this snippet.
 
-# Symlink terok's vault-routing extension into Pi's auto-discovery dir
+# Symlink terok's Pi extensions into Pi's auto-discovery dir
 # (~/.pi/agent/extensions/).  Pi only auto-discovers ``*.ts`` extensions, so the
-# link must be ``.ts`` (the file is plain ESM, which is valid TypeScript).  We
-# ship it at a system-wide path because the user's config dir is a bind mount we
-# don't own.
-_pi_ext_link="${HOME}/.pi/agent/extensions/terok-vault-routes.ts"
-_pi_ext_src="/usr/local/share/terok/pi-extensions/vault-routes.ts"
-if [ -f "$_pi_ext_src" ] && [ ! -L "$_pi_ext_link" ]; then
-    mkdir -p "$(dirname "$_pi_ext_link")"
-    ln -sf "$_pi_ext_src" "$_pi_ext_link"
+# links must be ``.ts`` (the files are plain ESM, which is valid TypeScript).  We
+# ship them at a system-wide path because the user's config dir is a bind mount
+# we don't own.  Linking the whole directory keeps this snippet agnostic to how
+# many extensions terok ships (vault-routes, git-identity, …).
+_pi_ext_dir="/usr/local/share/terok/pi-extensions"
+_pi_ext_link_dir="${HOME}/.pi/agent/extensions"
+if [ -d "$_pi_ext_dir" ]; then
+    mkdir -p "$_pi_ext_link_dir"
+    for _pi_ext_src in "$_pi_ext_dir"/*.ts; do
+        [ -f "$_pi_ext_src" ] || continue
+        _pi_ext_link="${_pi_ext_link_dir}/terok-$(basename "$_pi_ext_src")"
+        [ -L "$_pi_ext_link" ] || ln -sf "$_pi_ext_src" "$_pi_ext_link"
+    done
 fi
-unset _pi_ext_link _pi_ext_src
+unset _pi_ext_dir _pi_ext_link_dir _pi_ext_src _pi_ext_link

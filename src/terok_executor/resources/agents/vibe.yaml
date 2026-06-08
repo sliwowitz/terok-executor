@@ -13,8 +13,8 @@ wrapper:
     mode: on_provider_select
 
 git_identity:
-  name: Vibe
-  email: noreply@mistral.ai
+  name: Mistral Vibe
+  email: vibe@mistral.ai
 
 headless:
   prompt_flag: "--prompt"
