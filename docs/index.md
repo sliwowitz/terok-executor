@@ -2,7 +2,7 @@
 
 `terok-executor` runs an AI coding agent inside a hardened, rootless
 Podman container — one CLI command to launch, or one Python class to
-embed in your own tooling.
+embed in your own tooling. It is the single-task runtime used by [terok](https://terok-ai.github.io/terok/).
 
 ![terok ecosystem — terok-executor sits between project orchestration and the hardened runtime](img/architecture.svg)
 
