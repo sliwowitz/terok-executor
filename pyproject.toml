@@ -58,7 +58,7 @@ version = "0.1.1a3"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = ">=4.0"
-ruff = ">=0.15.15"
+ruff = ">=0.15.16"
 bandit = ">=1.7"
 docstr-coverage = "^2.3.2"
 complexipy = ">=5.5.0"
