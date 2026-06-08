@@ -19,7 +19,7 @@ wrapper:
     mode: on_provider_select
 
 git_identity:
-  name: OpenCode
+  name: opencode
   email: noreply@opencode.ai
 
 headless:

@@ -477,6 +477,11 @@ _DEFAULT_CAPABILITIES = RawCapabilities()
 _DEFAULT_WRAPPER = RawWrapper()
 _DEFAULT_GIT_IDENTITY = RawGitIdentity()
 
+# Git author email for any agent whose roster entry omits ``git_identity.email``.
+# Deliberately terok's own domain — never a fabricated vendor address — so an
+# unconfigured agent is honestly attributed rather than impersonating a provider.
+_FALLBACK_GIT_EMAIL = "noreply@terok.ai"
+
 
 class RawAgentYaml(StrictModel):
     """Full schema for one agent YAML file.
@@ -531,7 +536,7 @@ class RawAgentYaml(StrictModel):
             label=self.resolve_label(name),
             binary=self.binary or name,
             git_author_name=gi.name or name.capitalize(),
-            git_author_email=gi.email or f"noreply@{name}.ai",
+            git_author_email=gi.email or _FALLBACK_GIT_EMAIL,
             headless_subcommand=hl.subcommand,
             prompt_flag=hl.prompt_flag,
             auto_approve_env=dict(aa.env),

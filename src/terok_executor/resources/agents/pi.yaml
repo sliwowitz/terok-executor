@@ -29,9 +29,14 @@ wrapper:
     script: pi-provider
     mode: always
 
+# Placeholder identity.  ``pi-git-identity.ts`` (installed below) rewrites this
+# slot at commit time to the live provider/model — ``Pi (<model>) <pi@<provider>>``
+# — while leaving the human committer terok sets untouched.  If that extension
+# ever fails to load, commits stay honestly attributed to terok's own domain
+# rather than a fabricated vendor address.
 git_identity:
   name: Pi
-  email: noreply@earendil.works
+  email: noreply@terok.ai
 
 headless:
   # ``pi --mode json "<prompt>"`` — prompt is positional, JSON event
@@ -70,6 +75,8 @@ install:
                 /etc/profile.d/pi-env.sh; \
         install -D -m 0644 /tmp/terok-scripts/pi-vault-routes.ts \
                 /usr/local/share/terok/pi-extensions/vault-routes.ts; \
+        install -D -m 0644 /tmp/terok-scripts/pi-git-identity.ts \
+                /usr/local/share/terok/pi-extensions/git-identity.ts; \
         install -m 0755 /tmp/terok-scripts/pi-provider /usr/local/bin/pi-provider
   run_as_dev: |
     RUN npm install -g @earendil-works/pi-coding-agent

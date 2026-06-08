@@ -9,7 +9,7 @@ binary: copilot
 
 git_identity:
   name: Copilot
-  email: noreply@github.com
+  email: copilot@github.com
 
 headless:
   prompt_flag: "-p"
