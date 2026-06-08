@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 #
+# shellcheck shell=bash
+#
 # /etc/profile.d/ snippet for Pi (https://pi.dev).  Sourced by every
 # login shell — including the ``bash -lc`` wrappers terok uses for
 # headless task runs, so the symlink + env aliases are in place before
@@ -25,12 +27,12 @@ export PI_OFFLINE=1
 # many extensions terok ships (vault-routes, git-identity, …).
 _pi_ext_dir="/usr/local/share/terok/pi-extensions"
 _pi_ext_link_dir="${HOME}/.pi/agent/extensions"
-if [ -d "$_pi_ext_dir" ]; then
+if [[ -d "$_pi_ext_dir" ]]; then
     mkdir -p "$_pi_ext_link_dir"
     for _pi_ext_src in "$_pi_ext_dir"/*.ts; do
-        [ -f "$_pi_ext_src" ] || continue
+        [[ -f "$_pi_ext_src" ]] || continue
         _pi_ext_link="${_pi_ext_link_dir}/terok-$(basename "$_pi_ext_src")"
-        [ -L "$_pi_ext_link" ] || ln -sf "$_pi_ext_src" "$_pi_ext_link"
+        [[ -L "$_pi_ext_link" ]] || ln -sf "$_pi_ext_src" "$_pi_ext_link"
     done
 fi
 unset _pi_ext_dir _pi_ext_link_dir _pi_ext_src _pi_ext_link

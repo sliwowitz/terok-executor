@@ -74,7 +74,7 @@ export function specializeGitIdentity(
 	return next;
 }
 
-export default function (pi: ExtensionAPI): void {
+export default function registerGitIdentity(pi: ExtensionAPI): void {
 	const cwd = process.cwd();
 	let provider = "unknown";
 	let modelId = "unknown";
