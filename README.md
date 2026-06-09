@@ -89,7 +89,8 @@ runs across many projects.  Below it, terok-executor delegates the
 host-side security boundary
 ([terok-sandbox](https://github.com/terok-ai/terok-sandbox)): the
 credential vault, the git gate, the egress firewall hooks, the
-systemd service lifecycle.
+per-container supervisor lifecycle (OCI `createRuntime`/`poststop`
+hooks).
 
 ## Commands
 

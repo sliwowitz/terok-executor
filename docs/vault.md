@@ -81,19 +81,18 @@ their SDK supports:
 gh has no env var for base URL. It supports `http_unix_socket` in its
 config file, which routes all API traffic through a Unix socket.
 
-The init script (`init-ssh-and-repo.sh`) starts a socat bridge:
+The `shared_config_patch` mechanism writes the vault socket path into
+`~/.config/gh/config.yml` during `terok-executor auth gh` — the
+`{vault_socket}` template token, resolved per transport mode:
 
-```bash
-socat UNIX-LISTEN:/tmp/terok-gh-proxy.sock,fork \
-  TCP:host.containers.internal:${TEROK_TOKEN_BROKER_PORT} &
-```
+- **socket mode**: `/run/terok/vault.sock` — the supervisor's vault
+  socket, bind-mounted into the container.
+- **TCP mode**: `/tmp/terok-vault.sock` — a socat bridge started by
+  terok-sandbox's `ensure-bridges.sh`, forwarding to
+  `host.containers.internal:${TEROK_TOKEN_BROKER_PORT}`.
 
-The socket is created **inside** the container by the container's own
-process. SELinux allows `container_t -> container_t` socket connections.
-The TCP hop to the host token broker crosses the container boundary safely.
-
-The `http_unix_socket` path is written to `~/.config/gh/config.yml`
-by the `shared_config_patch` mechanism during `terok-executor auth gh`.
+Either way gh's API traffic reaches the vault token broker, which
+substitutes the phantom token before forwarding upstream.
 
 ### YAML-driven shared_config_patch
 
@@ -148,9 +147,10 @@ vault:
   by the environment builder for glab specifically. glab has no YAML field
   for this because it's a routing concern, not a credential concern.
 
-- **socat bridge**: Started by `init-ssh-and-repo.sh` when `TEROK_TOKEN_BROKER_PORT`
-  and `GH_TOKEN` are both set. The socket path is hardcoded to
-  `/tmp/terok-gh-proxy.sock` (matching the `shared_config_patch`).
+- **socat bridge**: In TCP mode, terok-sandbox's `ensure-bridges.sh`
+  exposes the broker as `/tmp/terok-vault.sock` for socket-only clients
+  (gh, claude). In socket mode no bridge is needed — the broker socket is
+  bind-mounted at `/run/terok/vault.sock`.
 
 ## Auth Flow
 

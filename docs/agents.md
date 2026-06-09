@@ -9,6 +9,7 @@
 | Vibe | API key | Mistral Vibe |
 | Copilot | — | GitHub Copilot (not proxied yet) |
 | Blablador | API key | Helmholtz Blablador via OpenCode |
+| Pi | — (reuses co-installed providers) | [Pi](https://pi.dev/) multi-provider harness; routes through the phantom tokens of co-installed agents |
 | KISSKI | API key | KISSKI AcademicCloud via OpenCode |
 
 \* OAuth support for Claude and Codex is experimental.
