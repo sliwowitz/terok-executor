@@ -1,4 +1,14 @@
 # Changelog
+## v0.2.0 — Emissary, Part II
+
+## What's Changed
+* Jinja-templated agent wrappers + instruction-injection, https://github.com/terok-ai/terok-executor/pull/392
+* Suppor LLM providers × agents combinations, https://github.com/terok-ai/terok-executor/pull/393, https://github.com/terok-ai/terok-executor/pull/396
+* Provider-aware Pi git identity, https://github.com/terok-ai/terok-executor/pull/397
+* terok-sandbox vault lock and SSH routing, https://github.com/terok-ai/terok-executor/pull/403, https://github.com/terok-ai/terok-executor/pull/402
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.1.0...v0.2.0
+
 ## v0.1.0 — The Emissary
 
 **First public PyPi release**
