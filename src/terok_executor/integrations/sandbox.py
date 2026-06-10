@@ -69,6 +69,7 @@ from terok_sandbox import (  # noqa: F401 — re-exported public API
     stage_line,
     stamp_path,
     systemd_creds_has_tpm2,
+    write_sidecar,
     yaml_update_section,
 )
 from terok_sandbox.commands import (  # noqa: F401 — re-exported public API
@@ -121,5 +122,6 @@ __all__ = [
     "stage_line",
     "stamp_path",
     "systemd_creds_has_tpm2",
+    "write_sidecar",
     "yaml_update_section",
 ]

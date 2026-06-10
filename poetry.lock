@@ -3404,14 +3404,14 @@ terok-util = ">=0.2.0,<0.3.0"
 
 [[package]]
 name = "terok-sandbox"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["main"]
 files = [
-    {file = "terok_sandbox-0.2.0-py3-none-any.whl", hash = "sha256:c2a01b7eab09f115fbacc25392120f04e903494fa1ea520ed69f0c7c24621435"},
-    {file = "terok_sandbox-0.2.0.tar.gz", hash = "sha256:3be21a77976515d5123ebeb3795700403c6214a9f402ee8c17d02dfcc1755fae"},
+    {file = "terok_sandbox-0.3.0-py3-none-any.whl", hash = "sha256:54739389a0c13be67b5a86ad79d1e9cba852d33ba685b75f2f4f2604e36e4f14"},
+    {file = "terok_sandbox-0.3.0.tar.gz", hash = "sha256:9c3ebace7016586a671fbf741d960c7e0dec19bfc031933ed6a6eb6424b8de2b"},
 ]
 
 [package.dependencies]
@@ -3835,4 +3835,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "8d762656b923bf96483ae33930bb7d1ac7b4e37baa64e3b222deceb8f9632d52"
+content-hash = "0b926650d5ca583da1e25e06b0cb76545b3240d2672d078027c871878f227bdc"
