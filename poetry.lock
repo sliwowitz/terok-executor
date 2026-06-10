@@ -3404,13 +3404,15 @@ terok-util = ">=0.2.0,<0.3.0"
 
 [[package]]
 name = "terok-sandbox"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
-python-versions = ">=3.12,<4.0"
+python-versions = "<4.0,>=3.12"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "terok_sandbox-0.3.0-py3-none-any.whl", hash = "sha256:54739389a0c13be67b5a86ad79d1e9cba852d33ba685b75f2f4f2604e36e4f14"},
+    {file = "terok_sandbox-0.3.0.tar.gz", hash = "sha256:9c3ebace7016586a671fbf741d960c7e0dec19bfc031933ed6a6eb6424b8de2b"},
+]
 
 [package.dependencies]
 aiohttp = ">=3.14.1"
@@ -3426,12 +3428,6 @@ sqlcipher3 = ">=0.6.2"
 terok-clearance = ">=0.7.1,<0.8.0"
 terok-shield = ">=0.7.1,<0.8.0"
 terok-util = ">=0.2.0,<0.3.0"
-
-[package.source]
-type = "git"
-url = "https://github.com/sliwowitz/terok-sandbox.git"
-reference = "fix/supervisor-restart-sidecar"
-resolved_reference = "36f9d4427ca7cf9ceb03dac0a9c36b576c2de2b3"
 
 [[package]]
 name = "terok-shield"
@@ -3839,4 +3835,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "2b7fb8f3799002a30dcee6265c36445dca59ff1f7d8209f407d9c58376c6ff34"
+content-hash = "0b926650d5ca583da1e25e06b0cb76545b3240d2672d078027c871878f227bdc"
