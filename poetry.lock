@@ -3431,7 +3431,7 @@ terok-util = ">=0.2.0,<0.3.0"
 type = "git"
 url = "https://github.com/sliwowitz/terok-sandbox.git"
 reference = "fix/supervisor-restart-sidecar"
-resolved_reference = "50b0580d42cbcc3b30e137a5576375e84f0c984f"
+resolved_reference = "36f9d4427ca7cf9ceb03dac0a9c36b576c2de2b3"
 
 [[package]]
 name = "terok-shield"
