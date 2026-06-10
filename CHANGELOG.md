@@ -1,4 +1,10 @@
 # Changelog
+## v0.2.1 — Locks and Hooks
+
+Hotfix for supervisor restart [#406](https://github.com/terok-ai/terok-executor/pull/406)
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.2.0...v0.2.1
+
 ## v0.2.0 — Emissary, Part II
 
 ## What's Changed
