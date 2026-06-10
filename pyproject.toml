@@ -17,7 +17,9 @@ keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
 dependencies = [
-    "terok-sandbox>=0.2.0,<0.3.0",
+    # PR-chain pin: needs terok-sandbox's public write_sidecar (terok-ai/terok-sandbox#390).
+    # Re-pin to the release range once 0.2.1 ships.
+    "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox.git@fix/supervisor-restart-sidecar",
     "terok-util>=0.2.0,<0.3.0",
     "ruamel.yaml>=0.18",
     "Jinja2>=3.1",

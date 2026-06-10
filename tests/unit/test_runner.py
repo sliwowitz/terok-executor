@@ -596,7 +596,7 @@ class TestLaunchPrepared:
         dossier = tmp_path / "dossier.toml"
         dossier.write_text("")
 
-        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
                 env={},
                 volumes=[],
@@ -620,7 +620,7 @@ class TestLaunchPrepared:
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
-        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
                 env={},
                 volumes=[],
@@ -646,7 +646,7 @@ class TestLaunchPrepared:
         cfg = sandbox.config
         runner = AgentRunner(sandbox=sandbox)
 
-        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
                 env={"TEROK_GATE_TOKEN": "terok-g-cafef00d"},
                 volumes=[],
@@ -667,7 +667,7 @@ class TestLaunchPrepared:
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
-        with patch("terok_executor.container.sidecar.write_supervisor_sidecar") as write_sidecar:
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
                 env={},
                 volumes=[],
@@ -706,7 +706,7 @@ class TestLaunchPreparedSupervisorWiring:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch(
-            "terok_executor.container.sidecar.write_supervisor_sidecar",
+            "terok_executor.integrations.sandbox.write_sidecar",
             return_value=None,
         ):
             with pytest.raises(BuildError, match="refusing to launch an unsupervised container"):

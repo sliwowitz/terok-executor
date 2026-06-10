@@ -448,9 +448,8 @@ class AgentRunner:
             Sharing,
             VolumeSpec,
             allocate_per_container_resources,
+            write_sidecar,
         )
-
-        from .sidecar import write_supervisor_sidecar
 
         cfg = self.sandbox.config
 
@@ -502,7 +501,10 @@ class AgentRunner:
         # The terok-sandbox OCI hook installed by ``terok-sandbox setup``
         # reads this file on container start and spawns one supervisor
         # per container; without it the supervisor refuses to start.
-        sidecar_path = write_supervisor_sidecar(
+        # ``write_sidecar`` is sandbox's canonical writer — schema,
+        # reader, and teardown live in one package, so nothing here can
+        # drift from what the supervisor parses.
+        sidecar_path = write_sidecar(
             name,
             cfg=cfg,
             per_container=per_container,
