@@ -48,6 +48,16 @@ def test_handle_auth_oauth_path_routes_through_authenticator() -> None:
     cls.return_value.run.assert_called_once()
 
 
+def test_handle_auth_device_auth_forwards_to_run() -> None:
+    """``--device-auth`` rides through to ``Authenticator.run(device_auth=True)``."""
+    with (
+        mock.patch("terok_executor.credentials.auth.Authenticator") as cls,
+        mock.patch("terok_executor.credentials.vault_config.write_vault_config"),
+    ):
+        _handle_auth(agent="codex", device_auth=True)
+    assert cls.return_value.run.call_args.kwargs["device_auth"] is True
+
+
 def test_handle_auth_empty_api_key_raises() -> None:
     """Empty api_key surfaces as a clean SystemExit, not an obscure failure."""
     with pytest.raises(SystemExit, match="cannot be empty"):

@@ -338,8 +338,14 @@ def _handle_auth(
     agent: str,
     api_key: str | None = None,
     base_image: str | None = None,
+    device_auth: bool = False,
 ) -> None:
-    """Run auth flow for an agent."""
+    """Run auth flow for an agent.
+
+    With *device_auth* the interactive method chooser is skipped and the
+    provider's headless device-code login runs directly — for remote or
+    headless hosts where the browser callback can't open.
+    """
     from .credentials.auth import AUTH_PROVIDERS, Authenticator, store_api_key
 
     if api_key is not None:
@@ -361,6 +367,7 @@ def _handle_auth(
             None,
             mounts_dir=mounts_dir(),
             image=lambda: ImageBuilder(base).ensure_default_l1(),
+            device_auth=device_auth,
         )
 
     # Write vault URLs to shared config files (e.g. Vibe config.toml, gh config.yml)
@@ -773,6 +780,11 @@ AUTH_COMMAND = CommandDef(
     args=(
         ArgDef(name="agent", help="Agent or tool name (claude, codex, gh, ...)"),
         ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
+        ArgDef(
+            name="--device-auth",
+            action="store_true",
+            help="Force the headless device-code login (skip the method chooser)",
+        ),
         ArgDef(
             name="--base-image",
             help=(

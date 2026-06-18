@@ -36,6 +36,7 @@ def test_run_delegates_with_bound_provider() -> None:
         expose_token=True,
         oauth_enabled=False,
         credential_set="proj-123",
+        device_auth=False,
     )
 
 
@@ -51,7 +52,15 @@ def test_run_defaults_match_underlying_fn() -> None:
         expose_token=False,
         oauth_enabled=True,
         credential_set="default",
+        device_auth=False,
     )
+
+
+def test_run_forwards_device_auth() -> None:
+    """``device_auth=True`` rides through to the underlying fn."""
+    with mock.patch("terok_executor.credentials.auth.authenticate") as auth:
+        Authenticator("codex").run(None, mounts_dir=Path("/m"), device_auth=True)
+    assert auth.call_args.kwargs["device_auth"] is True
 
 
 def test_provider_is_frozen() -> None:
