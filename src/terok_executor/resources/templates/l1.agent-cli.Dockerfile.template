@@ -81,6 +81,7 @@ ARG AGENT_CACHE_BUST=0
 COPY scripts/ /tmp/terok-scripts/
 COPY help.d/ /usr/local/share/terok/help.d/
 COPY agent-protocols.json {{ agent_protocols_path }}
+COPY provider-protocols.json {{ provider_protocols_path }}
 
 # Always-on terok scripts (env helpers, banner, updaters).
 RUN set -eux; \

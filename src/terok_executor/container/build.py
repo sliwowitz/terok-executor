@@ -35,9 +35,11 @@ L1 is roster-driven: each agent's install steps live in its YAML file
 (``install.run_as_root`` / ``install.run_as_dev``), and the L1 template
 loops over the resolved selection.  Build emits an OCI label
 ``ai.terok.agents=<csv>``, an in-container manifest
-``/etc/terok/installed.env``, pre-rendered ``hilfe`` help fragments, and a
-baked agent→wire-protocol map (``agent-protocols.json``) that the
-in-container readiness check consumes — all derived from the same selection.
+``/etc/terok/installed.env``, pre-rendered ``hilfe`` dev-tool help
+fragments, and a baked per-agent facts map (``agent-protocols.json`` —
+wire protocol, default provider, and banner label) that the in-container
+readiness check and the ``hilfe`` agent banner consume — all derived from
+the same selection.
 """
 
 from __future__ import annotations
@@ -70,16 +72,38 @@ INSTALLED_ENV_PATH = "/etc/terok/installed.env"
 """In-container env file that scripts source to learn what's installed."""
 
 AGENT_PROTOCOLS_PATH = "/usr/local/share/terok/agent-protocols.json"
-"""In-container map of each installed agent to the wire protocol it speaks.
+"""In-container map of each installed agent to the roster facts the readiness
+check and the ``hilfe`` banner need.
 
-The readiness check (``terok-agents``) needs each agent's wire protocol to
-decide which authenticated providers it can talk to, and that mapping is the
-one piece of roster knowledge the container environment does not already
-carry.  Baked at L1 build time the same way the ``hilfe`` help fragments are,
-and read back by the in-container manifest generator."""
+Each entry carries the agent's wire ``protocol`` (which authenticated
+providers it can talk to), its default ``provider`` (for natives that bind
+one), and its banner ``label``.  These are the pieces of roster knowledge the
+container environment does not already carry.  Baked at L1 build time and read
+back by the in-container manifest generator (``terok-agents``).
 
-_HELP_SECTION_FILES: dict[str, str] = {"agent": "agents.txt", "dev_tool": "dev-tools.txt"}
-"""Maps each [`HelpSection`][terok_executor.roster.loader.HelpSection] to its fragment filename."""
+The filename is historical (it once held only protocols); the contents are now
+a small per-agent record.  Producer ([`stage_agent_facts`][terok_executor.container.build.stage_agent_facts])
+and consumer ship in the same wheel, baked into and read from the same image,
+so the shape is free to evolve in lockstep."""
+
+PROVIDER_PROTOCOLS_PATH = "/usr/local/share/terok/provider-protocols.json"
+"""In-container map of each wire protocol to the providers that serve it.
+
+The complement of [`AGENT_PROTOCOLS_PATH`][terok_executor.container.build.AGENT_PROTOCOLS_PATH]: agents say which protocol
+they speak, this says which providers speak it.  Lets ``hilfe`` list, under the
+providers section, the candidate providers a user could authenticate to enable
+a dimmed agent — including providers not yet authenticated, which the container
+environment does not carry.  Baked at L1 build time by
+[`stage_provider_protocols`][terok_executor.container.build.stage_provider_protocols]."""
+
+_HELP_SECTION_FILES: dict[str, str] = {"dev_tool": "dev-tools.txt"}
+"""Maps a [`HelpSection`][terok_executor.roster.loader.HelpSection] to its baked fragment filename.
+
+Only ``dev_tool`` is pre-rendered: dev tools aren't auth-gated, so a static
+``cat`` is enough.  The ``agent`` section is *not* baked here — the ``hilfe``
+banner renders it at runtime from the readiness manifest (so unusable agents
+can be dimmed), driven by the per-agent facts in ``agent-protocols.json``.
+"""
 
 _ESCAPE_RE = re.compile(r"\\(?:[0-7]{1,3}|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|[nrtbfav\\'\"])")
 """Backslash escapes recognised in roster ``help.label`` strings.
@@ -508,7 +532,8 @@ def build_base_images(
         try:
             prepare_build_context(context)
             stage_help_fragments(context / "help.d", selected)
-            stage_agent_protocols(context / "agent-protocols.json", selected)
+            stage_agent_facts(context / "agent-protocols.json", selected)
+            stage_provider_protocols(context / "provider-protocols.json", selected)
 
             # Single timestamp for both render and build-arg consistency
             cache_bust = str(int(time.time()))
@@ -741,6 +766,7 @@ def render_l1(
             "agents_label": AGENTS_LABEL,
             "installed_env_path": INSTALLED_ENV_PATH,
             "agent_protocols_path": AGENT_PROTOCOLS_PATH,
+            "provider_protocols_path": PROVIDER_PROTOCOLS_PATH,
         },
     )
 
@@ -816,23 +842,25 @@ def stage_toad_agents(dest: Path) -> None:
 
 
 def stage_help_fragments(dest: Path, agents: tuple[str, ...]) -> None:
-    """Render per-section ``hilfe`` help fragments into *dest*.
+    """Render the baked ``hilfe`` help fragments into *dest*.
 
-    Writes one file per section (currently ``agent`` and ``dev_tool``)
-    containing the labels of the selected agents that have a ``help:``
-    section, with backslash escapes (``\\033[...]``) interpreted into
-    real ANSI sequences so that ``hilfe`` only needs to ``cat`` them.
-    Empty sections are omitted entirely; ``hilfe`` skips missing files.
+    Writes one file per *bakeable* section — only ``dev_tool`` (see
+    [`_HELP_SECTION_FILES`][terok_executor.container.build._HELP_SECTION_FILES]) — holding the labels of the
+    selected entries that have a ``help:`` block, with backslash escapes
+    (``\\033[...]``) interpreted into real ANSI so that ``hilfe`` only needs to
+    ``cat`` them.  The ``agent`` section is deliberately not baked: ``hilfe``
+    renders it at runtime so unusable agents can be dimmed (see
+    [`stage_agent_facts`][terok_executor.container.build.stage_agent_facts]).  Empty sections are omitted;
+    ``hilfe`` skips missing files.
     """
     from terok_executor.roster import AgentRoster
 
-    roster = AgentRoster.shared()
-    helps = roster.helps
+    helps = AgentRoster.shared().helps
 
     by_section: dict[str, list[str]] = {}
     for name in agents:
         spec = helps.get(name)
-        if spec is None or not spec.label:
+        if spec is None or not spec.label or spec.section not in _HELP_SECTION_FILES:
             continue
         by_section.setdefault(spec.section, []).append(spec.label)
 
@@ -844,29 +872,80 @@ def stage_help_fragments(dest: Path, agents: tuple[str, ...]) -> None:
         (dest / _HELP_SECTION_FILES[section]).write_text(decoded, encoding="utf-8")
 
 
-def stage_agent_protocols(dest_file: Path, agents: tuple[str, ...]) -> None:
-    """Bake the agent→wire-protocol map for *agents* into *dest_file* as JSON.
+def stage_agent_facts(dest_file: Path, agents: tuple[str, ...]) -> None:
+    """Bake the per-agent facts the in-container readiness layer needs, as JSON.
 
-    Records the wire protocol of every selected entry that speaks one — the
-    LLM-backed agents (claude, codex, vibe).  Tools and harnesses are left
-    out: they carry no fixed protocol, so the in-container readiness check has
-    nothing to match them against a provider on.  This map is the only roster
-    fact that check cannot reconstruct from the container environment, so it
-    travels into the image the same way the ``hilfe`` help fragments do.
+    For every selected entry in the ``agent`` help section, records a small
+    record — ``{"protocol", "label"}`` — so that ``terok-agents`` can decide, at
+    runtime, whether each agent has an authenticated provider it can talk to,
+    and ``hilfe`` can render it bright or dimmed:
 
-    The file is always written — an empty object when nothing in the selection
-    speaks a protocol — so the Dockerfile ``COPY`` always has a source.
+    - ``protocol`` — the wire protocol the agent speaks (``None`` for entries
+      with no fixed protocol, e.g. the ``toad`` frontend).  An agent is usable
+      when *any* authenticated provider serves this protocol — not tied to a
+      single default — so the protocol, not a provider name, is the fact that
+      matters.  The provider→protocol universe is baked separately by
+      [`stage_provider_protocols`][terok_executor.container.build.stage_provider_protocols].
+    - ``label`` — the banner line, escapes already decoded to real ANSI.
+
+    These facts are the only roster knowledge the container environment cannot
+    reconstruct, so they travel into the image alongside the help fragments.
+    The file is always written — an empty object when the selection has no
+    agent-section entries — so the Dockerfile ``COPY`` always has a source.
     """
     from terok_executor.roster import AgentRoster
 
-    agents_by_name = AgentRoster.shared().agents
+    roster = AgentRoster.shared()
+    agents_by_name = roster.agents
+    helps = roster.helps
+
+    facts: dict[str, dict[str, str | None]] = {}
+    for name in agents:
+        spec = helps.get(name)
+        if spec is None or not spec.label or spec.section != "agent":
+            continue
+        agent = agents_by_name.get(name)
+        facts[name] = {
+            "protocol": agent.protocol if agent else None,
+            "label": _decode_label_escapes(spec.label),
+        }
+    dest_file.parent.mkdir(parents=True, exist_ok=True)
+    dest_file.write_text(json.dumps(facts, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def stage_provider_protocols(dest_file: Path, agents: tuple[str, ...]) -> None:
+    """Bake the wire-protocol → candidate-providers universe as JSON.
+
+    For every protocol any selected agent speaks, records the sorted list of
+    providers whose ``serves`` covers it — i.e. the providers a user could
+    authenticate to make those agents usable.  This is what lets ``hilfe`` turn
+    a dimmed agent's ``needs an openai-chat provider`` into an actionable list
+    under the providers section, including providers not yet authenticated
+    (which the container environment, carrying only *authenticated* providers,
+    cannot enumerate on its own).
+
+    Scoped to the protocols actually in play for this image, so an L1 without a
+    given agent doesn't advertise providers for a protocol nothing speaks.  The
+    file is always written — an empty object when no selected agent speaks a
+    protocol — so the Dockerfile ``COPY`` always has a source.
+    """
+    from terok_executor.roster import AgentRoster
+
+    roster = AgentRoster.shared()
+    agents_by_name = roster.agents
+    providers = roster.providers
+
     protocols = {
-        name: agents_by_name[name].protocol
+        agents_by_name[name].protocol
         for name in agents
         if name in agents_by_name and agents_by_name[name].protocol
     }
+    universe = {
+        protocol: sorted(name for name, prov in providers.items() if protocol in prov.serves)
+        for protocol in protocols
+    }
     dest_file.parent.mkdir(parents=True, exist_ok=True)
-    dest_file.write_text(json.dumps(protocols, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    dest_file.write_text(json.dumps(universe, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def stage_tmux_config(dest: Path) -> None:

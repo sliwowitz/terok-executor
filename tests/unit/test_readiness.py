@@ -56,6 +56,29 @@ AGENT_PROTOCOLS = {
     "vibe": "openai-chat",
 }
 
+
+def _facts(protocols: dict[str, str]) -> dict[str, dict[str, str | None]]:
+    """Wrap a ``name → protocol`` map into the baked per-agent facts shape.
+
+    Each entry gains a synthetic banner ``label`` so the rollup and banner can
+    be exercised without the real roster.
+    """
+    return {
+        name: {"protocol": protocol, "label": f"  {name} - {name.title()}"}
+        for name, protocol in protocols.items()
+    }
+
+
+# The baked facts the generator reads: the three protocol-speaking natives.
+AGENT_FACTS = _facts(AGENT_PROTOCOLS)
+
+# The baked protocol → candidate-providers universe (mirrors the real roster).
+AGENT_UNIVERSE = {
+    "anthropic-messages": ["anthropic", "openrouter"],
+    "openai-responses": ["openai"],
+    "openai-chat": ["blablador", "kisski", "mistral", "openai", "openrouter"],
+}
+
 # A realistic in-container environment: anthropic (anthropic-messages),
 # openai (openai-responses), and openrouter (both openai-chat and
 # anthropic-messages) are authenticated; unrelated vars are noise.
@@ -85,7 +108,9 @@ class TestBuildManifest:
 
     def test_compatible_pairs_are_ready(self, generator: ModuleType) -> None:
         """An installed agent whose protocol the authed provider serves is ready."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         # claude speaks anthropic-messages → anthropic and openrouter serve it.
         assert _pair(manifest, "claude", "anthropic")["ready"] is True
         assert _pair(manifest, "claude", "openrouter")["ready"] is True
@@ -100,8 +125,8 @@ class TestBuildManifest:
         """Harnesses declare openai-chat, so they appear paired with every authed
         openai-chat provider — the universal cross-provider path (must not be
         omitted from the manifest, as they were when harnesses had no protocol)."""
-        protocols = {**AGENT_PROTOCOLS, "opencode": "openai-chat", "pi": "openai-chat"}
-        manifest = generator.build_manifest(set(protocols), protocols, AUTHED_ENV)
+        facts = _facts({**AGENT_PROTOCOLS, "opencode": "openai-chat", "pi": "openai-chat"})
+        manifest = generator.build_manifest(set(facts), facts, AGENT_UNIVERSE, AUTHED_ENV)
         assert _pair(manifest, "opencode", "openrouter")["ready"] is True
         assert _pair(manifest, "pi", "openrouter")["ready"] is True
         # openai serves openai-responses (not -chat) here, so opencode isn't ready on it.
@@ -109,7 +134,9 @@ class TestBuildManifest:
 
     def test_incompatible_pairs_are_not_ready(self, generator: ModuleType) -> None:
         """A provider that does not serve the agent's protocol is not ready."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         assert _pair(manifest, "codex", "anthropic")["ready"] is False
         # openrouter serves openai-chat + anthropic-messages, not openai-responses.
         assert _pair(manifest, "codex", "openrouter")["ready"] is False
@@ -119,7 +146,9 @@ class TestBuildManifest:
 
     def test_pair_shape(self, generator: ModuleType) -> None:
         """Each pair carries the agent/provider context and the lone ``ready`` flag."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         assert _pair(manifest, "claude", "anthropic") == {
             "agent": "claude",
             "provider": "anthropic",
@@ -130,37 +159,166 @@ class TestBuildManifest:
     def test_uninstalled_agent_is_omitted(self, generator: ModuleType) -> None:
         """A protocol-known agent absent from the image is not enumerated at all."""
         # claude has a baked protocol but is absent from this image's selection.
-        manifest = generator.build_manifest({"codex", "vibe"}, AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            {"codex", "vibe"}, AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         assert not [p for p in manifest["pairs"] if p["agent"] == "claude"]
 
     def test_full_matrix_is_emitted(self, generator: ModuleType) -> None:
         """Every installed protocol-speaking agent is paired with every authed provider."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         # 3 agents × 3 authenticated providers.
         assert len(manifest["pairs"]) == 9
         assert manifest["version"] == generator.MANIFEST_VERSION
 
     def test_pairs_are_deterministically_ordered(self, generator: ModuleType) -> None:
         """Pairs sort by (agent, provider) so the file is stable across runs."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         keys = [(p["agent"], p["provider"]) for p in manifest["pairs"]]
         assert keys == sorted(keys)
 
     def test_no_authenticated_providers_yields_no_pairs(self, generator: ModuleType) -> None:
         """With nothing authenticated there is no provider to pair an agent with."""
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, {"PATH": "/bin"})
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, {"PATH": "/bin"}
+        )
         assert manifest["pairs"] == []
 
-    def test_agents_without_protocol_are_absent(self, generator: ModuleType) -> None:
-        """An agent missing from the baked protocol map is never enumerated.
+    def test_agents_absent_from_facts_are_not_paired(self, generator: ModuleType) -> None:
+        """An agent missing from the baked facts map is never paired.
 
-        Tools and harnesses speak no fixed protocol, so they never appear even
-        when installed — compatibility is undefined for them.
+        Tools (gh) are baked into the dev-tool section, not the facts map, so
+        they never contribute a pair even when installed.
         """
-        installed = set(AGENT_PROTOCOLS) | {"gh", "opencode"}
-        manifest = generator.build_manifest(installed, AGENT_PROTOCOLS, AUTHED_ENV)
+        installed = set(AGENT_FACTS) | {"gh"}
+        manifest = generator.build_manifest(installed, AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV)
         named_agents = {p["agent"] for p in manifest["pairs"]}
-        assert named_agents == set(AGENT_PROTOCOLS)
+        assert named_agents == set(AGENT_FACTS)
+
+
+class TestAgentRollup:
+    """The ``agents`` view: usable/reason per installed agent, for the banner."""
+
+    def _rollup(self, manifest: dict, name: str) -> dict:
+        matches = [a for a in manifest["agents"] if a["name"] == name]
+        assert len(matches) == 1, f"expected one rollup for {name}, got {matches}"
+        return matches[0]
+
+    def test_usable_when_a_provider_serves_the_protocol(self, generator: ModuleType) -> None:
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
+        claude = self._rollup(manifest, "claude")
+        assert claude["usable"] is True
+        assert claude["reason"] == ""
+
+    def test_unusable_reason_names_the_protocol_not_a_provider(self, generator: ModuleType) -> None:
+        """Reason names the wire protocol — any compatible provider satisfies it,
+        so it must not name a single 'default' provider."""
+        # Only anthropic is authenticated → codex (openai-responses) is out.
+        env = {
+            "TEROK_PROVIDER_ANTHROPIC_TOKEN": "terok-p-aaa",
+            "TEROK_PROVIDER_ANTHROPIC_BASE_ANTHROPIC_MESSAGES": f"{_LOOPBACK}/v1",
+        }
+        manifest = generator.build_manifest(set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, env)
+        codex = self._rollup(manifest, "codex")
+        assert codex["usable"] is False
+        assert codex["reason"] == "needs an openai-responses provider"
+        # claude can reach anthropic → still usable.
+        assert self._rollup(manifest, "claude")["usable"] is True
+
+    def test_usable_via_any_compatible_provider_not_the_default(
+        self, generator: ModuleType
+    ) -> None:
+        """vibe (openai-chat) is usable because openrouter serves openai-chat —
+        even though 'mistral' (its roster default) is not authenticated."""
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
+        vibe = self._rollup(manifest, "vibe")
+        assert vibe["usable"] is True
+        assert vibe["reason"] == ""
+
+    def test_agent_without_protocol_is_always_usable(self, generator: ModuleType) -> None:
+        """A pure frontend (toad: no protocol) has nothing to assess → bright."""
+        facts = {"toad": {"protocol": None, "label": "  toad - Toad"}}
+        manifest = generator.build_manifest({"toad"}, facts, {}, {"PATH": "/bin"})
+        toad = self._rollup(manifest, "toad")
+        assert toad["usable"] is True
+        assert toad["reason"] == ""
+
+    def test_banner_keeps_usable_labels_and_dims_the_rest(self, generator: ModuleType) -> None:
+        """Usable agents print verbatim; unusable ones are stripped, dimmed, annotated."""
+        env = {
+            "TEROK_PROVIDER_ANTHROPIC_TOKEN": "terok-p-aaa",
+            "TEROK_PROVIDER_ANTHROPIC_BASE_ANTHROPIC_MESSAGES": f"{_LOOPBACK}/v1",
+        }
+        facts = {
+            "claude": {
+                "protocol": "anthropic-messages",
+                "label": "  \033[36mclaude\033[0m - Claude Code",
+            },
+            "codex": {
+                "protocol": "openai-responses",
+                "label": "  \033[36mcodex\033[0m - OpenAI Codex",
+            },
+        }
+        manifest = generator.build_manifest(set(facts), facts, AGENT_UNIVERSE, env)
+        banner = generator.render_agent_banner(manifest["agents"])
+        lines = banner.splitlines()
+        # claude usable → its cyan label is printed as-is.
+        assert "  \033[36mclaude\033[0m - Claude Code" in lines[0]
+        # codex unusable → dimmed, embedded ANSI stripped, reason appended.
+        assert lines[1].startswith("\033[2m")
+        assert "\033[36m" not in lines[1]
+        assert "(needs an openai-responses provider)" in lines[1]
+
+    def test_banner_tolerates_non_list_input(self, generator: ModuleType) -> None:
+        assert generator.render_agent_banner(None) == ""
+
+
+class TestProtocolRollup:
+    """The ``protocols`` view: candidate providers per protocol, for the section."""
+
+    def _row(self, manifest: dict, protocol: str) -> dict:
+        matches = [r for r in manifest["protocols"] if r["protocol"] == protocol]
+        assert len(matches) == 1, f"expected one row for {protocol}, got {matches}"
+        return matches[0]
+
+    def test_lists_candidates_and_marks_authenticated(self, generator: ModuleType) -> None:
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
+        chat = self._row(manifest, "openai-chat")
+        assert chat["candidates"] == ["blablador", "kisski", "mistral", "openai", "openrouter"]
+        # Of those, only openai + openrouter are authenticated in AUTHED_ENV.
+        assert chat["authenticated"] == ["openai", "openrouter"]
+
+    def test_candidates_listed_even_when_none_authenticated(self, generator: ModuleType) -> None:
+        """The point of the universe: surface providers to authenticate when zero are."""
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, {"PATH": "/x"}
+        )
+        chat = self._row(manifest, "openai-chat")
+        assert chat["candidates"]  # non-empty
+        assert chat["authenticated"] == []
+
+    def test_render_marks_authed_magenta_and_rest_dim(self, generator: ModuleType) -> None:
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
+        out = generator.render_provider_protocols(manifest["protocols"])
+        assert "openai-chat" in out
+        # authenticated provider → magenta; unauthenticated candidate → dim.
+        assert "\033[35mopenrouter\033[0m" in out
+        assert "\033[2mblablador\033[0m" in out
+
+    def test_render_tolerates_non_list_input(self, generator: ModuleType) -> None:
+        assert generator.render_provider_protocols(None) == ""
 
 
 class TestEnvironmentScanning:
@@ -199,22 +357,53 @@ class TestSourcesAndSink:
         """A missing manifest yields an empty set rather than raising."""
         assert generator._read_installed_agents(tmp_path / "absent.env") == set()
 
-    def test_read_agent_protocols(self, generator: ModuleType, tmp_path: Path) -> None:
-        """The baked map round-trips, dropping blank protocols."""
+    def test_read_agent_facts(self, generator: ModuleType, tmp_path: Path) -> None:
+        """The baked facts round-trip, normalising a missing protocol to ``None``."""
         baked = tmp_path / "agent-protocols.json"
-        baked.write_text(json.dumps({"claude": "anthropic-messages", "copilot": ""}))
-        assert generator._read_agent_protocols(baked) == {"claude": "anthropic-messages"}
+        baked.write_text(
+            json.dumps(
+                {
+                    "claude": {
+                        "protocol": "anthropic-messages",
+                        "label": "  claude - Claude Code",
+                    },
+                    "toad": {"label": "  toad - Toad"},
+                }
+            )
+        )
+        facts = generator._read_agent_facts(baked)
+        assert facts["claude"]["protocol"] == "anthropic-messages"
+        # Missing protocol key defaults to None, not KeyError.
+        assert facts["toad"]["protocol"] is None
+        assert facts["toad"]["label"] == "  toad - Toad"
 
-    def test_read_agent_protocols_malformed(self, generator: ModuleType, tmp_path: Path) -> None:
+    def test_read_agent_facts_malformed(self, generator: ModuleType, tmp_path: Path) -> None:
         """Malformed JSON yields an empty map rather than raising."""
         baked = tmp_path / "agent-protocols.json"
         baked.write_text("{not json")
-        assert generator._read_agent_protocols(baked) == {}
+        assert generator._read_agent_facts(baked) == {}
+
+    def test_read_provider_protocols(self, generator: ModuleType, tmp_path: Path) -> None:
+        """The baked protocol→providers universe round-trips; non-list values drop."""
+        baked = tmp_path / "provider-protocols.json"
+        baked.write_text(
+            json.dumps({"anthropic-messages": ["anthropic", "openrouter"], "bogus": "nope"})
+        )
+        universe = generator._read_provider_protocols(baked)
+        assert universe == {"anthropic-messages": ["anthropic", "openrouter"]}
+
+    def test_read_provider_protocols_malformed(self, generator: ModuleType, tmp_path: Path) -> None:
+        """Malformed JSON yields an empty map rather than raising."""
+        baked = tmp_path / "provider-protocols.json"
+        baked.write_text("{not json")
+        assert generator._read_provider_protocols(baked) == {}
 
     def test_write_manifest_round_trips(self, generator: ModuleType, tmp_path: Path) -> None:
         """The manifest is written as JSON under a freshly created parent dir."""
         out = tmp_path / "nested" / "agents.json"
-        manifest = generator.build_manifest(set(AGENT_PROTOCOLS), AGENT_PROTOCOLS, AUTHED_ENV)
+        manifest = generator.build_manifest(
+            set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
+        )
         generator._write_manifest(out, manifest)
         assert json.loads(out.read_text()) == manifest
 

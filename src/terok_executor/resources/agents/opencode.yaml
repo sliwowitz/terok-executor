@@ -73,4 +73,4 @@ install:
     RUN curl -fsSL https://opencode.ai/install | bash
 
 help:
-  label: '  \033[36mopencode\033[0m   - OpenCode CLI (\033[2mterok config import-opencode\033[0m)'
+  label: '  \033[36mopencode\033[0m   - OpenCode (\033[2mterok config import-opencode\033[0m)'

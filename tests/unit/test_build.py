@@ -27,8 +27,9 @@ from terok_executor.container.build import (
     render_l0,
     render_l1,
     render_l1_sidecar,
-    stage_agent_protocols,
+    stage_agent_facts,
     stage_help_fragments,
+    stage_provider_protocols,
     stage_scripts,
     stage_tmux_config,
     stage_toad_agents,
@@ -899,23 +900,24 @@ class TestStageTmuxConfig:
 
 
 class TestStageHelpFragments:
-    """Verify per-section help fragment rendering for ``hilfe``."""
+    """Verify the baked dev-tool help fragment for ``hilfe``."""
 
-    def test_splits_by_section(self, tmp_path: Path) -> None:
+    def test_bakes_dev_tool_section_only(self, tmp_path: Path) -> None:
+        # The agent section is rendered at runtime now, so only dev-tools.txt
+        # is baked — agents.txt is never written.
         dest = tmp_path / "help.d"
         stage_help_fragments(dest, ("claude", "gh"))
-        assert (dest / "agents.txt").is_file()
         assert (dest / "dev-tools.txt").is_file()
-        assert "claude" in (dest / "agents.txt").read_text()
+        assert not (dest / "agents.txt").exists()
         assert "gh" in (dest / "dev-tools.txt").read_text()
 
     def test_decodes_ansi_escapes(self, tmp_path: Path) -> None:
         dest = tmp_path / "help.d"
-        stage_help_fragments(dest, ("claude",))
+        stage_help_fragments(dest, ("gh",))
         # \033 in the YAML must land as the literal ESC byte in the file so
         # that hilfe just `cat`s and gets coloured output.
-        assert "\x1b[" in (dest / "agents.txt").read_text()
-        assert r"\033[" not in (dest / "agents.txt").read_text()
+        assert "\x1b[" in (dest / "dev-tools.txt").read_text()
+        assert r"\033[" not in (dest / "dev-tools.txt").read_text()
 
     def test_omits_empty_sections(self, tmp_path: Path) -> None:
         # Selecting only an agent (no dev_tool) leaves dev-tools.txt absent.
@@ -931,34 +933,57 @@ class TestStageHelpFragments:
         assert _decode_label_escapes(r"\033[36m→ ähnlich\033[0m") == ("\x1b[36m→ ähnlich\x1b[0m")
 
 
-class TestStageAgentProtocols:
-    """Verify the baked agent→wire-protocol map for the readiness check."""
+class TestStageAgentFacts:
+    """Verify the baked per-agent facts map for the readiness check + banner."""
 
-    def test_bakes_protocol_speaking_agents(self, tmp_path: Path) -> None:
+    def test_bakes_protocol_and_label(self, tmp_path: Path) -> None:
         dest = tmp_path / "agent-protocols.json"
-        stage_agent_protocols(dest, ("claude", "codex", "vibe"))
+        stage_agent_facts(dest, ("claude", "codex", "vibe"))
         baked = json.loads(dest.read_text())
-        assert baked == {
-            "claude": "anthropic-messages",
-            "codex": "openai-responses",
-            "vibe": "openai-chat",
-        }
+        assert baked["claude"]["protocol"] == "anthropic-messages"
+        # The label is the decoded banner line (real ESC byte, no CLI suffix).
+        assert "Claude Code" in baked["claude"]["label"]
+        assert "\x1b[" in baked["claude"]["label"]
+        assert baked["codex"]["protocol"] == "openai-responses"
+        assert baked["vibe"]["protocol"] == "openai-chat"
+        # No provider field — usability is protocol-based, not default-bound.
+        assert "provider" not in baked["claude"]
 
-    def test_omits_agents_without_protocol(self, tmp_path: Path) -> None:
-        # Tools carry no fixed protocol → absent.  Harnesses now declare the
-        # protocol their adapters speak (opencode → openai-chat) so the readiness
-        # manifest can surface them paired with compatible providers.
+    def test_includes_agents_without_a_protocol(self, tmp_path: Path) -> None:
+        # Tools (gh) live in the dev-tool section → absent.  An agent-section
+        # entry with no wire protocol (copilot) is still recorded so the banner
+        # can list it; its protocol is null.
         dest = tmp_path / "agent-protocols.json"
-        stage_agent_protocols(dest, ("claude", "gh", "opencode"))
-        assert json.loads(dest.read_text()) == {
-            "claude": "anthropic-messages",
-            "opencode": "openai-chat",
-        }
+        stage_agent_facts(dest, ("claude", "gh", "copilot", "opencode"))
+        baked = json.loads(dest.read_text())
+        assert set(baked) == {"claude", "copilot", "opencode"}
+        assert baked["copilot"]["protocol"] is None
+        assert baked["opencode"]["protocol"] == "openai-chat"
 
-    def test_writes_empty_object_for_no_protocol_agents(self, tmp_path: Path) -> None:
+    def test_writes_empty_object_for_no_agent_section_entries(self, tmp_path: Path) -> None:
         # Always write a file so the Dockerfile COPY always has a source.
         dest = tmp_path / "agent-protocols.json"
-        stage_agent_protocols(dest, ("gh",))
+        stage_agent_facts(dest, ("gh",))
+        assert json.loads(dest.read_text()) == {}
+
+
+class TestStageProviderProtocols:
+    """Verify the baked protocol → candidate-providers universe."""
+
+    def test_bakes_candidates_for_protocols_in_play(self, tmp_path: Path) -> None:
+        dest = tmp_path / "provider-protocols.json"
+        stage_provider_protocols(dest, ("claude", "vibe"))
+        baked = json.loads(dest.read_text())
+        # claude → anthropic-messages, vibe → openai-chat; each lists its servers.
+        assert baked["anthropic-messages"] == ["anthropic", "openrouter"]
+        assert "mistral" in baked["openai-chat"] and "openrouter" in baked["openai-chat"]
+        # openai-responses isn't spoken by the selection → not advertised.
+        assert "openai-responses" not in baked
+
+    def test_writes_empty_object_when_no_protocol_in_play(self, tmp_path: Path) -> None:
+        # Only a tool selected → no protocols → empty (but file still written).
+        dest = tmp_path / "provider-protocols.json"
+        stage_provider_protocols(dest, ("gh",))
         assert json.loads(dest.read_text()) == {}
 
 
