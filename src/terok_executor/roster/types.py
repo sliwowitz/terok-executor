@@ -47,6 +47,18 @@ class MountDef:
     [`ContainerEnvSpec.expose_credential_providers`][terok_executor.ContainerEnvSpec.expose_credential_providers].
     """
 
+    writable: bool = False
+    """Mount [`credential_file`][terok_executor.roster.types.MountDef.credential_file]
+    writable instead of under a read-only shadow.
+
+    Set for tools whose credential file doubles as their settings file and is
+    rewritten on startup (e.g. glab's ``config.yml``): the read-only shadow
+    would abort the tool, so the file rides the shared mount writable and
+    persists across tasks — trading the per-container credential containment of
+    [terok-ai/terok#873](https://github.com/terok-ai/terok/issues/873) for a
+    tool that runs at all.  Sourced from ``provider.credential_file_writable``.
+    """
+
 
 @dataclass(frozen=True)
 class VaultRoute:

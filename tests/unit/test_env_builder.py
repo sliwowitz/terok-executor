@@ -1253,6 +1253,19 @@ class TestSharedConfigMountsUnit:
         cred = [m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"]
         assert cred == []
 
+    def test_writable_credential_file_skips_ro_shadow(self, roster, tmp_path):
+        """A ``credential_file_writable`` provider (glab) gets no ro shadow.
+
+        glab's config.yml is both credentials and settings, rewritten on
+        startup, so the shadow would abort it — only the rw dir mount remains.
+        """
+        mounts = _shared_config_mounts(roster, tmp_path)
+        shadow = [m for m in mounts if m.container_path == "/home/dev/.config/glab-cli/config.yml"]
+        assert shadow == []
+        dir_mount = [m for m in mounts if m.container_path == "/home/dev/.config/glab-cli"]
+        assert len(dir_mount) == 1
+        assert dir_mount[0].read_only is False
+
 
 class TestExposedProviderMaterialization:
     """`_materialize_exposed_providers` surfaces exposed creds as TEROK_PROVIDER_* handles."""
