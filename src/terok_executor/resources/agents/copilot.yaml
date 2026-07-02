@@ -36,4 +36,4 @@ install:
         npm cache clean --force
 
 help:
-  label: '  \033[36mcopilot\033[0m    - GitHub Copilot CLI'
+  label: '  \033[36mcopilot\033[0m    - GitHub Copilot'

@@ -30,9 +30,10 @@ _terok_permission_mode() {
 
 _terok_help_dir=/usr/local/share/terok/help.d
 
-# Each section's contents are pre-rendered at L1 build time from the
-# roster YAML's `help:` blurbs (see terok_executor/container/build.py
-# stage_help_fragments).  Empty sections produce no file → silently skipped.
+# The dev-tools section is pre-rendered at L1 build time from the roster YAML's
+# `help:` blurbs (see terok_executor/container/build.py stage_help_fragments)
+# — dev tools aren't auth-gated, so a static `cat` is enough.  Empty sections
+# produce no file → silently skipped.
 _terok_section() {
     local title="$1" file="$2"
     [ -s "${_terok_help_dir}/${file}" ] || return 0
@@ -40,28 +41,47 @@ _terok_section() {
     cat "${_terok_help_dir}/${file}"
 }
 
-_terok_executors() { _terok_section 'Available AI agents:' agents.txt; }
-_terok_dev_tools() { _terok_section 'Dev tools:'           dev-tools.txt; }
+# The agent section is rendered at runtime by `terok-agents --banner`: it reads
+# the live readiness state and dims any agent with no authenticated provider it
+# can talk to, with the reason in parentheses.  Nothing prints when no agent is
+# installed (empty output → no header).
+_terok_executors() {
+    local _list
+    _list=$(terok-agents --banner 2>/dev/null) || return 0
+    [ -n "$_list" ] || return 0
+    printf '\n\033[1m%s\033[0m\n' 'Available AI agents:'
+    printf '%s\n' "$_list"
+}
+_terok_dev_tools() { _terok_section 'Dev tools:' dev-tools.txt; }
 
 # Agents (the CLI tools above) and providers (LLM endpoints) are independent
 # axes.  The authenticated providers the vault routes for this container come
-# from the materialized phantom-token env vars (one per provider).
+# from the materialized phantom-token env vars (one per provider); the
+# candidate providers per wire protocol — including ones not yet authenticated,
+# so a dimmed agent's "needs an X provider" is actionable — come from
+# `terok-agents --protocols` (baked roster knowledge the env doesn't carry).
 _terok_providers() {
-    local _list
+    local _list _byproto
     _list=$(printenv \
         | sed -n 's/^TEROK_PROVIDER_\(.*\)_TOKEN=.*/\1/p' \
         | tr '[:upper:]' '[:lower:]' | sort -u)
-    [ -n "$_list" ] || return 0
-    # Providers in magenta (distinct from the cyan agent/tool commands), joined
-    # with plain commas so the line reads as a sentence.
-    printf '\n\033[1mProviders (LLM endpoints):\033[0m '
-    local _first=1 _p
-    for _p in $_list; do
-        [ "$_first" -eq 1 ] || printf ', '
-        printf '\033[35m%s\033[0m' "$_p"
-        _first=0
-    done
+    _byproto=$(terok-agents --protocols 2>/dev/null)
+    # Nothing authenticated and nothing to suggest → skip the section entirely.
+    [ -n "$_list" ] || [ -n "$_byproto" ] || return 0
+
+    printf '\n\033[1mProviders (LLM endpoints):\033[0m'
+    if [ -n "$_list" ]; then
+        # Authenticated providers in magenta, joined so the line reads as a sentence.
+        local _first=1 _p
+        printf ' '
+        for _p in $_list; do
+            [ "$_first" -eq 1 ] || printf ', '
+            printf '\033[35m%s\033[0m' "$_p"
+            _first=0
+        done
+    fi
     printf '\n'
+    [ -n "$_byproto" ] && printf '%s\n' "$_byproto"
     printf '  Point any agent at a provider it speaks to: \033[36m<agent> --provider <name>\033[0m\n'
     printf '  (e.g. \033[36mopencode --provider openrouter\033[0m).  \033[36mopencode\033[0m reaches any of them;\n'
     printf '  native CLIs default to their own.  Ready pairs: \033[36mproviders\033[0m\n'

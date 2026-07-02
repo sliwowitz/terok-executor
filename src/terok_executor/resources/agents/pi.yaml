@@ -82,4 +82,4 @@ install:
     RUN npm install -g @earendil-works/pi-coding-agent
 
 help:
-  label: '  \033[36mpi\033[0m         - Pi coding agent (\033[2mhttps://pi.dev\033[0m)'
+  label: '  \033[36mpi\033[0m         - Pi coding agent'

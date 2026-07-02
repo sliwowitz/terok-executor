@@ -86,4 +86,4 @@ install:
         pipx inject mistral-vibe mistralai
 
 help:
-  label: '  \033[36mvibe\033[0m       - Mistral Vibe CLI'
+  label: '  \033[36mvibe\033[0m       - Mistral Vibe'

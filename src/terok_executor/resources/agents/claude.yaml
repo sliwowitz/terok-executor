@@ -100,4 +100,4 @@ install:
         ln -sf "$HOME/.local/bin/claude" "$SDK_BIN_DIR/claude"
 
 help:
-  label: '  \033[36mclaude\033[0m     - Claude Code CLI'
+  label: '  \033[36mclaude\033[0m     - Claude Code'

@@ -5,16 +5,23 @@
 
 # terok:container — this file is deployed into task containers, not used on the host.
 
-"""Report which (agent, provider) pairs are ready to use in this container.
+"""Report which agents are usable, and which (agent, provider) pairs are ready.
 
-Writes ``/home/dev/.terok/agents.json`` listing, for every installed agent
-paired with every provider this container is authenticated for, whether the
-agent can actually use that provider (``ready`` — the provider serves the
-agent's wire protocol).  Installed-ness and authentication define which pairs
-*appear* at all, so the only per-pair fact worth recording is readiness.
+Writes ``/home/dev/.terok/agents.json`` with two views of the container's
+*actual runtime state*:
 
-The manifest reflects the container's *actual runtime state*, read from three
-in-container sources:
+  * ``pairs`` — every installed protocol-speaking agent paired with every
+    authenticated provider, flagged ``ready`` when the provider serves the
+    agent's wire protocol.  Consumed by the ``providers`` command.
+  * ``agents`` — one rollup per installed agent: its banner ``label``, whether
+    it is ``usable`` at all (has *some* authenticated provider it can talk to),
+    and a short ``reason`` when it is not.  Consumed by the ``hilfe`` banner,
+    which dims unusable agents.
+  * ``protocols`` — one row per wire protocol in play: its candidate providers
+    and which are authenticated.  Consumed by the ``hilfe`` providers section so
+    a dimmed ``needs an openai-chat provider`` maps to a list to act on.
+
+The views are derived from three in-container sources:
 
   * installed agents       — ``TEROK_INSTALLED_AGENTS`` in
     ``/etc/terok/installed.env``
@@ -22,32 +29,50 @@ in-container sources:
   * served protocols        — a ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>`` per
     protocol the provider actually serves
 
-The agent→protocol vocabulary is the one fact the environment does not carry;
-it is baked into the image at build time and read from
-``/usr/local/share/terok/agent-protocols.json``.
+plus two baked maps the environment cannot reconstruct: per-agent facts
+(protocol, label) in ``agent-protocols.json``, and the protocol → candidate
+providers universe in ``provider-protocols.json``.
 
-The manifest is generated at container startup; re-run the ``terok-agents``
-command at any time to refresh it.
+Run with no arguments to (re)write the manifest — done at container startup,
+and any time to refresh.  Run with ``--banner`` / ``--protocols`` to print just
+the agent list / candidate-provider list for the ``hilfe`` login banner,
+deriving them live without touching the file.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 # ── Container contract (paths and names the image build agrees on) ──
 
-MANIFEST_VERSION = 1
-"""Schema version of the emitted ``agents.json``."""
+MANIFEST_VERSION = 2
+"""Schema version of the emitted ``agents.json`` (2 added the ``agents`` rollup)."""
 
 INSTALLED_ENV_PATH = Path("/etc/terok/installed.env")
 """Image manifest carrying ``TEROK_INSTALLED_AGENTS=<comma,separated>``."""
 
-AGENT_PROTOCOLS_PATH = Path("/usr/local/share/terok/agent-protocols.json")
-"""Baked agent→wire-protocol map — the only non-environment input."""
+AGENT_FACTS_PATH = Path("/usr/local/share/terok/agent-protocols.json")
+"""Baked per-agent facts (protocol, label) — a non-environment input.
+Filename is historical; see the build-side constant ``AGENT_PROTOCOLS_PATH``
+for why the name outlived the protocols-only contents."""
+
+PROVIDER_PROTOCOLS_PATH = Path("/usr/local/share/terok/provider-protocols.json")
+"""Baked ``protocol → [providers that serve it]`` universe — lets the providers
+banner list the candidate providers a user could authenticate to enable a
+dimmed agent, including providers not yet authenticated."""
+
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_MAGENTA = "\033[35m"
+_RESET = "\033[0m"
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+"""Matches the SGR escapes embedded in a baked banner label, so a dimmed line
+can be flattened to plain text before being wrapped in a single dim span."""
 
 MANIFEST_PATH = Path("/home/dev/.terok/agents.json")
 """Where the readiness manifest is written for agents and the operator to read."""
@@ -65,14 +90,33 @@ _BASE_MARKER = "_BASE_"
 # ── Entry point ──
 
 
-def main() -> int:
-    """Derive the readiness manifest from the live container state and write it."""
+def main(argv: list[str]) -> None:
+    """Write the readiness manifest, or render a ``hilfe`` section.
+
+    ``--banner`` prints the dimmed/bright agent list; ``--protocols`` prints the
+    per-protocol candidate-provider list for the providers section.  Both derive
+    live and leave the manifest file untouched — a login banner is a read, not a
+    checkpoint.  With no flag the manifest is (re)written.
+    """
+    flags = argv[1:]
     installed = _read_installed_agents(INSTALLED_ENV_PATH)
-    protocols = _read_agent_protocols(AGENT_PROTOCOLS_PATH)
-    manifest = build_manifest(installed, protocols, os.environ)
-    _write_manifest(MANIFEST_PATH, manifest)
-    _print_summary(manifest)
-    return 0
+    facts = _read_agent_facts(AGENT_FACTS_PATH)
+    universe = _read_provider_protocols(PROVIDER_PROTOCOLS_PATH)
+    manifest = build_manifest(installed, facts, universe, os.environ)
+
+    if "--banner" in flags:
+        _print_if_nonempty(render_agent_banner(manifest["agents"]))
+    elif "--protocols" in flags:
+        _print_if_nonempty(render_provider_protocols(manifest["protocols"]))
+    else:
+        _write_manifest(MANIFEST_PATH, manifest)
+        _print_summary(manifest)
+
+
+def _print_if_nonempty(text: str) -> None:
+    """Print *text* only when it has content (an empty section prints nothing)."""
+    if text:
+        print(text)
 
 
 # ── Derivation (pure: three runtime inputs → the JSON shape) ──
@@ -80,47 +124,141 @@ def main() -> int:
 
 def build_manifest(
     installed_agents: set[str],
-    agent_protocols: dict[str, str],
+    agent_facts: dict[str, dict[str, str | None]],
+    provider_protocols: dict[str, list[str]],
     env: Mapping[str, str],
 ) -> dict[str, object]:
     """Return the readiness manifest for the given runtime state.
 
-    Pairs every *installed* protocol-speaking agent with every provider this
-    container is authenticated for, and records whether the pair is ``ready``
-    — i.e. the provider serves the agent's wire protocol.  Installed-ness and
-    authentication are the *enumeration domain* (an agent must be installed to
-    appear; a provider must be authenticated for the container to know it
-    exists at all), so they are filters, not per-pair fields: the only thing
-    that varies across a pair, and the only thing worth recording, is protocol
-    compatibility.
+    Produces three views over the same facts:
+
+    - ``pairs``: every *installed* protocol-speaking agent paired with every
+      authenticated provider, flagged ``ready`` when the provider serves the
+      agent's wire protocol.  Installed-ness and authentication are the
+      enumeration domain (filters, not fields); readiness is the only per-pair
+      fact worth recording.
+    - ``agents``: one rollup per installed agent — ``label``, whether it is
+      ``usable`` at all, and a ``reason`` when not.  This is what lets ``hilfe``
+      dim an agent the container can't actually run.
+    - ``protocols``: one row per wire protocol in play — its candidate providers
+      and which of them are authenticated.  This is what lets ``hilfe`` turn a
+      dimmed agent's ``needs an openai-chat provider`` into an actionable list.
 
     Args:
         installed_agents: Agent names present in this image (from
-            ``TEROK_INSTALLED_AGENTS``) — the agent enumeration filter.
-        agent_protocols: Agent name → wire protocol, for the agents that speak
-            one (baked from the roster).
+            ``TEROK_INSTALLED_AGENTS``) — the enumeration filter.
+        agent_facts: Agent name → ``{protocol, label}``, baked from the roster.
+        provider_protocols: Protocol → candidate provider names, baked from the
+            roster (the providers a user *could* authenticate, beyond the ones
+            the environment already carries).
         env: The container environment, scanned for authenticated providers
             and the protocols each one serves.
 
     Returns:
-        ``{"version": int, "pairs": [...]}`` where each pair carries
-        ``agent``, ``provider``, ``protocol``, and ``ready``.
+        ``{"version", "pairs", "agents", "protocols"}`` — see above per view.
     """
     authenticated = _authenticated_providers(env)
     served = _served_protocols(env)
 
     pairs: list[dict[str, object]] = []
-    for agent in sorted(agent_protocols):
-        if agent not in installed_agents:
+    agents: list[dict[str, object]] = []
+    for name in sorted(agent_facts):
+        if name not in installed_agents:
             continue
-        protocol = agent_protocols[agent]
-        wire = _protocol_token(protocol)
-        for provider in sorted(authenticated):
-            ready = wire in served.get(provider, frozenset())
-            pairs.append(
-                {"agent": agent, "provider": provider, "protocol": protocol, "ready": ready}
-            )
-    return {"version": MANIFEST_VERSION, "pairs": pairs}
+        protocol = agent_facts[name].get("protocol")
+        label = agent_facts[name].get("label") or name
+
+        if protocol:
+            wire = _protocol_token(protocol)
+            for prov in sorted(authenticated):
+                ready = wire in served.get(prov, frozenset())
+                pairs.append(
+                    {"agent": name, "provider": prov, "protocol": protocol, "ready": ready}
+                )
+
+        usable, reason = _assess(protocol, authenticated, served)
+        agents.append({"name": name, "label": label, "usable": usable, "reason": reason})
+
+    protocols = [
+        {
+            "protocol": protocol,
+            "candidates": candidates,
+            "authenticated": [p for p in candidates if p in authenticated],
+        }
+        for protocol, candidates in sorted(provider_protocols.items())
+    ]
+    return {"version": MANIFEST_VERSION, "pairs": pairs, "agents": agents, "protocols": protocols}
+
+
+def _assess(
+    protocol: str | None,
+    authenticated: set[str],
+    served: dict[str, set[str]],
+) -> tuple[bool, str]:
+    """Return ``(usable, reason)`` for one agent given the live provider state.
+
+    A protocol-speaking agent is usable when *some* authenticated provider's
+    ``serves`` covers its wire protocol — any compatible provider, not a single
+    default.  An agent with no fixed protocol (a frontend like ``toad``) has
+    nothing to assess, so it is always shown bright.
+
+    The ``reason`` (only meaningful when not usable) names the protocol no
+    authenticated provider speaks — ``needs an openai-chat provider`` — and the
+    providers section lists which providers would satisfy it.
+    """
+    if not protocol:
+        return True, ""
+    wire = _protocol_token(protocol)
+    if any(wire in served.get(p, frozenset()) for p in authenticated):
+        return True, ""
+    return False, f"needs an {protocol} provider"
+
+
+def render_agent_banner(agents: object) -> str:
+    """Render the ``agents`` rollup as ``hilfe``'s bright/dimmed agent list.
+
+    Usable agents print their baked label verbatim (the command stays cyan);
+    unusable ones are flattened to plain text, wrapped in a single dim span, and
+    suffixed with ``(reason)`` so the *why* travels with the *what*.
+    """
+    if not isinstance(agents, list):
+        return ""
+    lines: list[str] = []
+    for entry in agents:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label", ""))
+        if entry.get("usable"):
+            lines.append(label)
+        else:
+            plain = _ANSI_RE.sub("", label)
+            lines.append(f"{_DIM}{plain}  ({entry.get('reason', '')}){_RESET}")
+    return "\n".join(lines)
+
+
+def render_provider_protocols(protocols: object) -> str:
+    """Render the ``protocols`` rollup as ``hilfe``'s candidate-provider list.
+
+    One line per wire protocol: its candidate providers, with the authenticated
+    ones in magenta (matching the providers section's colour) and the rest
+    dimmed — so an agent dimmed with ``needs an openai-chat provider`` maps to a
+    concrete row of providers to authenticate.
+    """
+    if not isinstance(protocols, list):
+        return ""
+    rows = [r for r in protocols if isinstance(r, dict) and r.get("candidates")]
+    if not rows:
+        return ""
+    width = max(len(str(r["protocol"])) for r in rows)
+    lines = [f"  {_DIM}Providers by wire protocol (authenticate one to enable its agents):{_RESET}"]
+    for row in rows:
+        authed = set(row.get("authenticated") or [])
+        names = ", ".join(
+            f"{_MAGENTA}{p}{_RESET}" if p in authed else f"{_DIM}{p}{_RESET}"
+            for p in row["candidates"]
+        )
+        lines.append(f"    {str(row['protocol']):<{width}}  {names}")
+    return "\n".join(lines)
 
 
 def _authenticated_providers(env: Mapping[str, str]) -> set[str]:
@@ -185,11 +323,12 @@ def _read_installed_agents(path: Path) -> set[str]:
     return set()
 
 
-def _read_agent_protocols(path: Path) -> dict[str, str]:
-    """Return the baked agent→wire-protocol map, or empty when absent.
+def _read_agent_facts(path: Path) -> dict[str, dict[str, str | None]]:
+    """Return the baked per-agent facts map, or empty when absent.
 
-    A missing file or malformed JSON yields an empty map (the readiness check
-    then resolves nothing as compatible) rather than raising at startup.
+    Each value is normalised to ``{protocol, label}`` with missing keys
+    defaulted to ``None``.  A missing file or malformed JSON yields an empty map
+    (nothing resolves as usable) rather than raising at startup.
     """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -197,7 +336,31 @@ def _read_agent_protocols(path: Path) -> dict[str, str]:
         return {}
     if not isinstance(data, dict):
         return {}
-    return {str(name): str(protocol) for name, protocol in data.items() if protocol}
+    facts: dict[str, dict[str, str | None]] = {}
+    for name, fact in data.items():
+        if not isinstance(fact, dict):
+            continue
+        facts[str(name)] = {"protocol": fact.get("protocol"), "label": fact.get("label")}
+    return facts
+
+
+def _read_provider_protocols(path: Path) -> dict[str, list[str]]:
+    """Return the baked ``protocol → [providers]`` universe, or empty when absent.
+
+    A missing file or malformed JSON yields an empty map (the providers section
+    simply lists no candidates) rather than raising at startup.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    universe: dict[str, list[str]] = {}
+    for protocol, providers in data.items():
+        if isinstance(providers, list):
+            universe[str(protocol)] = [str(p) for p in providers]
+    return universe
 
 
 def _write_manifest(path: Path, manifest: dict[str, object]) -> None:
@@ -220,8 +383,10 @@ def _print_summary(manifest: dict[str, object]) -> None:
 
 
 if __name__ == "__main__":
+    # Advisory metadata must never abort container init, so any failure is
+    # reported and swallowed — the command always exits 0.
     try:
-        sys.exit(main())
+        main(sys.argv)
     except Exception as exc:  # noqa: BLE001 — advisory metadata must not abort init
         print(f"terok-agents: could not write readiness manifest: {exc}", file=sys.stderr)
-        sys.exit(0)
+    sys.exit(0)
