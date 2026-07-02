@@ -13,6 +13,12 @@ provider:
   default: gitlab
   credential_type: pat
   credential_file: config.yml
+  # glab keeps credentials AND settings in the same config.yml and rewrites it
+  # on startup, so the read-only credential shadow (terok#873) would abort it.
+  # Mount it writable: glab reaches the API through GITLAB_TOKEN/GITLAB_API_HOST
+  # env (a phantom token), and the file persists settings across tasks in the
+  # shared mount instead of being contained per-container.
+  credential_file_writable: true
   token_env:
     _default: GITLAB_TOKEN
 

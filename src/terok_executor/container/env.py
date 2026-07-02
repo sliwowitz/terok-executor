@@ -443,7 +443,11 @@ def _shared_config_mounts(
 
     Providers in *expose_credential_providers* keep the writable mount —
     used by terok's experimental ``expose_oauth_token`` mode where the
-    agent intentionally manages its own token.
+    agent intentionally manages its own token.  Mounts flagged
+    [`writable`][terok_executor.roster.types.MountDef.writable] skip the shadow
+    too: their credential file doubles as a settings file the tool rewrites on
+    startup (e.g. glab's ``config.yml``), so the read-only shadow would abort
+    the tool — it rides the shared mount writable instead.
     """
     specs: list[VolumeSpec] = []
 
@@ -452,7 +456,7 @@ def _shared_config_mounts(
         host_dir.mkdir(parents=True, exist_ok=True)
         specs.append(VolumeSpec(host_dir, m.container_path))
 
-        if not m.credential_file or m.provider in expose_credential_providers:
+        if not m.credential_file or m.writable or m.provider in expose_credential_providers:
             continue
 
         host_file = host_dir / m.credential_file

@@ -489,6 +489,7 @@ def load_roster() -> AgentRoster:
             agents[name] = spec.to_agent(name)
 
         credential_file = spec.provider.credential_file if spec.provider else ""
+        credential_file_writable = bool(spec.provider and spec.provider.credential_file_writable)
 
         # Agents capture credentials only through an explicit ``auth:`` block;
         # the harness-driven providers' API-key capture is synthesized from
@@ -511,6 +512,7 @@ def load_roster() -> AgentRoster:
                     label=f"{auth_prov.label} config",
                     credential_file=credential_file,
                     provider=name,
+                    writable=credential_file_writable,
                 )
 
         for m in spec.mounts:

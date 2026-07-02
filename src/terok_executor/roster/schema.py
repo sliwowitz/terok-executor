@@ -436,6 +436,15 @@ class RawProviderBinding(StrictModel):
     base_url_env: str = ""
     socket_env: str = ""
     credential_file: str = ""
+    credential_file_writable: bool = Field(
+        default=False,
+        description=(
+            "Mount the credential file writable instead of under a read-only shadow. "
+            "Set when the tool stores credentials and settings in the same file it must "
+            "rewrite on startup (e.g. glab's config.yml) — the shadow would block the "
+            "write, and the file persists in the shared mount instead of being contained."
+        ),
+    )
     credential_type: Literal["api_key", "oauth", "oauth_token", "pat"] = "api_key"
     config_patch: dict | None = None
 
