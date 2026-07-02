@@ -37,9 +37,8 @@ loops over the resolved selection.  Build emits an OCI label
 ``ai.terok.agents=<csv>``, an in-container manifest
 ``/etc/terok/installed.env``, pre-rendered ``hilfe`` dev-tool help
 fragments, and a baked per-agent facts map (``agent-protocols.json`` —
-wire protocol, default provider, and banner label) that the in-container
-readiness check and the ``hilfe`` agent banner consume — all derived from
-the same selection.
+wire protocol and banner label) that the in-container readiness check and
+the ``hilfe`` agent banner consume — all derived from the same selection.
 """
 
 from __future__ import annotations
@@ -76,10 +75,12 @@ AGENT_PROTOCOLS_PATH = "/usr/local/share/terok/agent-protocols.json"
 check and the ``hilfe`` banner need.
 
 Each entry carries the agent's wire ``protocol`` (which authenticated
-providers it can talk to), its default ``provider`` (for natives that bind
-one), and its banner ``label``.  These are the pieces of roster knowledge the
-container environment does not already carry.  Baked at L1 build time and read
-back by the in-container manifest generator (``terok-agents``).
+providers it can talk to — ``null`` for entries with no fixed protocol) and its
+banner ``label``.  These are the pieces of roster knowledge the container
+environment does not already carry.  Usability turns on the protocol alone —
+any authenticated provider serving it works — so no provider name is recorded.
+Baked at L1 build time and read back by the in-container manifest generator
+(``terok-agents``).
 
 The filename is historical (it once held only protocols); the contents are now
 a small per-agent record.  Producer ([`stage_agent_facts`][terok_executor.container.build.stage_agent_facts])
