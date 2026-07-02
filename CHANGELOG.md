@@ -1,4 +1,13 @@
 # Changelog
+## v0.2.2 — We are constantly searching
+
+## What's Changed
+* Codex device-code login UI fix, https://github.com/terok-ai/terok-executor/pull/410
+* Fix `glab` config permissions, https://github.com/terok-ai/terok-executor/pull/412
+* Dim unusable agents, list candidate providers by protocol in `hilfe`, https://github.com/terok-ai/terok-executor/pull/411
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.2.1...v0.2.2
+
 ## v0.2.1 — Locks and Hooks
 
 Hotfix for supervisor restart [#406](https://github.com/terok-ai/terok-executor/pull/406)
