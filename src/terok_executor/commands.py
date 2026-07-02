@@ -344,9 +344,20 @@ def _handle_auth(
 
     With *device_auth* the interactive method chooser is skipped and the
     provider's headless device-code login runs directly — for remote or
-    headless hosts where the browser callback can't open.
+    headless hosts where the browser callback can't open.  ``--api-key`` and
+    ``--device-auth`` are mutually exclusive; passing both takes the API-key
+    route (no container) and warns that ``--device-auth`` was ignored.
     """
     from .credentials.auth import AUTH_PROVIDERS, Authenticator, store_api_key
+
+    if api_key is not None and device_auth:
+        import sys
+
+        print(
+            "Warning: --device-auth is ignored when --api-key is given; "
+            "the API key takes precedence (no auth container is launched).",
+            file=sys.stderr,
+        )
 
     if api_key is not None:
         if not api_key.strip():
