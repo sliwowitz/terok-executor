@@ -45,12 +45,25 @@ Runs a sidecar tool in its own container. Arguments after `--` are
 passed to the tool binary. See [Agents](agents.md#sidecar-tools) for
 the list of supported tools.
 
-## Managing containers
+## Container lifecycle
+
+Containers follow podman's own lifecycle: `run` creates one and keeps it
+after exit, `start` resumes it, `stop` halts it without removing
+anything, and `rm` removes it together with its host-side state.  Add
+`--rm` to `run` for a disposable container podman removes on exit.
 
 ```bash
-terok-executor list            # list running containers
-terok-executor stop my-task    # stop a specific container
+terok-executor list             # list containers
+terok-executor start my-task    # resume a stopped container
+terok-executor stop my-task     # halt, kept for a later start
+terok-executor rm my-task       # remove container + host-side state
 ```
+
+The workspace lives inside the container by default — the repo is
+cloned in through the gate, so your source checkout stays untouched and
+the work survives stop/start in podman storage.  Mount a host directory
+with `--workspace` when you want to work directly in it (it outlives
+even `rm`).
 
 ## Common flags
 
@@ -61,6 +74,8 @@ terok-executor stop my-task    # stop a specific container
 | `--branch <ref>` | Check out a specific git branch |
 | `--name <name>` | Container name override |
 | `--gpu` | Enable GPU passthrough |
+| `--workspace <dir>` | Mount a host directory at `/workspace` (default: the workspace lives in the container) |
+| `--rm` | Remove the container when it exits (podman `--rm`) |
 | `--git-identity-from-host` | Use the host's git user.name and user.email |
 | `--shared-dir` / `--shared-mount` | Mount a host directory into the container |
 | `--timeout <seconds>` | Override the default timeout |

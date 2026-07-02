@@ -202,7 +202,7 @@ def _resolve_host_git_identity() -> tuple[str | None, str | None]:
 def _handle_run(
     *,
     agent: str,
-    repo: str = ".",
+    repo: str | None = None,
     prompt: str | None = None,
     model: str | None = None,
     max_turns: int | None = None,
@@ -218,6 +218,8 @@ def _handle_run(
     gpu: bool = False,
     memory: str | None = None,
     cpus: str | None = None,
+    workspace: str | None = None,
+    ephemeral: bool = False,
     git_identity_from_host: bool = False,
     shared_dir: str | None = None,
     shared_mount: str = "/shared",
@@ -249,6 +251,11 @@ def _handle_run(
         else:
             print("Warning: --git-identity-from-host: git config user.name not set, skipping")
 
+    # Bare ``run <agent>`` works on an isolated clone of the current repo;
+    # with --workspace the mounted directory's own content is the default.
+    if repo is None and workspace is None:
+        repo = "."
+
     effective_gate = gate and not no_gate
     runner = AgentRunner(base_image=base, family=family, cfg=cfg)
     resolved_shared_dir = Path(shared_dir) if shared_dir else None
@@ -260,6 +267,8 @@ def _handle_run(
         "gpu": gpu,
         "memory": memory,
         "cpus": cpus,
+        "workspace": Path(workspace) if workspace else None,
+        "ephemeral": ephemeral,
         "human_name": human_name,
         "human_email": human_email,
         "authorship": authorship,
@@ -295,12 +304,14 @@ def _handle_run(
 def _handle_run_tool(
     *,
     tool: str,
-    repo: str = ".",
+    repo: str | None = None,
     branch: str | None = None,
     gate: bool = True,
     no_gate: bool = False,
     name: str | None = None,
     timeout: int = 600,
+    workspace: str | None = None,
+    ephemeral: bool = False,
     tool_args: list[str] | None = None,
     base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
@@ -318,6 +329,11 @@ def _handle_run_tool(
 
     from .container.runner import AgentRunner
 
+    # Same default policy as ``run``: bare invocation works on an isolated
+    # clone of the current repo; --workspace brings its own content.
+    if repo is None and workspace is None:
+        repo = "."
+
     effective_gate = gate and not no_gate
     runner = AgentRunner(base_image=base, family=family, cfg=cfg)
     cname = runner.run_tool(
@@ -328,6 +344,8 @@ def _handle_run_tool(
         gate=effective_gate,
         name=name,
         timeout=timeout,
+        workspace=Path(workspace) if workspace else None,
+        ephemeral=ephemeral,
         timezone=timezone,
     )
     print(f"Container: {cname}")
@@ -528,17 +546,52 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
     yaml.dump(data, sys.stdout)
 
 
-def _handle_stop(*, name: str) -> None:
-    """Stop a running container (best-effort)."""
-    from terok_executor.integrations.sandbox import PodmanRuntime
+def _handle_start(*, name: str) -> None:
+    """Start a stopped container, re-establishing its host scaffolding."""
+    from terok_executor.integrations.sandbox import Sandbox
+
+    try:
+        Sandbox().start(name)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Started: {name}")
+
+
+def _handle_stop(*, name: str, timeout: int = 10) -> None:
+    """Stop a container, keeping it for a later ``start``."""
+    from terok_executor.integrations.sandbox import PodmanRuntime, Sandbox
 
     runtime = PodmanRuntime()
-    container = runtime.container(name)
-    if container.state is None:
+    if runtime.container(name).state is None:
         print(f"Container not found: {name}")
         return
-    runtime.force_remove([container])
+    Sandbox(runtime=runtime).stop([name], timeout=timeout)
     print(f"Stopped: {name}")
+
+
+def _handle_rm(*, name: str) -> None:
+    """Remove a container together with its host-side state.
+
+    Also sweeps the per-container state when the container is already
+    gone — the one situation (crash, out-of-band ``podman rm``) where
+    residue outlives its container.
+    """
+    import shutil
+
+    from terok_executor.integrations.sandbox import (
+        PodmanRuntime,
+        Sandbox,
+        remove_container_state,
+    )
+    from terok_executor.paths import container_state_dir
+
+    sandbox = Sandbox(runtime=PodmanRuntime())
+    [result] = sandbox.rm([name])
+    if not result.removed:
+        raise SystemExit(f"Could not remove {name}: {result.error}")
+    remove_container_state(name, cfg=sandbox.config)
+    shutil.rmtree(container_state_dir(name), ignore_errors=True)
+    print(f"Removed: {name}")
 
 
 def _handle_setup(
@@ -674,7 +727,13 @@ RUN_COMMAND = CommandDef(
     handler=_handle_run,
     args=(
         ArgDef(name="agent", help="Agent name (claude, codex, vibe, ...)"),
-        ArgDef(name="repo", nargs="?", default=".", help="Local path or git URL (default: .)"),
+        ArgDef(
+            name="repo",
+            nargs="?",
+            default=None,
+            help="Git URL or local dir cloned into the workspace via the gate "
+            "(default: . — unless --workspace brings its own content)",
+        ),
         ArgDef(name="-p", dest="prompt", help="Prompt for headless mode"),
         ArgDef(name="-m", dest="model", help="Model override"),
         ArgDef(name="--max-turns", type=int, help="Maximum agent turns"),
@@ -694,6 +753,17 @@ RUN_COMMAND = CommandDef(
         ArgDef(name="--gpu", action="store_true", help="Enable GPU passthrough"),
         ArgDef(name="--memory", help="Container memory limit (e.g. 4g, 512m)"),
         ArgDef(name="--cpus", help="Container CPU limit (e.g. 2.0, 0.5)"),
+        ArgDef(
+            name="--workspace",
+            help="Host directory to mount at /workspace "
+            "(default: the workspace lives in the container)",
+        ),
+        ArgDef(
+            name="--rm",
+            dest="ephemeral",
+            action="store_true",
+            help="Remove the container when it exits (podman --rm)",
+        ),
         ArgDef(
             name="--git-identity-from-host",
             action="store_true",
@@ -744,12 +814,29 @@ RUN_TOOL_COMMAND = CommandDef(
     handler=_handle_run_tool,
     args=(
         ArgDef(name="tool", help="Tool name (coderabbit)"),
-        ArgDef(name="repo", nargs="?", default=".", help="Local path or git URL (default: .)"),
+        ArgDef(
+            name="repo",
+            nargs="?",
+            default=None,
+            help="Git URL or local dir cloned into the workspace via the gate "
+            "(default: . — unless --workspace brings its own content)",
+        ),
         ArgDef(name="--branch", help="Git branch to check out"),
         ArgDef(name="--gate", action="store_true", default=True, help="Use gate (default)"),
         ArgDef(name="--no-gate", action="store_true", help="Disable gate"),
         ArgDef(name="--name", help="Container name override"),
         ArgDef(name="--timeout", type=int, default=600, help="Timeout in seconds (default: 600)"),
+        ArgDef(
+            name="--workspace",
+            help="Host directory to mount at /workspace "
+            "(default: the workspace lives in the container)",
+        ),
+        ArgDef(
+            name="--rm",
+            dest="ephemeral",
+            action="store_true",
+            help="Remove the container when it exits (podman --rm)",
+        ),
         ArgDef(name="tool_args", nargs="*", help="Extra args passed to the tool (after --)"),
         ArgDef(
             name="--base",
@@ -902,10 +989,32 @@ SHOW_CONFIG_COMMAND = CommandDef(
     handler=_handle_show_config,
 )
 
+START_COMMAND = CommandDef(
+    name="start",
+    help="Start a stopped container",
+    handler=_handle_start,
+    args=(ArgDef(name="name", help="Container name"),),
+)
+
 STOP_COMMAND = CommandDef(
     name="stop",
-    help="Stop a running container",
+    help="Stop a container (kept for a later start)",
     handler=_handle_stop,
+    args=(
+        ArgDef(name="name", help="Container name"),
+        ArgDef(
+            name="--timeout",
+            type=int,
+            default=10,
+            help="Seconds before the stop escalates to SIGKILL (default: 10)",
+        ),
+    ),
+)
+
+RM_COMMAND = CommandDef(
+    name="rm",
+    help="Remove a container and its host-side state",
+    handler=_handle_rm,
     args=(ArgDef(name="name", help="Container name"),),
 )
 
@@ -979,7 +1088,9 @@ COMMANDS: tuple[CommandDef, ...] = (
     SETUP_COMMAND,
     UNINSTALL_COMMAND,
     LIST_COMMAND,
+    START_COMMAND,
     STOP_COMMAND,
+    RM_COMMAND,
     SHOW_CONFIG_COMMAND,
     ACP_COMMAND,
 )

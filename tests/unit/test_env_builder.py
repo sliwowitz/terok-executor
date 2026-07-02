@@ -339,6 +339,13 @@ class TestWorkspaceVolume:
         assert ws.host_path == base_spec.workspace_host_path
         assert ws.sharing == "private"
 
+    def test_in_container_workspace_mounts_nothing(self, envs_dir, roster):
+        """No workspace_host_path → no /workspace volume (writable-layer cell)."""
+        spec = ContainerEnvSpec(task_id="t1", agent_name="claude", envs_dir=envs_dir)
+        result = assemble_container_env(spec, roster, caller_manages_vault=True)
+        assert _find_vol(result.volumes, "/workspace") is None
+        assert result.env["REPO_ROOT"] == "/workspace"
+
 
 # ---------------------------------------------------------------------------
 # Shared config mounts
@@ -790,22 +797,6 @@ class TestVaultTokenInjection:
 # ---------------------------------------------------------------------------
 # Task dir
 # ---------------------------------------------------------------------------
-
-
-class TestTaskDir:
-    """Verify task_dir resolution."""
-
-    def test_explicit_task_dir(self, workspace, envs_dir, roster, tmp_path):
-        td = tmp_path / "my-task"
-        td.mkdir()
-        spec = _spec(workspace, envs_dir, task_dir=td)
-        result = assemble_container_env(spec, roster, caller_manages_vault=True)
-        assert result.task_dir == td
-
-    def test_auto_creates_temp_dir(self, base_spec, roster):
-        result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
-        assert result.task_dir.exists()
-        assert "terok-executor-test-123" in str(result.task_dir)
 
 
 # ---------------------------------------------------------------------------

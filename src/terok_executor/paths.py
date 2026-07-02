@@ -25,6 +25,31 @@ def state_root() -> Path:
     return namespace_state_dir(_SUBDIR, env_var="TEROK_EXECUTOR_STATE_DIR")
 
 
+def container_state_dir(container_name: str) -> Path:
+    """Host-side state directory for one container, derived from its name.
+
+    ``state_root()/run/<name>`` carries what a run keeps on the host even
+    when the workspace lives in-container: shield state and the staged
+    agent config.  ``run`` creates it, ``rm`` removes it.  Deriving the
+    path from the container name keeps podman the only container
+    registry — no executor-side index is needed to find a container's
+    state.
+
+    Raises:
+        ValueError: If *container_name* is empty or carries a path
+            separator / traversal segment — such a name would redirect
+            the directory outside executor-owned state.
+    """
+    if (
+        not container_name
+        or container_name in (".", "..")
+        or "/" in container_name
+        or "\\" in container_name
+    ):
+        raise ValueError(f"invalid container name: {container_name!r}")
+    return state_root() / "run" / container_name
+
+
 def mounts_dir() -> Path:
     """Base directory for agent config bind-mounts (container-writable).
 

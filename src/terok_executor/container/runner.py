@@ -19,13 +19,14 @@ from __future__ import annotations
 import logging
 import shlex
 import sys
-import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
+from terok_executor.paths import container_state_dir
 
 from .build import BuildError, ImageBuilder
 
@@ -42,6 +43,26 @@ if TYPE_CHECKING:
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class WorkspaceProvision:
+    """The two workspace axes of a run, resolved: location and content."""
+
+    host_dir: Path | None
+    """Host directory mounted at ``/workspace``; ``None`` keeps the
+    workspace in the container's writable layer."""
+
+    code_repo: str | None
+    """Clone URL handed to the init script (``CODE_REPO``); ``None``
+    provisions nothing."""
+
+    gate_token: str | None
+    """Per-container gate token when the clone URL routes through the gate."""
+
+    source_dir: Path | None
+    """Local directory the code came from, when the repo was a path —
+    kept for repo-level instructions discovery."""
 
 
 class AgentRunner:
@@ -131,7 +152,7 @@ class AgentRunner:
     def run_headless(
         self,
         agent: str,
-        repo: str,
+        repo: str | None,
         *,
         prompt: str,
         branch: str | None = None,
@@ -145,6 +166,8 @@ class AgentRunner:
         gpu: bool = False,
         memory: str | None = None,
         cpus: str | None = None,
+        workspace: Path | None = None,
+        ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
         human_name: str | None = None,
         human_email: str | None = None,
@@ -158,9 +181,15 @@ class AgentRunner:
     ) -> str:
         """Launch a headless agent run. Returns container name.
 
-        The agent executes the *prompt* against *repo* (local path or git URL)
-        and exits when done or when *timeout* is reached.  Set *follow=True*
-        to block until the agent finishes (the CLI does this by default).
+        The agent executes the *prompt* against *repo* (git URL or local
+        directory, cloned into the workspace via the gate) and exits when
+        done or when *timeout* is reached.  Set *follow=True* to block
+        until the agent finishes (the CLI does this by default).
+
+        The workspace lives in the container's writable layer unless
+        *workspace* names a host directory to bind-mount; the container is
+        retained after exit unless *ephemeral* asks podman to remove it
+        (``--rm``) — the same two axes ``podman run`` users already know.
 
         *project_id*, *task_id*, *dossier_path* propagate the terok
         orchestrator's identity into the per-container supervisor sidecar.
@@ -182,6 +211,8 @@ class AgentRunner:
             gpu=gpu,
             memory=memory,
             cpus=cpus,
+            workspace=workspace,
+            ephemeral=ephemeral,
             hooks=hooks,
             human_name=human_name,
             human_email=human_email,
@@ -197,7 +228,7 @@ class AgentRunner:
     def run_interactive(
         self,
         agent: str,
-        repo: str,
+        repo: str | None,
         *,
         branch: str | None = None,
         gate: bool = True,
@@ -206,6 +237,8 @@ class AgentRunner:
         gpu: bool = False,
         memory: str | None = None,
         cpus: str | None = None,
+        workspace: Path | None = None,
+        ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
         human_name: str | None = None,
         human_email: str | None = None,
@@ -235,6 +268,8 @@ class AgentRunner:
             gpu=gpu,
             memory=memory,
             cpus=cpus,
+            workspace=workspace,
+            ephemeral=ephemeral,
             hooks=hooks,
             human_name=human_name,
             human_email=human_email,
@@ -249,7 +284,7 @@ class AgentRunner:
 
     def run_web(
         self,
-        repo: str,
+        repo: str | None,
         *,
         port: int | None = None,
         branch: str | None = None,
@@ -260,6 +295,8 @@ class AgentRunner:
         gpu: bool = False,
         memory: str | None = None,
         cpus: str | None = None,
+        workspace: Path | None = None,
+        ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
         human_name: str | None = None,
         human_email: str | None = None,
@@ -294,6 +331,8 @@ class AgentRunner:
             gpu=gpu,
             memory=memory,
             cpus=cpus,
+            workspace=workspace,
+            ephemeral=ephemeral,
             hooks=hooks,
             human_name=human_name,
             human_email=human_email,
@@ -309,7 +348,7 @@ class AgentRunner:
     def run_tool(
         self,
         tool: str,
-        repo: str,
+        repo: str | None,
         *,
         tool_args: tuple[str, ...] = (),
         branch: str | None = None,
@@ -317,6 +356,8 @@ class AgentRunner:
         name: str | None = None,
         follow: bool = True,
         timeout: int = 600,
+        workspace: Path | None = None,
+        ephemeral: bool = False,
         timezone: str | None = None,
         project_id: str = "",
         task_id: str = "",
@@ -341,6 +382,8 @@ class AgentRunner:
             timeout=timeout,
             tool_args=tool_args,
             branch=branch,
+            workspace=workspace,
+            ephemeral=ephemeral,
             timezone=timezone,
             project_id=project_id,
             supervisor_task_id=task_id,
@@ -359,6 +402,7 @@ class AgentRunner:
         gpu: bool = False,
         memory: str | None = None,
         cpus: str | None = None,
+        ephemeral: bool = False,
         unrestricted: bool = True,
         sealed: bool = False,
         hooks: LifecycleHooks | None = None,
@@ -394,6 +438,9 @@ class AgentRunner:
             gpu: Pass GPU device args when True.
             memory: Podman ``--memory`` value (``"4g"`` etc.); ``None`` = unlimited.
             cpus: Podman ``--cpus`` value (``"2.0"`` etc.); ``None`` = unlimited.
+            ephemeral: When True, podman removes the container as soon as
+                it exits (``--rm``); the default keeps it for
+                ``start``/``rm``, matching ``podman run``.
             unrestricted: When False, adds ``--security-opt no-new-privileges``.
             sealed: Enable sealed isolation (no bind mounts).
             hooks: Optional lifecycle callbacks fired around the launch.
@@ -554,6 +601,7 @@ class AgentRunner:
             extra_args=tuple(extra_args or ()),
             unrestricted=unrestricted,
             sealed=sealed,
+            ephemeral=ephemeral,
             hostname=hostname,
             annotations=spec_annotations,
             runtime=runtime,
@@ -746,7 +794,7 @@ class AgentRunner:
         self,
         *,
         agent: str,
-        repo: str,
+        repo: str | None,
         mode: str,
         prompt: str | None = None,
         branch: str | None = None,
@@ -762,6 +810,8 @@ class AgentRunner:
         gpu: bool = False,
         memory: str | None = None,
         cpus: str | None = None,
+        workspace: Path | None = None,
+        ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
         tool_args: tuple[str, ...] = (),
         human_name: str | None = None,
@@ -782,7 +832,6 @@ class AgentRunner:
 
         is_tool = mode == "tool"
         task_id = _generate_task_id()
-        code_repo, local_path = _resolve_repo(repo)
 
         # Resolve the container name and allocate the per-container socket
         # dir / TCP ports ONCE, up front.  The same instance is threaded
@@ -804,8 +853,12 @@ class AgentRunner:
             agent_spec = self.roster.get_agent(agent)
             image_tag = self._ensure_images()
 
-        # Task directory (ephemeral for standalone runs)
-        task_dir = Path(tempfile.mkdtemp(prefix=f"terok-executor-{task_id}-"))
+        # Per-container host state (shield state, staged agent config) —
+        # derived from the name so ``rm`` can find it without a registry.
+        task_dir = container_state_dir(cname)
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        provision = self._provision_workspace(workspace=workspace, repo=repo, gate=gate)
 
         mounts_base = mounts_dir()
 
@@ -821,24 +874,17 @@ class AgentRunner:
             if branch:
                 env["GIT_BRANCH"] = branch
             env.update(self._direct_credential_env(agent))
+            if provision.code_repo:
+                env["CODE_REPO"] = provision.code_repo
+            if provision.gate_token is not None:
+                # The launch path wires this into the supervisor sidecar.
+                env["TEROK_GATE_TOKEN"] = provision.gate_token
 
             volumes: list[VolumeSpec] = []
-            if local_path:
-                volumes.append(VolumeSpec(local_path, "/workspace", sharing=Sharing.PRIVATE))
-            elif code_repo:
-                if gate:
-                    effective_repo, gate_token = self._setup_gate(code_repo)
-                    # The launch path wires this into the supervisor sidecar.
-                    env["TEROK_GATE_TOKEN"] = gate_token
-                else:
-                    effective_repo = code_repo
-                env["CODE_REPO"] = effective_repo
-                workspace = task_dir / "workspace"
-                workspace.mkdir(parents=True, exist_ok=True)
-                _seed_from_cache(
-                    workspace, code_repo, self.sandbox.config, origin_url=effective_repo
+            if provision.host_dir is not None:
+                volumes.append(
+                    VolumeSpec(provision.host_dir, "/workspace", sharing=Sharing.PRIVATE)
                 )
-                volumes.append(VolumeSpec(workspace, "/workspace", sharing=Sharing.PRIVATE))
         else:
             # Agent modes: full env assembly via canonical builder
             agent_config_dir = self._prepare_agent_config(
@@ -847,37 +893,17 @@ class AgentRunner:
                 agent,
                 prompt=prompt,
                 mounts_base=mounts_base,
-                project_root=local_path,
+                project_root=provision.source_dir or provision.host_dir,
             )
-
-            # Resolve workspace and gate URL
-            gate_token = None
-            if local_path:
-                ws_host = local_path
-                resolved_code_repo = None
-            elif code_repo:
-                if gate:
-                    effective_repo, gate_token = self._setup_gate(code_repo)
-                else:
-                    effective_repo = code_repo
-                ws_host = task_dir / "workspace"
-                ws_host.mkdir(parents=True, exist_ok=True)
-                _seed_from_cache(ws_host, code_repo, self.sandbox.config, origin_url=effective_repo)
-                resolved_code_repo = effective_repo
-            else:
-                ws_host = task_dir / "workspace"
-                ws_host.mkdir(parents=True, exist_ok=True)
-                resolved_code_repo = None
 
             spec_kwargs: dict = {
                 "task_id": task_id,
                 "agent_name": agent,
-                "workspace_host_path": ws_host,
-                "code_repo": resolved_code_repo,
+                "workspace_host_path": provision.host_dir,
+                "code_repo": provision.code_repo,
                 "branch": branch,
                 "unrestricted": unrestricted,
                 "agent_config_dir": agent_config_dir,
-                "task_dir": task_dir,
                 "envs_dir": mounts_base,
                 "timezone": timezone,
             }
@@ -903,9 +929,9 @@ class AgentRunner:
                 per_container=per_container,
             )
             env = dict(result.env)
-            if gate_token is not None:
+            if provision.gate_token is not None:
                 # The launch path wires this into the supervisor sidecar.
-                env["TEROK_GATE_TOKEN"] = gate_token
+                env["TEROK_GATE_TOKEN"] = provision.gate_token
             volumes = list(result.volumes)
 
         # Build command based on mode
@@ -949,6 +975,7 @@ class AgentRunner:
             gpu=gpu,
             memory=memory,
             cpus=cpus,
+            ephemeral=ephemeral,
             unrestricted=unrestricted,
             extra_args=extra_args or None,
             hooks=hooks,
@@ -999,6 +1026,59 @@ class AgentRunner:
         """Ensure sidecar L1 exists for *tool_name*, return its tag."""
 
         return ImageBuilder(self._base_image, self._family).build_sidecar(tool_name=tool_name)
+
+    def _provision_workspace(
+        self,
+        *,
+        workspace: Path | None,
+        repo: str | None,
+        gate: bool,
+    ) -> WorkspaceProvision:
+        """Resolve the two workspace axes of a run: location and content.
+
+        Location: *workspace* names a host directory to bind-mount at
+        ``/workspace``; ``None`` (the default) keeps the workspace in the
+        container's writable layer.  Content: *repo* — git URL or local
+        directory — becomes the clone source the in-container init script
+        pulls from; a local directory is mirrored through the gate exactly
+        like a URL, so the agent works on an isolated clone and the source
+        checkout stays untouched.  ``None`` provisions an empty workspace.
+
+        A mounted workspace additionally gets a host-side seed from the
+        clone cache; the in-container cell starts from the gate mirror
+        alone (there is no host directory to seed).
+
+        Raises:
+            SystemExit: For a local *repo* with the gate disabled — a host
+                directory is unreachable from inside the container except
+                through the gate; bind-mount it with ``--workspace``
+                instead, or drop ``--no-gate``.
+        """
+        host_dir: Path | None = None
+        if workspace is not None:
+            host_dir = workspace.expanduser().resolve()
+            host_dir.mkdir(parents=True, exist_ok=True)
+
+        if repo is None:
+            return WorkspaceProvision(host_dir, None, None, None)
+
+        code_repo, local_path = _resolve_repo(repo)
+        source = code_repo or str(local_path)
+        gate_token: str | None = None
+        if gate:
+            effective_repo, gate_token = self._setup_gate(source)
+        elif local_path is not None:
+            raise SystemExit(
+                f"Local repo {local_path} is unreachable from the container "
+                "without the gate; drop --no-gate, or bind-mount it with "
+                "--workspace instead."
+            )
+        else:
+            effective_repo = code_repo
+
+        if host_dir is not None:
+            _seed_from_cache(host_dir, source, self.sandbox.config, origin_url=effective_repo)
+        return WorkspaceProvision(host_dir, effective_repo, gate_token, local_path)
 
     def _setup_gate(self, repo_url: str) -> tuple[str, str]:
         """Mirror a repo via the gate and return ``(gate_url, gate_token)``.
