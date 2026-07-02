@@ -70,7 +70,7 @@ _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _MAGENTA = "\033[35m"
 _RESET = "\033[0m"
-_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 """Matches the SGR escapes embedded in a baked banner label, so a dimmed line
 can be flattened to plain text before being wrapped in a single dim span."""
 
@@ -90,7 +90,7 @@ _BASE_MARKER = "_BASE_"
 # ── Entry point ──
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str]) -> None:
     """Write the readiness manifest, or render a ``hilfe`` section.
 
     ``--banner`` prints the dimmed/bright agent list; ``--protocols`` prints the
@@ -98,21 +98,19 @@ def main(argv: list[str]) -> int:
     live and leave the manifest file untouched — a login banner is a read, not a
     checkpoint.  With no flag the manifest is (re)written.
     """
+    flags = argv[1:]
     installed = _read_installed_agents(INSTALLED_ENV_PATH)
     facts = _read_agent_facts(AGENT_FACTS_PATH)
     universe = _read_provider_protocols(PROVIDER_PROTOCOLS_PATH)
     manifest = build_manifest(installed, facts, universe, os.environ)
 
-    if "--banner" in argv[1:]:
+    if "--banner" in flags:
         _print_if_nonempty(render_agent_banner(manifest["agents"]))
-        return 0
-    if "--protocols" in argv[1:]:
+    elif "--protocols" in flags:
         _print_if_nonempty(render_provider_protocols(manifest["protocols"]))
-        return 0
-
-    _write_manifest(MANIFEST_PATH, manifest)
-    _print_summary(manifest)
-    return 0
+    else:
+        _write_manifest(MANIFEST_PATH, manifest)
+        _print_summary(manifest)
 
 
 def _print_if_nonempty(text: str) -> None:
@@ -385,8 +383,10 @@ def _print_summary(manifest: dict[str, object]) -> None:
 
 
 if __name__ == "__main__":
+    # Advisory metadata must never abort container init, so any failure is
+    # reported and swallowed — the command always exits 0.
     try:
-        sys.exit(main(sys.argv))
+        main(sys.argv)
     except Exception as exc:  # noqa: BLE001 — advisory metadata must not abort init
         print(f"terok-agents: could not write readiness manifest: {exc}", file=sys.stderr)
-        sys.exit(0)
+    sys.exit(0)
