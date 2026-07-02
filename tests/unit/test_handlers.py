@@ -48,6 +48,29 @@ def test_handle_auth_oauth_path_routes_through_authenticator() -> None:
     cls.return_value.run.assert_called_once()
 
 
+def test_handle_auth_device_auth_forwards_to_run() -> None:
+    """``--device-auth`` rides through to ``Authenticator.run(device_auth=True)``."""
+    with (
+        mock.patch("terok_executor.credentials.auth.Authenticator") as cls,
+        mock.patch("terok_executor.credentials.vault_config.write_vault_config"),
+    ):
+        _handle_auth(agent="codex", device_auth=True)
+    assert cls.return_value.run.call_args.kwargs["device_auth"] is True
+
+
+def test_handle_auth_api_key_and_device_auth_warns_and_takes_api_key(capsys) -> None:
+    """Both flags given → API key wins, `--device-auth` is ignored with a warning."""
+    with (
+        mock.patch("terok_executor.credentials.auth.store_api_key") as store,
+        mock.patch("terok_executor.credentials.auth.Authenticator") as cls,
+        mock.patch("terok_executor.credentials.vault_config.write_vault_config"),
+    ):
+        _handle_auth(agent="codex", api_key="sk-test", device_auth=True)
+    store.assert_called_once()  # API-key route taken
+    cls.return_value.run.assert_not_called()  # no auth container
+    assert "--device-auth is ignored" in capsys.readouterr().err
+
+
 def test_handle_auth_empty_api_key_raises() -> None:
     """Empty api_key surfaces as a clean SystemExit, not an obscure failure."""
     with pytest.raises(SystemExit, match="cannot be empty"):

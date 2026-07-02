@@ -1460,3 +1460,78 @@ class TestAuthenticateCredentialSet:
         ):
             authenticate(None, "vibe", mounts_dir=tmp_path)
         mock_store.assert_called_once_with("vibe", "sk", credential_set="default")
+
+
+class TestDeviceAuthForcePath:
+    """``authenticate(device_auth=True)`` skips the chooser and forces device-code."""
+
+    @staticmethod
+    def _codex(*, device_auth: bool = True) -> object:
+        from terok_executor.credentials.auth import AuthProvider
+
+        return AuthProvider(
+            name="codex",
+            label="Codex",
+            host_dir_name="_codex-config",
+            container_mount="/home/dev/.codex",
+            command=["setup-codex-auth.sh"],
+            banner_hint="",
+            modes=("oauth", "api_key"),
+            api_key_hint="hint",
+            device_auth=device_auth,
+        )
+
+    def test_forces_device_login_without_prompt(self, tmp_path: Path) -> None:
+        """No ``input`` is read and the container runs with ``device_auth=True``."""
+        from terok_executor.credentials.auth import authenticate
+
+        def _boom(*_a: object, **_k: object) -> str:
+            raise AssertionError("device_auth must not prompt")
+
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": self._codex()},
+                clear=True,
+            ),
+            patch("builtins.input", _boom),
+            patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
+        ):
+            authenticate(None, "codex", mounts_dir=tmp_path, image="l1:tag", device_auth=True)
+
+        assert mock_run.call_args.kwargs["device_auth"] is True
+
+    def test_unsupported_provider_raises(self, tmp_path: Path) -> None:
+        """Forcing device-auth on a provider that lacks it is a hard error."""
+        from terok_executor.credentials.auth import authenticate
+
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": self._codex(device_auth=False)},
+                clear=True,
+            ),
+            pytest.raises(SystemExit, match="no device-code login"),
+        ):
+            authenticate(None, "codex", mounts_dir=tmp_path, image="l1:tag", device_auth=True)
+
+    def test_oauth_gated_off_raises(self, tmp_path: Path) -> None:
+        """A closed OAuth gate blocks the device-code variant too."""
+        from terok_executor.credentials.auth import authenticate
+
+        with (
+            patch.dict(
+                "terok_executor.credentials.auth.AUTH_PROVIDERS",
+                {"codex": self._codex()},
+                clear=True,
+            ),
+            pytest.raises(SystemExit, match="requires OAuth"),
+        ):
+            authenticate(
+                None,
+                "codex",
+                mounts_dir=tmp_path,
+                image="l1:tag",
+                oauth_enabled=False,
+                device_auth=True,
+            )

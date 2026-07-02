@@ -185,13 +185,15 @@ class Authenticator:
         expose_token: bool = False,
         oauth_enabled: bool = True,
         credential_set: str = "default",
+        device_auth: bool = False,
     ) -> None:
         """Run the auth flow for ``self.provider``; see module-level docs.
 
         Mirrors the parameters of the underlying ``authenticate`` free
         function — instance-bound ``self.provider`` replaces the old
-        positional ``provider`` arg.  The device-code login is offered as a
-        method in that flow's prompt, so it needs no parameter here.
+        positional ``provider`` arg.  The device-code login is normally
+        offered as a method in that flow's prompt; pass *device_auth* to
+        skip the prompt and force it (the headless ``--device-auth`` path).
         """
         authenticate(
             project_id,
@@ -201,6 +203,7 @@ class Authenticator:
             expose_token=expose_token,
             oauth_enabled=oauth_enabled,
             credential_set=credential_set,
+            device_auth=device_auth,
         )
 
     def prepare_oauth(
@@ -255,6 +258,7 @@ def authenticate(
     expose_token: bool = False,
     oauth_enabled: bool = True,
     credential_set: str = "default",
+    device_auth: bool = False,
 ) -> None:
     """Run the auth flow for *provider*, optionally scoped to a project.
 
@@ -264,6 +268,11 @@ def authenticate(
     the roster declares (``modes:``, ``device_auth``) intersected with what the
     caller permits via *oauth_enabled*.  One method runs straight through; two or
     more prompt the user to choose.
+
+    Pass *device_auth* to force the device-code variant non-interactively
+    (the headless ``--device-auth`` path): the menu is skipped and the
+    device-code login runs straight through.  Raises ``SystemExit`` if the
+    provider has no device-code login or OAuth is gated off.
 
     Args:
         project_id: Project identifier used for container naming and the
@@ -339,6 +348,22 @@ def authenticate(
             methods.append(("OAuth login — device code", lambda: _oauth(device=True)))
     if has_api_key:
         methods.append(("API key", _api_key))
+
+    if device_auth:
+        # Headless force: bypass the chooser and run the device-code login
+        # directly.  Reuses the OAuth gate's hint when the path is closed.
+        if not has_oauth:
+            raise SystemExit(
+                f"Device-code auth for {provider!r} requires OAuth, but it is "
+                f"disabled by the caller's gating policy.  For terok this "
+                f"typically means the experimental flag and/or the "
+                f"provider-specific allow_oauth/expose_oauth_token config "
+                f"keys are unset."
+            )
+        if not info.supports_device_auth:
+            raise SystemExit(f"Provider {provider!r} has no device-code login.")
+        _oauth(device=True)
+        return
 
     if not methods:
         # Provider declares only OAuth and the caller's gate is closed.
