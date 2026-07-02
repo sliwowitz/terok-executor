@@ -844,8 +844,8 @@ def stage_toad_agents(dest: Path) -> None:
 def stage_help_fragments(dest: Path, agents: tuple[str, ...]) -> None:
     """Render the baked ``hilfe`` help fragments into *dest*.
 
-    Writes one file per *bakeable* section — only ``dev_tool`` (see
-    [`_HELP_SECTION_FILES`][terok_executor.container.build._HELP_SECTION_FILES]) — holding the labels of the
+    Writes one file per *bakeable* section — only ``dev_tool`` (see the
+    module-level ``_HELP_SECTION_FILES`` map) — holding the labels of the
     selected entries that have a ``help:`` block, with backslash escapes
     (``\\033[...]``) interpreted into real ANSI so that ``hilfe`` only needs to
     ``cat`` them.  The ``agent`` section is deliberately not baked: ``hilfe``
