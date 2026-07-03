@@ -16,18 +16,18 @@ maintainers = [
 keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
 requires-python = ">=3.12,<3.15"
 dynamic = ["version", "classifiers"]
+# Dependency pins follow the policy in AGENTS.md ("Dependency Pinning &
+# pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
-    # 0.3.0 floor: write_sidecar (the canonical sidecar writer this
-    # package calls) entered the public API in that release.
     "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.3.2a1/terok_sandbox-0.3.2a1-py3-none-any.whl",
     "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.2.0/terok_util-0.2.0-py3-none-any.whl",
-    "ruamel.yaml>=0.18",
-    "Jinja2>=3.1",
-    "tomli-w>=1.0",
-    "prompt-toolkit>=3.0",
-    "pydantic>=2.9",
-    "rich>=13.0",
-    "agent-client-protocol>=0.10.1",
+    "ruamel.yaml==0.19.1",
+    "Jinja2~=3.1",
+    "tomli-w~=1.2",
+    "prompt-toolkit~=3.0",
+    "pydantic~=2.13",
+    "rich~=15.0",
+    "agent-client-protocol==0.10.1",
 ]
 
 [project.urls]
@@ -131,7 +131,7 @@ quote-style = "double"
 indent-style = "space"
 docstring-code-format = true
 
-# Static type checking — see `make typecheck`.
+# Static type checking -- see `make typecheck`.
 # ``resources/`` is excluded entirely: it holds container-side scripts and
 # bundled agent assets that aren't part of the host-side import graph
 # (``resources/toad-agents/`` isn't even a valid Python package name).
@@ -152,7 +152,7 @@ pretty = true
 show_error_codes = true
 
 # ``resources/`` holds container-side scripts (run inside task containers, not
-# part of the host import graph — the same reason mypy excludes it).  Tests
+# part of the host import graph -- the same reason mypy excludes it).  Tests
 # exercise them by path-loading (``SourceFileLoader``), which coverage.py can't
 # attribute, so they report 0%; omit them rather than chase phantom misses.
 [tool.coverage.run]
