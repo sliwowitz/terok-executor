@@ -3420,13 +3420,14 @@ url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.7.2/tero
 
 [[package]]
 name = "terok-sandbox"
-version = "0.3.2a1"
+version = "0.3.2a2"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "terok_sandbox-0.3.2a2-py3-none-any.whl", hash = "sha256:8111575c5cc0ff04e712408d467b1138f88b7976a415f057457b77b42569eb99"},
+]
 
 [package.dependencies]
 aiohttp = ">=3.14.1,<3.15.0"
@@ -3444,10 +3445,8 @@ terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/downloa
 terok_util = {url = "https://github.com/terok-ai/terok-util/releases/download/v0.2.0/terok_util-0.2.0-py3-none-any.whl"}
 
 [package.source]
-type = "git"
-url = "https://github.com/sliwowitz/terok-sandbox.git"
-reference = "feat/lifecycle-verb-parity"
-resolved_reference = "d2daa472096e216df97de4d2613de14b225631ce"
+type = "url"
+url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.3.2a2/terok_sandbox-0.3.2a2-py3-none-any.whl"
 
 [[package]]
 name = "terok-shield"
@@ -3861,4 +3860,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "ea9c9db1b535ea8034019121e1923c25180fe69f8e832af0e42a940df4fac2c9"
+content-hash = "0465377103632b33a7837664fbbd1ad84e1615c0a7400589e1698251e4383de1"
