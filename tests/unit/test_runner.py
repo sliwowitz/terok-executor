@@ -37,6 +37,42 @@ class TestResolveRepo:
             _resolve_repo("./nonexistent-dir-xyz")
 
 
+class TestProvisionWorkspace:
+    """Verify the two-axis workspace resolution on the runner."""
+
+    def test_no_repo_no_workspace_provisions_nothing(self) -> None:
+        """Bare provision: in-container workspace, nothing to clone."""
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=None, repo=None, gate=True
+        )
+        assert provision.host_dir is None
+        assert provision.code_repo is None
+        assert provision.gate_token is None
+
+    def test_workspace_dir_is_created_and_mounted(self, tmp_path: Path) -> None:
+        """A --workspace dir is created on demand and returned as the mount."""
+        target = tmp_path / "made-on-demand"
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=target, repo=None, gate=True
+        )
+        assert provision.host_dir == target
+        assert target.is_dir()
+
+    def test_local_repo_without_gate_exits(self, tmp_path: Path) -> None:
+        """A local repo needs the gate — refusing beats a dead CODE_REPO path."""
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        with pytest.raises(SystemExit, match="--workspace"):
+            runner._provision_workspace(workspace=None, repo=str(tmp_path), gate=False)
+
+    def test_ungated_url_passes_through(self) -> None:
+        """--no-gate with a URL hands the upstream straight to the init script."""
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=None, repo="https://github.com/user/repo.git", gate=False
+        )
+        assert provision.code_repo == "https://github.com/user/repo.git"
+        assert provision.gate_token is None
+
+
 class TestTaskId:
     """Verify task ID generation."""
 
