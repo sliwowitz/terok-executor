@@ -37,6 +37,42 @@ class TestResolveRepo:
             _resolve_repo("./nonexistent-dir-xyz")
 
 
+class TestProvisionWorkspace:
+    """Verify the two-axis workspace resolution on the runner."""
+
+    def test_no_repo_no_workspace_provisions_nothing(self) -> None:
+        """Bare provision: in-container workspace, nothing to clone."""
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=None, repo=None, gate=True
+        )
+        assert provision.host_dir is None
+        assert provision.code_repo is None
+        assert provision.gate_token is None
+
+    def test_workspace_dir_is_created_and_mounted(self, tmp_path: Path) -> None:
+        """A --workspace dir is created on demand and returned as the mount."""
+        target = tmp_path / "made-on-demand"
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=target, repo=None, gate=True
+        )
+        assert provision.host_dir == target
+        assert target.is_dir()
+
+    def test_local_repo_without_gate_exits(self, tmp_path: Path) -> None:
+        """A local repo needs the gate — refusing beats a dead CODE_REPO path."""
+        runner = AgentRunner(sandbox=_mock_sandbox())
+        with pytest.raises(SystemExit, match="--workspace"):
+            runner._provision_workspace(workspace=None, repo=str(tmp_path), gate=False)
+
+    def test_ungated_url_passes_through(self) -> None:
+        """--no-gate with a URL hands the upstream straight to the init script."""
+        provision = AgentRunner(sandbox=_mock_sandbox())._provision_workspace(
+            workspace=None, repo="https://github.com/user/repo.git", gate=False
+        )
+        assert provision.code_repo == "https://github.com/user/repo.git"
+        assert provision.gate_token is None
+
+
 class TestTaskId:
     """Verify task ID generation."""
 
@@ -102,7 +138,8 @@ class TestAgentRunner:
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             cname = runner.run_headless(
                 "claude",
-                str(tmp_path),
+                None,
+                workspace=tmp_path,
                 prompt="Fix the bug",
                 follow=False,
             )
@@ -120,7 +157,7 @@ class TestAgentRunner:
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             runner.run_headless(
-                "claude", str(tmp_path), prompt="test", follow=False, unrestricted=False
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, unrestricted=False
             )
 
         spec = sandbox.run.call_args[0][0]
@@ -135,7 +172,7 @@ class TestAgentRunner:
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             runner.run_headless(
-                "claude", str(tmp_path), prompt="test", follow=False, unrestricted=True
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, unrestricted=True
             )
 
         spec = sandbox.run.call_args[0][0]
@@ -148,7 +185,9 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, gpu=True)
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, gpu=True
+            )
 
         spec = sandbox.run.call_args[0][0]
         assert spec.gpu_enabled is True
@@ -159,7 +198,9 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, memory="4g")
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, memory="4g"
+            )
 
         spec = sandbox.run.call_args[0][0]
         assert spec.memory == "4g"
@@ -170,7 +211,9 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, cpus="2.0")
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, cpus="2.0"
+            )
 
         spec = sandbox.run.call_args[0][0]
         assert spec.cpus == "2.0"
@@ -181,7 +224,7 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test", follow=False)
 
         spec = sandbox.run.call_args[0][0]
         assert spec.memory is None
@@ -193,7 +236,7 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_interactive("claude", str(tmp_path))
+            runner.run_interactive("claude", None, workspace=tmp_path)
 
         spec = sandbox.run.call_args[0][0]
         cmd_str = " ".join(spec.command)
@@ -238,7 +281,7 @@ class TestAgentRunner:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_web(str(tmp_path), port=9999)
+            runner.run_web(None, workspace=tmp_path, port=9999)
 
         spec = sandbox.run.call_args[0][0]
         assert "-p" in spec.extra_args
@@ -263,7 +306,7 @@ class TestAgentRunner:
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
             patch.object(AgentRunner, "runtime", runtime_mock),
         ):
-            runner.run_web(str(tmp_path))  # no port= arg
+            runner.run_web(None, workspace=tmp_path)  # no port= arg
 
         runtime_mock.reserve_port.assert_called_once()
         spec = sandbox.run.call_args[0][0]
@@ -280,7 +323,9 @@ class TestAgentRunner:
         hooks = LifecycleHooks(pre_start=lambda: None)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False, hooks=hooks)
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, hooks=hooks
+            )
 
         assert sandbox.run.call_args.kwargs["hooks"] is hooks
 
@@ -306,7 +351,7 @@ class TestAgentRunner:
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
             pytest.raises(BuildError, match="CDI broken"),
         ):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test", follow=False)
 
     def test_shared_mount_must_be_absolute(self, tmp_path: Path) -> None:
         """Relative shared_mount is rejected with SystemExit."""
@@ -318,7 +363,8 @@ class TestAgentRunner:
         ):
             runner.run_headless(
                 "claude",
-                str(tmp_path),
+                None,
+                workspace=tmp_path,
                 prompt="test",
                 follow=False,
                 shared_dir=tmp_path / "ipc",
@@ -335,7 +381,8 @@ class TestAgentRunner:
         ):
             runner.run_headless(
                 "claude",
-                str(tmp_path),
+                None,
+                workspace=tmp_path,
                 prompt="test",
                 follow=False,
                 shared_dir=tmp_path / "ipc",
@@ -354,7 +401,8 @@ class TestAgentRunner:
         ):
             runner.run_headless(
                 "claude",
-                str(tmp_path),
+                None,
+                workspace=tmp_path,
                 prompt="test",
                 follow=False,
                 shared_dir=existing_file,
@@ -369,7 +417,8 @@ class TestAgentRunner:
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             runner.run_headless(
                 "claude",
-                str(tmp_path),
+                None,
+                workspace=tmp_path,
                 prompt="test",
                 follow=False,
                 shared_dir=shared,
@@ -833,7 +882,7 @@ class TestLaunchPreparedSupervisorWiring:
             patch.object(env_mod, "assemble_container_env", _spy_assemble),
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
         ):
-            runner.run_headless("claude", str(tmp_path), prompt="x", follow=False)
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="x", follow=False)
 
         # Allocated exactly once for the whole launch — no second allocation in
         # ``launch_prepared`` that would hand back colliding ports.
@@ -1171,7 +1220,7 @@ class TestVaultEnv:
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
-            runner.run_headless("claude", str(tmp_path), prompt="test", follow=False)
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test", follow=False)
 
         spec = sandbox.run.call_args[0][0]
         assert "TEROK_TOKEN_BROKER_PORT" not in spec.env

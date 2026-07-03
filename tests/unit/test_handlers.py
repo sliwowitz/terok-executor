@@ -11,6 +11,7 @@ podman / vault / OAuth stack.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -20,6 +21,9 @@ from terok_executor.commands import (
     _handle_agents_set,
     _handle_auth,
     _handle_build,
+    _handle_rm,
+    _handle_start,
+    _handle_stop,
     _remove_images,
 )
 from terok_executor.container.build import ImageSet
@@ -148,3 +152,74 @@ def test_remove_images_uses_image_builder_tags() -> None:
     # L0 / L1 tags come from the ImageBuilder properties.
     assert "terok-l0:fedora-44" in argv
     assert "terok-l1-cli:fedora-44" in argv
+
+
+# ── lifecycle verbs: start / stop / rm ──────────────────────
+
+
+def test_handle_start_delegates_to_sandbox_start() -> None:
+    """``start`` routes through the facade so host scaffolding is rebuilt."""
+    with mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls:
+        _handle_start(name="ctr")
+    sandbox_cls.return_value.start.assert_called_once_with("ctr")
+
+
+def test_handle_start_maps_runtime_error_to_exit() -> None:
+    """A failed podman start surfaces as a clean SystemExit, not a traceback."""
+    with mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls:
+        sandbox_cls.return_value.start.side_effect = RuntimeError("no such container")
+        with pytest.raises(SystemExit, match="no such container"):
+            _handle_start(name="ctr")
+
+
+def test_handle_stop_stops_and_retains() -> None:
+    """``stop`` halts via the facade's retain-stop with the chosen timeout."""
+    with (
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
+        mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
+    ):
+        _handle_stop(name="ctr", timeout=5)
+    sandbox_cls.return_value.stop.assert_called_once_with(["ctr"], timeout=5)
+
+
+def test_handle_stop_missing_container_exits() -> None:
+    """A missing container errors, exactly as ``podman stop`` treats it."""
+    with (
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
+        mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
+    ):
+        sandbox_cls.return_value.stop.side_effect = RuntimeError("no such container: ctr")
+        with pytest.raises(SystemExit, match="no such container"):
+            _handle_stop(name="ctr")
+
+
+def test_handle_rm_removes_container_and_host_state(tmp_path) -> None:
+    """``rm`` composes container removal with both host-state sweeps."""
+    removed = SimpleNamespace(name="ctr", removed=True, error=None)
+    state_dir = tmp_path / "run" / "ctr"
+    state_dir.mkdir(parents=True)
+    with (
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
+        mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
+        mock.patch("terok_executor.integrations.sandbox.remove_container_state") as state,
+        mock.patch("terok_executor.paths.container_state_dir", return_value=state_dir),
+    ):
+        sandbox_cls.return_value.rm.return_value = [removed]
+        _handle_rm(name="ctr")
+    sandbox_cls.return_value.rm.assert_called_once_with(["ctr"])
+    state.assert_called_once_with("ctr", cfg=sandbox_cls.return_value.config)
+    assert not state_dir.exists()
+
+
+def test_handle_rm_failure_exits_without_state_sweep(tmp_path) -> None:
+    """A live container that can't be removed keeps its host state intact."""
+    failed = SimpleNamespace(name="ctr", removed=False, error="container is in use")
+    with (
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
+        mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
+        mock.patch("terok_executor.integrations.sandbox.remove_container_state") as state,
+    ):
+        sandbox_cls.return_value.rm.return_value = [failed]
+        with pytest.raises(SystemExit, match="in use"):
+            _handle_rm(name="ctr")
+    state.assert_not_called()

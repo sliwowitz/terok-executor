@@ -3420,33 +3420,33 @@ url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.7.2/tero
 
 [[package]]
 name = "terok-sandbox"
-version = "0.3.2a1"
+version = "0.3.2a2"
 description = "Hardened Podman container runner with gate server and shield integration"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_sandbox-0.3.2a1-py3-none-any.whl", hash = "sha256:bff8c1bdf1d3e11babcd04ccfb7bd150ad7f353d29d87f59b863db59cbd35b36"},
+    {file = "terok_sandbox-0.3.2a2-py3-none-any.whl", hash = "sha256:8111575c5cc0ff04e712408d467b1138f88b7976a415f057457b77b42569eb99"},
 ]
 
 [package.dependencies]
-aiohttp = ">=3.14.1"
-cryptography = ">=49.0.0"
-jinja2 = ">=3.1"
-keyring = ">=25.0"
-packaging = ">=24"
-platformdirs = ">=4.10.0"
-prompt-toolkit = ">=3.0"
-pydantic = ">=2.9"
-"ruamel.yaml" = ">=0.18"
-sqlcipher3 = ">=0.6.2"
+aiohttp = ">=3.14.1,<3.15.0"
+cryptography = ">=49.0,<50.0"
+jinja2 = ">=3.1,<4.0"
+keyring = ">=25.7,<26.0"
+packaging = ">=26.2,<27.0"
+platformdirs = ">=4.10,<5.0"
+prompt-toolkit = ">=3.0,<4.0"
+pydantic = ">=2.13,<3.0"
+"ruamel.yaml" = "0.19.1"
+sqlcipher3 = "0.6.2"
 terok_clearance = {url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.7.2/terok_clearance-0.7.2-py3-none-any.whl"}
 terok_shield = {url = "https://github.com/terok-ai/terok-shield/releases/download/v0.7.1/terok_shield-0.7.1-py3-none-any.whl"}
 terok_util = {url = "https://github.com/terok-ai/terok-util/releases/download/v0.2.0/terok_util-0.2.0-py3-none-any.whl"}
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.3.2a1/terok_sandbox-0.3.2a1-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.3.2a2/terok_sandbox-0.3.2a2-py3-none-any.whl"
 
 [[package]]
 name = "terok-shield"
@@ -3860,4 +3860,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "eadb649fb7616541648868536a1e852ec39c401c6c5e6fb951db2b362f85bfe6"
+content-hash = "0465377103632b33a7837664fbbd1ad84e1615c0a7400589e1698251e4383de1"

@@ -103,8 +103,10 @@ hooks).
 | `agents` | List the agent roster |
 | `build` | Build base + agent images explicitly |
 | `run-tool` | Run a sidecar tool (CodeRabbit, SonarCloud) |
-| `list` | List running containers |
-| `stop` | Stop a running container |
+| `list` | List containers |
+| `start` | Start a stopped container |
+| `stop` | Stop a container (kept for a later `start`) |
+| `rm` | Remove a container and its host-side state |
 | `show-config` | Print the effective `SandboxConfig` as YAML (diffable across orchestrators) |
 | `vault` | Vault management (start, stop, status, install, routes) |
 

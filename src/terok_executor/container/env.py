@@ -14,16 +14,15 @@ Usage::
     from terok_executor import AgentRoster
 
     result = assemble_container_env(
-        ContainerEnvSpec(task_id="abc", agent_name="claude", workspace_host_path=ws),
+        ContainerEnvSpec(task_id="abc", agent_name="claude"),
         AgentRoster.shared(),
     )
-    # result.env, result.volumes, result.task_dir
+    # result.env, result.volumes
 """
 
 from __future__ import annotations
 
 import logging
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -75,8 +74,13 @@ class ContainerEnvSpec:
     agent_name: str
     """Agent name (e.g. ``"claude"``, ``"codex"``)."""
 
-    workspace_host_path: Path
-    """Host-side workspace directory — caller pre-creates, mounted as ``/workspace:Z``."""
+    # -- Workspace location --------------------------------------------------
+
+    workspace_host_path: Path | None = None
+    """Host-side workspace directory — caller pre-creates, mounted as
+    ``/workspace:Z``.  ``None`` (the default) keeps the workspace in the
+    container's writable layer; the init script clones ``code_repo``
+    there."""
 
     # -- Repository setup --------------------------------------------------
 
@@ -202,9 +206,6 @@ class ContainerEnvSpec:
 
     # -- Directories -------------------------------------------------------
 
-    task_dir: Path | None = None
-    """Host-side task directory.  A temp dir is created if ``None``."""
-
     envs_dir: Path | None = None
     """Base directory for shared config mounts.  Uses [`paths.mounts_dir`][terok_executor.paths.mounts_dir]
     if ``None``."""
@@ -228,10 +229,6 @@ class ContainerEnvResult:
 
     volumes: tuple[VolumeSpec, ...]
     """Typed volume specs — the sandbox decides whether to mount or inject."""
-
-    task_dir: Path
-    """Host-side task directory.  When ``spec.task_dir`` was ``None``, this is
-    an auto-created temporary directory — the **caller owns cleanup**."""
 
 
 # ── Public API ──
@@ -261,7 +258,7 @@ def assemble_container_env(
             delegated.
 
     Returns:
-        Assembled env dict, volume tuple, and resolved task_dir.
+        Assembled env dict and volume tuple.
     """
     from terok_executor.paths import mounts_dir as _mounts_dir
 
@@ -305,12 +302,13 @@ def assemble_container_env(
     if spec.clone_from:
         env["CLONE_FROM"] = spec.clone_from
 
-    # 7. Workspace volume
-    volumes.append(VolumeSpec(spec.workspace_host_path, "/workspace", sharing=Sharing.PRIVATE))
+    # 7. Workspace volume — only the host-mounted cell needs one; the
+    #    in-container workspace is just the writable layer at /workspace.
+    if spec.workspace_host_path is not None:
+        volumes.append(VolumeSpec(spec.workspace_host_path, "/workspace", sharing=Sharing.PRIVATE))
 
     # 8. Shared config mounts from roster
     mounts_base = spec.envs_dir or _mounts_dir()
-    task_dir = spec.task_dir or Path(tempfile.mkdtemp(prefix=f"terok-executor-{spec.task_id}-"))
     volumes += _shared_config_mounts(
         roster,
         mounts_base,
@@ -384,7 +382,7 @@ def assemble_container_env(
     # 13. Extra volumes
     volumes.extend(spec.extra_volumes)
 
-    return ContainerEnvResult(env=env, volumes=tuple(volumes), task_dir=task_dir)
+    return ContainerEnvResult(env=env, volumes=tuple(volumes))
 
 
 # ── Private helpers ──
