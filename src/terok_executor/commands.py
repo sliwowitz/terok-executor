@@ -491,12 +491,27 @@ def _handle_build(
 
 
 def _handle_list() -> None:
-    """List running terok-executor containers."""
-    from terok_executor.integrations.sandbox import PodmanRuntime
+    """List executor-managed containers and their states.
 
-    states = PodmanRuntime().container_states("terok-executor")
+    Two name sources meet here: the ``terok-executor-`` default-name
+    prefix, and the per-container state dirs under
+    [`container_state_root`][terok_executor.paths.container_state_root]
+    — the latter makes ``--name`` overrides visible.  Podman stays the
+    truth for liveness: the dirs only contribute names to ask about,
+    and a name whose container is gone is skipped.
+    """
+    from terok_executor.integrations.sandbox import PodmanRuntime
+    from terok_executor.paths import container_state_root
+
+    runtime = PodmanRuntime()
+    states = runtime.container_states("terok-executor")
+    run_root = container_state_root()
+    named = (p.name for p in run_root.iterdir() if p.is_dir()) if run_root.is_dir() else ()
+    for name in named:
+        if name not in states and (state := runtime.container(name).state) is not None:
+            states[name] = state
     if not states:
-        print("No running containers.")
+        print("No containers.")
         return
     for name, state in sorted(states.items()):
         print(f"{name}  {state}")
@@ -984,7 +999,7 @@ ACP_COMMAND = CommandDef(
 )
 
 
-LIST_COMMAND = CommandDef(name="list", help="List running containers", handler=_handle_list)
+LIST_COMMAND = CommandDef(name="list", help="List containers", handler=_handle_list)
 
 SHOW_CONFIG_COMMAND = CommandDef(
     name="show-config",

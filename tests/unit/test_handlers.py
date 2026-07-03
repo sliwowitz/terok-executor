@@ -21,6 +21,7 @@ from terok_executor.commands import (
     _handle_agents_set,
     _handle_auth,
     _handle_build,
+    _handle_list,
     _handle_rm,
     _handle_start,
     _handle_stop,
@@ -223,3 +224,37 @@ def test_handle_rm_failure_exits_without_state_sweep(tmp_path) -> None:
         with pytest.raises(SystemExit, match="in use"):
             _handle_rm(name="ctr")
     state.assert_not_called()
+
+
+# ── list ─────────────────────────────────────────────────────
+
+
+def test_handle_list_includes_named_containers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+) -> None:
+    """Containers with --name overrides surface via their state dirs."""
+    monkeypatch.setenv("TEROK_EXECUTOR_STATE_DIR", str(tmp_path))
+    (tmp_path / "run" / "my-named-run").mkdir(parents=True)
+    with mock.patch("terok_executor.integrations.sandbox.PodmanRuntime") as runtime_cls:
+        runtime = runtime_cls.return_value
+        runtime.container_states.return_value = {"terok-executor-abc": "running"}
+        runtime.container.return_value.state = "exited"
+        _handle_list()
+    runtime.container.assert_called_once_with("my-named-run")
+    out = capsys.readouterr().out
+    assert "terok-executor-abc  running" in out
+    assert "my-named-run  exited" in out
+
+
+def test_handle_list_skips_state_dirs_without_containers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, capsys
+) -> None:
+    """A stale state dir (container removed out-of-band) is not listed."""
+    monkeypatch.setenv("TEROK_EXECUTOR_STATE_DIR", str(tmp_path))
+    (tmp_path / "run" / "gone").mkdir(parents=True)
+    with mock.patch("terok_executor.integrations.sandbox.PodmanRuntime") as runtime_cls:
+        runtime = runtime_cls.return_value
+        runtime.container_states.return_value = {}
+        runtime.container.return_value.state = None
+        _handle_list()
+    assert "No containers." in capsys.readouterr().out
