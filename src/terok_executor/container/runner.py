@@ -853,12 +853,14 @@ class AgentRunner:
             agent_spec = self.roster.get_agent(agent)
             image_tag = self._ensure_images()
 
+        provision = self._provision_workspace(workspace=workspace, repo=repo, gate=gate)
+
         # Per-container host state (shield state, staged agent config) —
         # derived from the name so ``rm`` can find it without a registry.
+        # Created only after provisioning has validated the run: a refused
+        # launch must not leave an orphaned directory behind.
         task_dir = container_state_dir(cname)
         task_dir.mkdir(parents=True, exist_ok=True)
-
-        provision = self._provision_workspace(workspace=workspace, repo=repo, gate=gate)
 
         mounts_base = mounts_dir()
 
@@ -1074,7 +1076,8 @@ class AgentRunner:
                 "--workspace instead."
             )
         else:
-            effective_repo = code_repo
+            # Ungated URL: the container clones the upstream directly.
+            effective_repo = source
 
         if host_dir is not None:
             _seed_from_cache(host_dir, source, self.sandbox.config, origin_url=effective_repo)

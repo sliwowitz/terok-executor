@@ -47,6 +47,29 @@ class TestStateRoot:
         assert result.parent.name == "terok"
 
 
+class TestContainerStateDir:
+    """Verify ``container_state_dir()`` derivation and its name guard."""
+
+    def test_derives_under_state_root_run(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Path is state_root()/run/<name> — derivable, no registry."""
+        monkeypatch.setenv("TEROK_EXECUTOR_STATE_DIR", str(tmp_path))
+        assert paths.container_state_dir("terok-executor-abc123") == (
+            tmp_path / "run" / "terok-executor-abc123"
+        )
+
+    @pytest.mark.parametrize(
+        "name",
+        ["", ".", "..", "a/b", "../escape", "a\\b"],
+        ids=["empty", "dot", "dotdot", "slash", "traversal", "backslash"],
+    )
+    def test_rejects_path_shaped_names(self, name: str) -> None:
+        """Names that would redirect the dir outside executor state are refused."""
+        with pytest.raises(ValueError, match="invalid container name"):
+            paths.container_state_dir(name)
+
+
 class TestMountsDir:
     """Verify ``mounts_dir()`` lives under sandbox-live/."""
 
