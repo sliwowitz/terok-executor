@@ -175,24 +175,22 @@ def test_handle_start_maps_runtime_error_to_exit() -> None:
 def test_handle_stop_stops_and_retains() -> None:
     """``stop`` halts via the facade's retain-stop with the chosen timeout."""
     with (
-        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime") as runtime_cls,
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
         mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
     ):
-        runtime_cls.return_value.container.return_value.state = "running"
         _handle_stop(name="ctr", timeout=5)
     sandbox_cls.return_value.stop.assert_called_once_with(["ctr"], timeout=5)
 
 
-def test_handle_stop_missing_container_reports_without_stopping(capsys) -> None:
-    """A missing container is reported; nothing is stopped."""
+def test_handle_stop_missing_container_exits() -> None:
+    """A missing container errors, exactly as ``podman stop`` treats it."""
     with (
-        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime") as runtime_cls,
+        mock.patch("terok_executor.integrations.sandbox.PodmanRuntime"),
         mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls,
     ):
-        runtime_cls.return_value.container.return_value.state = None
-        _handle_stop(name="ctr")
-    sandbox_cls.return_value.stop.assert_not_called()
-    assert "not found" in capsys.readouterr().out
+        sandbox_cls.return_value.stop.side_effect = RuntimeError("no such container: ctr")
+        with pytest.raises(SystemExit, match="no such container"):
+            _handle_stop(name="ctr")
 
 
 def test_handle_rm_removes_container_and_host_state(tmp_path) -> None:

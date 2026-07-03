@@ -548,24 +548,27 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_start(*, name: str) -> None:
     """Start a stopped container, re-establishing its host scaffolding."""
-    from terok_executor.integrations.sandbox import Sandbox
+    from terok_executor.integrations.sandbox import PodmanRuntime, Sandbox
 
     try:
-        Sandbox().start(name)
+        Sandbox(runtime=PodmanRuntime()).start(name)
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
     print(f"Started: {name}")
 
 
 def _handle_stop(*, name: str, timeout: int = 10) -> None:
-    """Stop a container, keeping it for a later ``start``."""
+    """Stop a container, keeping it for a later ``start``.
+
+    A missing container is an error, exactly as ``podman stop`` treats
+    it — the facade's ``RuntimeError`` carries podman's own message.
+    """
     from terok_executor.integrations.sandbox import PodmanRuntime, Sandbox
 
-    runtime = PodmanRuntime()
-    if runtime.container(name).state is None:
-        print(f"Container not found: {name}")
-        return
-    Sandbox(runtime=runtime).stop([name], timeout=timeout)
+    try:
+        Sandbox(runtime=PodmanRuntime()).stop([name], timeout=timeout)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     print(f"Stopped: {name}")
 
 
