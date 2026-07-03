@@ -25,6 +25,15 @@ def state_root() -> Path:
     return namespace_state_dir(_SUBDIR, env_var="TEROK_EXECUTOR_STATE_DIR")
 
 
+def container_state_root() -> Path:
+    """Parent of every per-container state directory (``state_root()/run``).
+
+    Listing it names every container a ``run`` created on this host —
+    including ``--name`` overrides the default-name prefix can't find.
+    """
+    return state_root() / "run"
+
+
 def container_state_dir(container_name: str) -> Path:
     """Host-side state directory for one container, derived from its name.
 
@@ -47,7 +56,7 @@ def container_state_dir(container_name: str) -> Path:
         or "\\" in container_name
     ):
         raise ValueError(f"invalid container name: {container_name!r}")
-    return state_root() / "run" / container_name
+    return container_state_root() / container_name
 
 
 def mounts_dir() -> Path:
