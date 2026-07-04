@@ -409,6 +409,12 @@ class TestExtractCredential:
         with pytest.raises(ValueError, match="No credential extractor"):
             extract_credential("unknown-agent", tmp_path)
 
+    def test_dispatches_to_openrouter(self, tmp_path: Path) -> None:
+        """extract_credential('openrouter', ...) reads config.json like its OpenCode siblings."""
+        (tmp_path / "config.json").write_text(json.dumps({"api_key": "sk-or-test"}))
+        result = extract_credential("openrouter", tmp_path)
+        assert result["key"] == "sk-or-test"
+
 
 class TestVendorFormatDrift:
     """Verify the Pydantic schema surfaces vendor-format drift clearly.
