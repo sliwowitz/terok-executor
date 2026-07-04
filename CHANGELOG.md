@@ -1,4 +1,15 @@
 # Changelog
+## v0.3.0 — The Celestial Temple
+
+* Codex device-code login, https://github.com/terok-ai/terok-executor/pull/410
+* Mount glab's config writable, https://github.com/terok-ai/terok-executor/pull/412
+* Dim unusable agents in `hilfe`, list candidate providers by protocol, https://github.com/terok-ai/terok-executor/pull/411
+* Container workspace default, and start/stop/rm verbs, https://github.com/terok-ai/terok-executor/pull/421
+* API-key extractor for OpenRouter, https://github.com/terok-ai/terok-executor/pull/428
+* Expose --passphrase-tier and declare the setup invocation, https://github.com/terok-ai/terok-executor/pull/429
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.2.1...v0.3.0
+
 ## v0.2.2 — We are constantly searching
 
 ## What's Changed
