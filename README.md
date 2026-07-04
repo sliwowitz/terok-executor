@@ -28,7 +28,7 @@ Python when you want library-grade control.
 
 ```bash
 pip install terok-executor
-terok-executor run claude ~/my-workspace
+terok-executor run claude ~/my-workspace -p "Fix the bug"
 ```
 
 The first `run` interactively offers any missing prerequisites — sandbox
@@ -70,16 +70,18 @@ hardening guarantees.
 | Claude Code | OAuth*, API key | Anthropic Claude Code |
 | Codex | OAuth*, API key | OpenAI Codex CLI |
 | Vibe | API key | Mistral Vibe |
-| OpenCode | API key | Generic LLM endpoint driver — bundled defaults for Helmholtz Blablador, KISSKI AcademicCloud, and your own endpoint |
+| Copilot | — | GitHub Copilot (no vault route yet) |
+| OpenCode | — (uses provider keys) | Harness that drives any OpenAI-compatible provider — curated configs for Helmholtz Blablador, KISSKI AcademicCloud, and OpenRouter (each authenticated with its own API key) |
+| Pi | — (uses provider keys) | Multi-provider harness; routes through the phantom tokens of co-installed providers |
 | gh | OAuth, API key | GitHub CLI |
 | glab | API key | GitLab CLI |
+| SonarCloud | API key | SonarCloud scanner |
 | CodeRabbit | API key | CodeRabbit (sidecar tool) |
-| SonarCloud | API key | SonarCloud scanner (sidecar tool) |
 
-\* Claude and Codex OAuth are experimental, and support must be explicitly allowed in the config file. 
+\* Claude and Codex OAuth are experimental.
 
-`terok-executor agents` lists the live roster (add `--all` to
-include the tool entries).
+`terok-executor agents list` lists the live roster (add `--all` to
+include tools and harness-driven providers).
 
 ## Where it sits in the stack
 
@@ -100,15 +102,16 @@ hooks).
 | `setup` | Bootstrap sandbox services + container images |
 | `uninstall` | Remove sandbox services + container images |
 | `auth` | Authenticate a provider |
-| `agents` | List the agent roster |
+| `agents` | Inspect the agent roster (`list`) and set the build-time default selection (`set`) |
 | `build` | Build base + agent images explicitly |
-| `run-tool` | Run a sidecar tool (CodeRabbit, SonarCloud) |
+| `run-tool` | Run a sidecar tool (CodeRabbit) |
 | `list` | List containers |
 | `start` | Start a stopped container |
 | `stop` | Stop a container (kept for a later `start`) |
 | `rm` | Remove a container and its host-side state |
 | `show-config` | Print the effective `SandboxConfig` as YAML (diffable across orchestrators) |
-| `vault` | Vault management (start, stop, status, install, routes) |
+| `vault` | Vault management (status, unlock, lock, list, passphrase, routes, clean) |
+| `sandbox` | Full terok-sandbox command tree (shield, vault, ssh, doctor, …) |
 
 ### Config override
 

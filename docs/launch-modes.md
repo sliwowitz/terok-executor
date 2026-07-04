@@ -1,13 +1,13 @@
 # Launch modes
 
-terok-executor supports four ways to run an agent, plus a separate tool
-runner for sidecars.
+terok-executor supports three ways to run an agent — headless,
+interactive, and web — plus a separate tool runner for sidecars.
 
 ## Headless
 
 ```bash
 terok-executor run claude . -p "Fix the failing test"
-terok-executor run claude . -p "Refactor auth" --model sonnet --max-turns 10
+terok-executor run claude . -p "Refactor auth" -m sonnet --max-turns 10
 ```
 
 Fire-and-forget. The agent runs autonomously and streams output to the
@@ -20,9 +20,10 @@ terminal. Exits when the agent finishes, hits `--max-turns`, or reaches
 terok-executor run claude . --interactive
 ```
 
-Opens a shell session inside the container. The agent CLI is installed
-and ready; credentials and the repository are pre-configured. Use this
-to drive the agent manually.
+Starts the container and keeps it running; once it is ready, the CLI
+prints the login command (e.g. `podman exec -it <name> bash -l`). The
+agent CLI is installed and ready; credentials and the repository are
+pre-configured. Use this to drive the agent manually.
 
 ## Web
 
@@ -32,18 +33,20 @@ terok-executor run claude . --web --port 8080
 ```
 
 Launches [toad](https://github.com/terok-ai/toad), a multi-agent TUI
-served over HTTP. Access it in a browser at the printed URL.
+served over HTTP on `127.0.0.1` (auto-allocated port unless `--port`
+is given). Access it in a browser at the printed URL.
 
 ## Tool mode
 
 ```bash
 terok-executor run-tool coderabbit . -- --pr 42
-terok-executor run-tool sonarcloud . --timeout 300
+terok-executor run-tool coderabbit . --timeout 300
 ```
 
-Runs a sidecar tool in its own container. Arguments after `--` are
-passed to the tool binary. See [Agents](agents.md#sidecar-tools) for
-the list of supported tools.
+Runs a sidecar tool in its own container (default timeout: 600 s).
+Arguments after `--` are passed to the tool binary. CodeRabbit is
+currently the only sidecar tool — see
+[Agents](agents.md#sidecar-tools).
 
 ## Container lifecycle
 
@@ -69,15 +72,16 @@ even `rm`).
 
 | Flag | Description |
 |------|-------------|
-| `--gate` / `--no-gate` | Route git clone through the host-side gate mirror, or skip it and let the container clone upstream directly (default: on — the gate is faster and offers staleness comparison; the shield firewall is unaffected) |
+| `--gate` / `--no-gate` | Route the git clone through the per-container gate mirror (default: on; the shield firewall is unaffected).  `--no-gate` makes the container clone the upstream URL directly — a local directory repo is unreachable without the gate and is refused |
 | `--restricted` | No auto-approve, no-new-privileges |
 | `--branch <ref>` | Check out a specific git branch |
 | `--name <name>` | Container name override |
 | `--gpu` | Enable GPU passthrough |
+| `--memory <limit>` / `--cpus <n>` | Container memory / CPU limits (e.g. `4g`, `2.0`) |
 | `--workspace <dir>` | Mount a host directory at `/workspace` (default: the workspace lives in the container) |
 | `--rm` | Remove the container when it exits (podman `--rm`) |
-| `--git-identity-from-host` | Use the host's git user.name and user.email |
-| `--shared-dir` / `--shared-mount` | Mount a host directory into the container |
+| `--git-identity-from-host` | Use the host's git user.name/email as the human committer identity |
+| `--shared-dir <dir>` | Mount a host directory as shared IPC space (at `--shared-mount`, default `/shared`) |
 | `--timeout <seconds>` | Override the default timeout |
-| `--model <name>` | Model override (headless mode) |
+| `-m <name>` | Model override (headless mode) |
 | `--max-turns <n>` | Limit agent turns (headless mode) |
