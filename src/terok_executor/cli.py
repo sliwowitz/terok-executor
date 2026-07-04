@@ -36,6 +36,13 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 
+#: Spelling under which sandbox setup is reachable in this front-end;
+#: declared at CLI entry so sandbox-composed re-run hints name a verb
+#: this CLI actually exposes (protocol: env var name, shared by string).
+_SETUP_INVOCATION_ENV = "TEROK_SETUP_INVOCATION"
+_SETUP_INVOCATION = "terok-executor setup"
+
+
 def main() -> None:
     """Run the terok-executor CLI.
 
@@ -44,6 +51,7 @@ def main() -> None:
     subparser convention, matching the placement used by ``docker`` and
     ``kubectl``.
     """
+    os.environ.setdefault(_SETUP_INVOCATION_ENV, _SETUP_INVOCATION)
     parser = argparse.ArgumentParser(
         prog="terok-executor",
         description="Single-agent task runner for hardened Podman containers",

@@ -62,7 +62,7 @@ class TestHandleSetup:
 
     def test_default_runs_sandbox_setup_then_image_build(self, setup_spies) -> None:
         _handle_setup()
-        setup_spies["sandbox_setup"].assert_called_once_with(cfg=None)
+        setup_spies["sandbox_setup"].assert_called_once_with(cfg=None, passphrase_tier=None)
         setup_spies["build_images"].assert_called_once()
 
     def test_no_sandbox_skips_sandbox_setup(self, setup_spies) -> None:

@@ -619,6 +619,7 @@ def _handle_setup(
     no_images: bool = False,
     base: str = DEFAULT_BASE_IMAGE,
     family: str | None = None,
+    passphrase_tier: str | None = None,
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Bootstrap the full terok-executor stack on a fresh host.
@@ -635,7 +636,7 @@ def _handle_setup(
     if not no_sandbox:
         from .sandbox import ensure_sandbox_ready
 
-        ensure_sandbox_ready(cfg=cfg)
+        ensure_sandbox_ready(cfg=cfg, passphrase_tier=passphrase_tier)
 
     if not no_images:
         _build_images_with_banner(base, family)
@@ -1067,6 +1068,15 @@ SETUP_COMMAND = CommandDef(
             name="--family",
             default=None,
             help="Override package family for unknown base images (deb or rpm)",
+        ),
+        ArgDef(
+            name="--passphrase-tier",
+            default=None,
+            help=(
+                "Force credentials-DB passphrase storage to a specific tier"
+                " (systemd-creds | keyring | session-file | config); required"
+                " on a non-TTY host without systemd-creds"
+            ),
         ),
     ),
 )
