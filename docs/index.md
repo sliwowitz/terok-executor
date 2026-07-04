@@ -45,11 +45,13 @@ terok-executor auth claude  # OAuth or API key
 terok-executor run claude . -p "..."
 ```
 
-`setup` is idempotent — safe to re-run after upgrades.  Only the
-image build can be run on its own: `terok-executor build` rebuilds
-the L0+L1 images without touching the sandbox services.  The other
-setup steps (shield hooks, gate, credentials-DB provisioning) are
-only available through `setup`.
+`setup` is idempotent — safe to re-run after upgrades.
+`terok-executor build` rebuilds the L0+L1 images without touching
+the sandbox services; the service side (supervisor + shield OCI
+hooks, credentials-DB provisioning) is installed by `setup`
+(individual steps are also reachable under the `terok-executor
+sandbox` subtree).  There is no host-side gate or vault service —
+both run inside each container's supervisor, spawned on demand.
 
 ## Authenticate
 
