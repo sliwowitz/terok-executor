@@ -19,8 +19,8 @@ dynamic = ["version", "classifiers"]
 # Dependency pins follow the policy in AGENTS.md ("Dependency Pinning &
 # pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
-    "terok-sandbox>=0.4.1,<0.5.0",
-    "terok-util>=0.2.1,<0.3.0",
+    "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox.git@perf/lazy-imports",
+    "terok-util @ git+https://github.com/sliwowitz/terok-util.git@perf/lazy-command-handler",
     "ruamel.yaml==0.19.1",
     "Jinja2~=3.1",
     "tomli-w~=1.2",
