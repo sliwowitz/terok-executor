@@ -28,6 +28,7 @@ from importlib.metadata import PackageNotFoundError, version as _meta_version
 
 from terok_util import CommandTree
 
+from . import _ensure_bootstrapped
 from ._tree import COMMANDS
 
 try:
@@ -87,6 +88,10 @@ def main() -> None:
         os.environ["TEROK_CONFIG_FILE"] = args.config
 
     if hasattr(args, "_cmd"):
+        # Populate the agent registry once before any handler runs — the
+        # package defers this out of import so ``--version`` / ``--help``
+        # (which exit above) never pay the roster YAML load.
+        _ensure_bootstrapped()
         CommandTree.dispatch(args)
     elif hasattr(args, "_group_help"):
         args._group_help.print_help()

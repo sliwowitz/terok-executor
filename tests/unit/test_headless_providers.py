@@ -8,7 +8,6 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from terok_executor.provider.providers import (
-    AGENT_NAMES,
     AGENTS,
     get_agent,
     resolve_agent_value,
@@ -50,8 +49,15 @@ class TestAgentProviderRegistry:
 
     def test_provider_names_tuple(self) -> None:
         """AGENT_NAMES is a tuple matching registry keys."""
-        assert isinstance(AGENT_NAMES, tuple)
-        assert set(AGENT_NAMES) == set(AGENTS.keys())
+        # Read through the module rather than a module-level ``from …
+        # import AGENT_NAMES``: the roster bootstrap *rebinds* the
+        # immutable tuple, so a name captured at import time would stay
+        # the empty placeholder.  ``AGENTS`` is a dict filled in place, so
+        # the module-level binding tracks it fine.
+        from terok_executor.provider import providers
+
+        assert isinstance(providers.AGENT_NAMES, tuple)
+        assert set(providers.AGENT_NAMES) == set(AGENTS.keys())
 
     def test_providers_are_frozen(self) -> None:
         """Agent instances are immutable."""
