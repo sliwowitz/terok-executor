@@ -44,7 +44,7 @@ class MountDef:
 
     Empty for explicit ``mounts:`` blocks that aren't tied to a single
     provider.  Used by the credential-shadow path to match against
-    [`ContainerEnvSpec.expose_credential_providers`][terok_executor.ContainerEnvSpec.expose_credential_providers].
+    [`ContainerEnvSpec.expose_credential_providers`][terok_executor.container.env.ContainerEnvSpec.expose_credential_providers].
     """
 
     writable: bool = False

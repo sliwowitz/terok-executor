@@ -10,9 +10,9 @@ lifecycle of one AI coding agent at a time.  Designed for standalone use
 The public surface is ``__all__`` below.  Key entry points:
 
 - [`AgentRunner`][terok_executor.AgentRunner] — launch agents in containers
-- [`Authenticator`][terok_executor.Authenticator] — credential flow
+- [`Authenticator`][terok_executor.credentials.auth.Authenticator] — credential flow
 - [`ImageBuilder`][terok_executor.ImageBuilder] — image construction
-- [`AgentRoster.shared`][terok_executor.AgentRoster.shared] — YAML agent registry (process-wide cache)
+- [`AgentRoster.shared`][terok_executor.roster.loader.AgentRoster.shared] — YAML agent registry (process-wide cache)
 
 Every public name is served lazily (PEP 562 ``__getattr__``): the
 submodule that defines a symbol is imported only when that symbol is

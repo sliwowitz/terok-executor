@@ -54,7 +54,7 @@ class Preflight:
     assume_yes: bool = field(default=False)
     credential_set: str = "default"
     """Vault DB namespace to check for stored credentials.  Pairs with
-    [`Authenticator.run`][terok_executor.Authenticator.run]'s
+    [`Authenticator.run`][terok_executor.credentials.auth.Authenticator.run]'s
     ``credential_set`` — a project running with per-project credentials
     passes its own value so the preflight verdict reflects what the
     runtime will actually load, not the shared host-wide bucket."""
