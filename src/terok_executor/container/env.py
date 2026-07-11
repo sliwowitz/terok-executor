@@ -23,6 +23,8 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -438,6 +440,8 @@ def _shared_config_mounts(
     materialises the destination inside the container's userns as root
     with mode 0700, leaving the file unreadable to the agent (and breaking
     e.g. ``gh`` whose ``hosts.yml`` is normally absent on fresh installs).
+    Credential files are created — and pre-existing ones re-clamped —
+    owner-only, because glab aborts on a ``config.yml`` looser than 0600.
 
     Providers in *expose_credential_providers* keep the writable mount —
     used by terok's experimental ``expose_oauth_token`` mode where the
@@ -454,18 +458,51 @@ def _shared_config_mounts(
         host_dir.mkdir(parents=True, exist_ok=True)
         specs.append(VolumeSpec(host_dir, m.container_path))
 
-        if not m.credential_file or m.writable or m.provider in expose_credential_providers:
+        if not m.credential_file:
             continue
 
         host_file = host_dir / m.credential_file
+        _clamp_credential_mode(host_file)
+
+        if m.writable or m.provider in expose_credential_providers:
+            continue
+
         host_file.parent.mkdir(parents=True, exist_ok=True)
         if not host_file.exists():
-            host_file.touch()
+            host_file.touch(mode=0o600)
 
         container_file = f"{m.container_path}/{m.credential_file}"
         specs.append(VolumeSpec(host_file, container_file, read_only=True))
 
     return specs
+
+
+def _clamp_credential_mode(host_file: Path) -> None:
+    """Strip group/other permission bits from an existing credential file.
+
+    Releases up to 0.2.x ``touch()``-ed credential files with the umask
+    default (0644), and those files persist in the shared mounts across
+    upgrades.  glab refuses to start when its ``config.yml`` is looser
+    than 0600, so every launch re-clamps to owner-only — idempotent, and
+    never *adds* bits (a deliberately read-only 0400 file stays 0400).
+
+    Opens with ``O_NOFOLLOW`` + ``fchmod`` so a symlink planted in the
+    container-writable shared dir cannot redirect the chmod to an
+    arbitrary operator-owned file (CWE-59).  The clamp is best-effort:
+    any open failure (missing file, planted symlink, permissions) leaves
+    the file as-is rather than aborting container assembly — a file we
+    cannot even open is not one the old ``touch()`` created loose.
+    """
+    try:
+        fd = os.open(host_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode) & 0o077:
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) & ~0o077)
+    finally:
+        os.close(fd)
 
 
 def _set_provider_handle(
