@@ -488,11 +488,14 @@ def _clamp_credential_mode(host_file: Path) -> None:
 
     Opens with ``O_NOFOLLOW`` + ``fchmod`` so a symlink planted in the
     container-writable shared dir cannot redirect the chmod to an
-    arbitrary operator-owned file (CWE-59).
+    arbitrary operator-owned file (CWE-59).  The clamp is best-effort:
+    any open failure (missing file, planted symlink, permissions) leaves
+    the file as-is rather than aborting container assembly — a file we
+    cannot even open is not one the old ``touch()`` created loose.
     """
     try:
         fd = os.open(host_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except FileNotFoundError:
+    except OSError:
         return
     try:
         st = os.fstat(fd)
