@@ -487,7 +487,7 @@ def _prompt_api_key(info: AuthProvider) -> str:
 class AuthSession:
     """A prepared-but-not-run OAuth auth container session.
 
-    Built by [`Authenticator.prepare_oauth`][terok_executor.Authenticator.prepare_oauth]
+    Built by [`Authenticator.prepare_oauth`][terok_executor.credentials.auth.Authenticator.prepare_oauth]
     (or the module-level [`prepare_oauth_session`][terok_executor.prepare_oauth_session]
     helper).  Hold-don't-call: the caller is responsible for running
     ``argv`` (synchronously, in a new terminal tab, suspended TUI, etc.)

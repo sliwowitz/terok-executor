@@ -58,7 +58,9 @@ class TestPackageImport:
 
     def test_config_stack_resolve(self) -> None:
         """ConfigStack merges scopes correctly."""
-        from terok_executor import ConfigScope, ConfigStack
+        from terok_util import ConfigStack
+
+        from terok_executor.integrations.sandbox import ConfigScope
 
         stack = ConfigStack()
         stack.push(ConfigScope("base", None, {"model": "haiku", "timeout": 60}))

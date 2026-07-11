@@ -106,6 +106,25 @@ def _isolate_user_paths(
 
 
 @pytest.fixture(autouse=True)
+def _bootstrap_agent_registry(_isolate_user_paths: None) -> None:
+    """Populate the process-wide agent registry for tests that read it directly.
+
+    Production defers the roster YAML load until the first barrel access
+    (``terok_executor.AGENTS`` / ``get_agent`` / …) or the CLI entry
+    point, so a bare ``import terok_executor`` stays cheap.  Unit tests
+    that read the populated ``provider.providers.AGENTS`` dict through
+    the *submodule* path (``from terok_executor.provider.providers
+    import AGENTS``) never touch the barrel, so trigger the one-shot
+    bootstrap here — mirroring the import-time side effect they used to
+    rely on.  Depends on ``_isolate_user_paths`` so the first population
+    resolves the bundled roster under the tmp-rooted ``HOME``.
+    """
+    import terok_executor
+
+    terok_executor._ensure_bootstrapped()
+
+
+@pytest.fixture(autouse=True)
 def _stub_credential_db_passphrase() -> Iterator[None]:
     """Open ``cfg.open_credential_db`` with ``TEST_VAULT_PASSPHRASE``.
 

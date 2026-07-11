@@ -48,22 +48,43 @@ host-side caller (terok) doesn't have to reach into the submodules.
 
 from __future__ import annotations
 
-from .cache import AgentRosterCache, CacheKey
-from .daemon import acp_socket_is_live, serve_acp
-from .endpoint import ACPEndpointStatus
-from .probe import ProbeError, probe_agent_models
-from .proxy import AgentBindError
-from .roster import ACPRoster, list_authenticated_agents
+import importlib
+from typing import TYPE_CHECKING
 
-__all__ = [
-    "ACPEndpointStatus",
-    "ACPRoster",
-    "AgentBindError",
-    "AgentRosterCache",
-    "CacheKey",
-    "ProbeError",
-    "acp_socket_is_live",
-    "list_authenticated_agents",
-    "probe_agent_models",
-    "serve_acp",
-]
+if TYPE_CHECKING:
+    from .daemon import acp_socket_is_live as acp_socket_is_live
+    from .endpoint import ACPEndpointStatus as ACPEndpointStatus
+    from .roster import list_authenticated_agents as list_authenticated_agents
+
+#: Public symbol → defining submodule.  Only the three names the host
+#: CLI re-exports through ``terok_executor`` live here; the protocol
+#: machinery ([`ACPRoster`][terok_executor.acp.roster.ACPRoster],
+#: [`ACPProxy`][terok_executor.acp.proxy.ACPProxy], the probe/cache
+#: types) is internal — import it from its submodule when you need it.
+#: Resolving lazily keeps [`acp_socket_is_live`][terok_executor.acp.daemon.acp_socket_is_live]
+#: (and this package's import) free of the ``acp`` pydantic schema build,
+#: which only [`.probe`][terok_executor.acp.probe] / [`.proxy`][terok_executor.acp.proxy]
+#: pull in when a session is actually served.
+_LAZY: dict[str, str] = {
+    "ACPEndpointStatus": ".endpoint",
+    "acp_socket_is_live": ".daemon",
+    "list_authenticated_agents": ".roster",
+}
+
+__all__ = list(_LAZY)
+
+
+def __getattr__(name: str) -> object:
+    """Resolve a re-exported name to its defining submodule on first access (PEP 562)."""
+    try:
+        module_path = _LAZY[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(importlib.import_module(module_path, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    """Expose the lazy names to ``dir()`` / autocompletion."""
+    return sorted({*globals(), *_LAZY})

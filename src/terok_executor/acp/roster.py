@@ -30,9 +30,6 @@ from terok_executor.container.build import AGENTS_LABEL
 from terok_executor.integrations.sandbox import SandboxConfig
 
 from .cache import GLOBAL_CACHE, AgentRosterCache, CacheKey
-from .model_options import MODEL_NAMESPACE_SEP
-from .probe import ProbeError, probe_agent_models
-from .proxy import ACPProxy
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import Sandbox
@@ -193,6 +190,8 @@ class ACPRoster:
         recover on the next ``session/new`` instead of wedging the
         roster empty until the daemon restarts.
         """
+        from .model_options import MODEL_NAMESPACE_SEP
+
         agents_in_order = self.acp_capable_agents
         cold = [a for a in agents_in_order if self._cache.get(self._cache_key(a)) is None]
         if cold:
@@ -216,6 +215,8 @@ class ACPRoster:
         the response.  Successful probes are cached per-daemon and
         reused across reconnects.
         """
+        from .probe import ProbeError
+
         key = self._cache_key(agent_id)
         try:
             models = await self._probe(agent_id)
@@ -236,6 +237,8 @@ class ACPRoster:
         roster owns the data (cache + live walk); the proxy owns the
         protocol.
         """
+        from .proxy import ACPProxy
+
         proxy = ACPProxy(roster=self)
         await proxy.run(reader, writer)
 
@@ -263,6 +266,8 @@ class ACPRoster:
 
     async def _probe(self, agent_id: str) -> tuple[str, ...]:
         """Drive a single probe in the current event loop."""
+        from .probe import probe_agent_models
+
         return await probe_agent_models(
             agent_id=agent_id,
             wrapper_argv=self.wrapper_argv(agent_id),

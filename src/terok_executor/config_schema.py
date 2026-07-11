@@ -126,7 +126,7 @@ class ExecutorConfigView(SandboxConfigView):
         """Write *selection* into ``image.agents`` and return the file path.
 
         Caller validates *selection* up-front (typically via
-        [`AgentRoster.validate_selection`][terok_executor.AgentRoster.validate_selection]).
+        [`AgentRoster.validate_selection`][terok_executor.roster.loader.AgentRoster.validate_selection]).
 
         Invalidates terok-util's process-wide ``read_config_section``
         cache before returning so the next ``image_agents()`` /

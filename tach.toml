@@ -101,7 +101,6 @@ depends_on = [
 [[modules]]
 path = "terok_executor.roster"
 depends_on = [
-    "terok_executor.roster.loader",
 ]
 
 # ── provider/ — AI provider behavior ────────────────────────────────
@@ -288,14 +287,13 @@ depends_on = [
 [[modules]]
 path = "terok_executor._tree"
 depends_on = [
-    "terok_executor.commands",
-    "terok_executor.credentials.vault_commands",
 ]
 
 # CLI entry point — wires command registry to argparse
 [[modules]]
 path = "terok_executor.cli"
 depends_on = [
+    "terok_executor",
     "terok_executor._tree",
 ]
 
@@ -311,21 +309,9 @@ depends_on = [
 [[modules]]
 path = "terok_executor"
 depends_on = [
-    "terok_executor._tree",
-    "terok_executor.acp",
-    "terok_executor.commands",
-    "terok_executor.config_schema",
-    "terok_executor.container.build",
-    "terok_executor.container.cache",
-    "terok_executor.container.env",
-    "terok_executor.container.runner",
     "terok_executor.credentials.auth",
-    "terok_executor.credentials.vault_commands",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
-    "terok_executor.provider.agents",
-    "terok_executor.provider.instructions",
     "terok_executor.provider.providers",
     "terok_executor.roster",
-    "terok_executor.sandbox",
 ]

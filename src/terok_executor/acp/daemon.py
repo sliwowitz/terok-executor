@@ -24,10 +24,12 @@ import socket
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from terok_executor.integrations.sandbox import Sandbox, SandboxConfig
+if TYPE_CHECKING:
+    from terok_executor.integrations.sandbox import Sandbox
 
-from .roster import ACPRoster
+    from .roster import ACPRoster
 
 _logger = logging.getLogger(__name__)
 
@@ -71,6 +73,11 @@ def serve_acp(
     ``SandboxConfig()`` defaults executor uses everywhere).
     """
     if sandbox is None:
+        # Deferred so the lightweight ``acp_socket_is_live`` probe (and
+        # any importer of this module) doesn't pay for terok_sandbox
+        # until an ACP session is actually served.
+        from terok_executor.integrations.sandbox import Sandbox, SandboxConfig
+
         sandbox = Sandbox(config=SandboxConfig())
     return asyncio.run(_run(container_name, socket_path, sandbox, poll_interval_sec))
 
@@ -132,6 +139,11 @@ async def _run(
         _logger.error("container %r has no image — aborting", container_name)
         return 1
     image_id = image.id or image.ref
+
+    # Deferred: importing ``.roster`` pulls the acp protocol stack
+    # (model_options / probe / proxy).  Keeping it out of module scope
+    # is what lets ``acp_socket_is_live`` import acp-free.
+    from .roster import ACPRoster
 
     roster = ACPRoster(
         container_name=container_name,
