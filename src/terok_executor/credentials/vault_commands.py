@@ -196,9 +196,27 @@ def _build_sandbox_tree() -> CommandTree:
 SANDBOX_TREE: CommandTree = _build_sandbox_tree()
 
 
-#: Sandbox's vault group with executor's extensions applied — a 1-tuple
-#: containing the modified vault ``CommandDef``.  Surfaced at executor's
-#: top level as the ``terok-executor vault …`` shortcut; the same
-#: ``CommandDef`` instance also reaches ``terok-executor sandbox vault …``
-#: via [`SANDBOX_TREE`][terok_executor.credentials.vault_commands.SANDBOX_TREE].
-VAULT_COMMANDS: tuple[CommandDef, ...] = (SANDBOX_TREE.find_at(("vault",)),)
+#: The ``sandbox`` deep-path group — the lazy ``source`` target the
+#: top-level tree ([`_tree`][terok_executor._tree]) references so that
+#: building the tree doesn't import this module (and the whole
+#: ``terok_sandbox`` command tree it pulls).  Resolving it — i.e. running
+#: ``terok-executor sandbox …`` — is what loads the sandbox tree.
+SANDBOX_GROUP: CommandDef = CommandDef(
+    name="sandbox",
+    help="Sandbox subsystem (full deep tree — same verbs as terok-sandbox)",
+    children=SANDBOX_TREE.roots,
+)
+
+
+#: Sandbox's vault group with executor's extensions applied — the lazy
+#: ``source`` target for the top-level ``terok-executor vault …``
+#: shortcut.  The same ``CommandDef`` instance also reaches
+#: ``terok-executor sandbox vault …`` via
+#: [`SANDBOX_GROUP`][terok_executor.credentials.vault_commands.SANDBOX_GROUP]'s
+#: children, so a wrap applied at one path applies at the other.
+VAULT_GROUP: CommandDef = SANDBOX_TREE.find_at(("vault",))
+
+
+#: Sandbox's vault group as a 1-tuple — retained for the terok adapter /
+#: tests that consume the executor vault surface directly.
+VAULT_COMMANDS: tuple[CommandDef, ...] = (VAULT_GROUP,)

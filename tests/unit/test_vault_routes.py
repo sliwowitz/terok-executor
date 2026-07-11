@@ -524,6 +524,8 @@ class TestVaultHandlerCfgSignatures:
     def test_all_leaf_handlers_accept_cfg(self) -> None:
         import inspect
 
+        from terok_util import LazyHandler
+
         from terok_executor.credentials.vault_commands import VAULT_COMMANDS
 
         vault_group = VAULT_COMMANDS[0]
@@ -531,8 +533,11 @@ class TestVaultHandlerCfgSignatures:
             # Skip the nested ``passphrase`` group; its leaves don't take cfg.
             if cmd.children:
                 continue
-            sig = inspect.signature(cmd.handler)
-            assert "cfg" in sig.parameters, f"{cmd.handler.__name__} missing cfg param"
+            # Handlers are wired as opaque LazyHandler("mod:fn"); resolve to
+            # the real callable before reading its signature.
+            handler = cmd.handler.resolve() if isinstance(cmd.handler, LazyHandler) else cmd.handler
+            sig = inspect.signature(handler)
+            assert "cfg" in sig.parameters, f"{getattr(handler, '__name__', handler)} missing cfg"
 
 
 class TestVaultCommandsOverlay:
@@ -586,8 +591,12 @@ class TestVaultCommandsOverlay:
         the same ``CommandDef`` — the load-bearing property for wraps to apply uniformly."""
         from terok_executor.cli import COMMANDS
 
-        deep = COMMANDS.find_at(("sandbox", "vault"))
-        shortcut = COMMANDS.find_at(("vault",))
+        # ``sandbox`` and ``vault`` are lazy top-level roots (name+help
+        # placeholders until invoked); resolve them to reach the shared
+        # subtree — both source off the one ``SANDBOX_TREE`` instance.
+        sandbox_group = COMMANDS.find_at(("sandbox",)).resolve()
+        deep = next(child for child in sandbox_group.children if child.name == "vault")
+        shortcut = COMMANDS.find_at(("vault",)).resolve()
         assert deep is shortcut
 
     def test_argparse_wires_both_paths_to_the_same_handler(self) -> None:

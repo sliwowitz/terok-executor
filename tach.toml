@@ -287,8 +287,6 @@ depends_on = [
 [[modules]]
 path = "terok_executor._tree"
 depends_on = [
-    "terok_executor.commands",
-    "terok_executor.credentials.vault_commands",
 ]
 
 # CLI entry point — wires command registry to argparse

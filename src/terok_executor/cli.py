@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
 from terok_util import CommandTree
@@ -44,14 +45,20 @@ _SETUP_INVOCATION_ENV = "TEROK_SETUP_INVOCATION"
 _SETUP_INVOCATION = "terok-executor setup"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Run the terok-executor CLI.
 
     Top-level options must precede the subcommand
     (``terok-executor --config /path run claude .``) — standard argparse
     subparser convention, matching the placement used by ``docker`` and
     ``kubectl``.
+
+    *argv* (default ``sys.argv[1:]``) is threaded into
+    [`CommandTree.wire`][terok_util.cli_types.CommandTree.wire] so only
+    the invoked verb's module is imported: ``terok-executor run …``
+    pulls the run stack, not the whole ``terok_sandbox`` command tree.
     """
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     os.environ.setdefault(_SETUP_INVOCATION_ENV, _SETUP_INVOCATION)
     parser = argparse.ArgumentParser(
         prog="terok-executor",
@@ -74,9 +81,9 @@ def main() -> None:
             "Equivalent to '--config /dev/null'."
         ),
     )
-    COMMANDS.wire(parser)
+    COMMANDS.wire(parser, argv=raw_argv)
 
-    args = parser.parse_args()
+    args = parser.parse_args(raw_argv)
 
     # Honour --config / --raw before dispatch so the very first
     # ``SandboxConfig()`` constructed by any handler sees the override.
