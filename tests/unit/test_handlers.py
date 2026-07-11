@@ -258,3 +258,11 @@ def test_handle_list_skips_state_dirs_without_containers(
         runtime.container.return_value.state = None
         _handle_list()
     assert "No containers." in capsys.readouterr().out
+
+
+def test_handle_list_reports_runtime_query_failure() -> None:
+    """A failed batch query (``None``) exits with a message, not "No containers."."""
+    with mock.patch("terok_executor.integrations.sandbox.PodmanRuntime") as runtime_cls:
+        runtime_cls.return_value.container_states.return_value = None
+        with pytest.raises(SystemExit, match="runtime unavailable"):
+            _handle_list()

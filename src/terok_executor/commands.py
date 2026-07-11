@@ -505,6 +505,8 @@ def _handle_list() -> None:
 
     runtime = PodmanRuntime()
     states = runtime.container_states("terok-executor")
+    if states is None:
+        raise SystemExit("Container runtime unavailable — cannot query container states.")
     run_root = container_state_root()
     named = (p.name for p in run_root.iterdir() if p.is_dir()) if run_root.is_dir() else ()
     for name in named:
