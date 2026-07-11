@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+import stat
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1243,6 +1244,40 @@ class TestSharedConfigMountsUnit:
         )
         cred = [m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"]
         assert cred == []
+
+    def test_credential_file_created_owner_only(self, roster, tmp_path):
+        """A freshly touched credential file must be 0600 — glab aborts on looser."""
+        _shared_config_mounts(roster, tmp_path)
+        cred = tmp_path / "_claude-config" / ".credentials.json"
+        assert stat.S_IMODE(cred.stat().st_mode) == 0o600
+
+    def test_existing_loose_credential_file_reclamped(self, roster, tmp_path):
+        """A 0644 credential file left behind by an older release is healed to 0600.
+
+        Releases up to 0.2.x touched credential files with the umask default;
+        the stale file persists in the shared mount across upgrades and makes
+        glab refuse to start.  Content must survive the re-clamp.
+        """
+        host_cred = tmp_path / "_glab-config" / "config.yml"
+        host_cred.parent.mkdir(parents=True)
+        host_cred.write_text("hosts:\n  gitlab.com:\n    token: t\n")
+        host_cred.chmod(0o644)
+
+        _shared_config_mounts(roster, tmp_path)
+
+        assert stat.S_IMODE(host_cred.stat().st_mode) == 0o600
+        assert "gitlab.com" in host_cred.read_text()
+
+    def test_stricter_credential_file_left_alone(self, roster, tmp_path):
+        """Re-clamping only strips group/other bits — a 0400 file stays 0400."""
+        host_cred = tmp_path / "_glab-config" / "config.yml"
+        host_cred.parent.mkdir(parents=True)
+        host_cred.write_text("hosts: {}\n")
+        host_cred.chmod(0o400)
+
+        _shared_config_mounts(roster, tmp_path)
+
+        assert stat.S_IMODE(host_cred.stat().st_mode) == 0o400
 
     def test_writable_credential_file_skips_ro_shadow(self, roster, tmp_path):
         """A ``credential_file_writable`` provider (glab) gets no ro shadow.
