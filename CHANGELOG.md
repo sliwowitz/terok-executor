@@ -1,4 +1,11 @@
 # Changelog
+## v0.3.1 — You Exist Here
+
+* Shared credential files permissions for glab, https://github.com/terok-ai/terok-executor/pull/437
+* Resilient gate restart after upgrade, https://github.com/terok-ai/terok-executor/pull/440
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.3.0...v0.3.1
+
 ## v0.3.0 — The Celestial Temple
 
 * Codex device-code login, https://github.com/terok-ai/terok-executor/pull/410
