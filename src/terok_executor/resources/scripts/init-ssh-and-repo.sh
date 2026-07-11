@@ -198,6 +198,21 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     fi
   fi
 
+  # Terok-managed origin must match the launch env, not whatever a previous
+  # container generation persisted into .git/config: gate URLs embed a
+  # per-task auth token, so a stale origin breaks every fetch with 403.
+  # In both security modes the invariant is the same — origin is CODE_REPO
+  # (the gate in gatekeeping mode, upstream in online mode) — and it must
+  # hold BEFORE the first fetch below.
+  if [[ -d "${REPO_ROOT}/.git" ]]; then
+    CURRENT_ORIGIN=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
+    if [[ -n "${CURRENT_ORIGIN}" && "${CURRENT_ORIGIN}" != "${CODE_REPO}" ]]; then
+      echo ">> fixing origin remote (was: $(redact_url "${CURRENT_ORIGIN}"))"
+      git -C "${REPO_ROOT}" remote set-url origin "${CODE_REPO}" || true
+      git -C "${REPO_ROOT}" remote set-url --push origin "${CODE_REPO}" || true
+    fi
+  fi
+
   if [[ ! -d "${REPO_ROOT}/.git" ]]; then
     # No .git directory - perform initial clone
     # Remove marker first so the directory is empty for git clone
@@ -245,7 +260,7 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
       git -C "${REPO_ROOT}" remote set-url origin "${CODE_REPO}" || true
       git -C "${REPO_ROOT}" remote set-url --push origin "${CODE_REPO}" || true
       # Fetch latest from upstream to ensure we have all refs
-      git -C "${REPO_ROOT}" fetch --all --prune || true
+      git -C "${REPO_ROOT}" fetch origin --prune || true
       # After repointing, checkout the target branch from the new origin if specified
       if [[ -n "${TARGET_BRANCH}" ]]; then
         if git -C "${REPO_ROOT}" rev-parse --verify "origin/${TARGET_BRANCH}" >/dev/null 2>&1; then
@@ -270,7 +285,10 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     # .git exists and this is a new task (marker present).
     # Normal fast path when clone cache pre-populated the workspace.
     echo ">> new task — updating cached workspace to latest HEAD"
-    git -C "${REPO_ROOT}" fetch --all --prune
+    # Fetch origin only: the "external" remote is unreachable by design
+    # (gatekeeping blocks egress) and the "gate" remote is re-added with a
+    # fresh URL further down — ``--all`` would fetch both and fail.
+    git -C "${REPO_ROOT}" fetch origin --prune
     TARGET_BRANCH="${GIT_BRANCH:-}"
 
     # Checkout and reset to the target branch. Use checkout -B to create/reset
@@ -301,7 +319,8 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
     # .git exists and no marker - this is a restarted task
     # Only fetch updates, preserve local changes
     echo ">> restarted task - fetching updates (preserving local changes)"
-    git -C "${REPO_ROOT}" fetch --all --prune
+    # origin only — see the new-task fetch above for why not ``--all``.
+    git -C "${REPO_ROOT}" fetch origin --prune
     # Only reset if explicitly requested via GIT_RESET_MODE
     if [[ -n "${GIT_BRANCH:-}" && "${GIT_RESET_MODE}" != "none" ]]; then
       echo ">> git reset (${GIT_RESET_MODE}) to origin/${GIT_BRANCH}"
@@ -313,21 +332,6 @@ if [[ -n "${REPO_ROOT:-}" && -n "${CODE_REPO:-}" ]]; then
           git -C "${REPO_ROOT}" reset "origin/${GIT_BRANCH}" || true
           ;;
       esac
-    fi
-  fi
-
-  # Gatekeeping mode: Ensure origin remote is set to the git-gate (CODE_REPO).
-  # This is necessary because:
-  # 1. Existing workspaces might have origin pointing to the real upstream
-  #    (e.g., from a previous online mode run or misconfigured setup)
-  # 2. In gatekeeping mode, origin should ALWAYS be the local git-gate
-  # We detect gatekeeping mode by checking if CODE_REPO is a local file path.
-  if [[ "${CODE_REPO}" == file://* ]]; then
-    CURRENT_ORIGIN=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
-    if [[ "${CURRENT_ORIGIN}" != "${CODE_REPO}" ]]; then
-      echo ">> gatekeeping mode: fixing origin remote (was: $(redact_url "${CURRENT_ORIGIN}"))"
-      git -C "${REPO_ROOT}" remote set-url origin "${CODE_REPO}" || true
-      git -C "${REPO_ROOT}" remote set-url --push origin "${CODE_REPO}" || true
     fi
   fi
 
