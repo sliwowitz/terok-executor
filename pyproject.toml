@@ -1,6 +1,6 @@
 [build-system]
-requires = ["poetry-core>=2.0.0", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
-build-backend = "poetry_dynamic_versioning.backend"
+requires = ["hatchling>=1.27", "hatch-vcs>=0.5"]
+build-backend = "hatchling.build"
 
 [project]
 name = "terok-executor"
@@ -14,13 +14,27 @@ maintainers = [
     {name = "Jiri Vyskocil", email = "jiri@vyskocil.com"},
 ]
 keywords = ["podman", "containers", "agent", "ai", "coding-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
 requires-python = ">=3.12,<3.15"
-dynamic = ["version", "classifiers"]
+dynamic = ["version"]
 # Dependency pins follow the policy in AGENTS.md ("Dependency Pinning &
 # pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
-    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.4.2a1/terok_sandbox-0.4.2a1-py3-none-any.whl",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.2.2a1/terok_util-0.2.2a1-py3-none-any.whl",
+    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a1/terok_sandbox-0.5.0a1-py3-none-any.whl",
+    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.3.0a1/terok_util-0.3.0a1-py3-none-any.whl",
     "ruamel.yaml==0.19.1",
     "Jinja2~=3.1",
     "tomli-w~=1.2",
@@ -41,48 +55,46 @@ Security = "https://github.com/terok-ai/terok-executor/security/policy"
 [project.scripts]
 terok-executor = "terok_executor.cli:main"
 
-[tool.poetry]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python",
-    "Topic :: Software Development :: Quality Assurance",
-    "Typing :: Typed",
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0",
+    "ruff>=0.15.20",
+    "bandit>=1.7",
+    "docstr-coverage>=2.3.2,<3",
+    "complexipy>=6.0.1",
+    "vulture>=2.12",
+    "reuse>=6.2.0,<7",
+    "tach>=0.35.0,<0.36",
+    "mypy>=2.1.0,<3.0",
+    "import-linter>=2.13",
+]
+test = [
+    "pytest>=9.1.1",
+    "pytest-cov>=4.0",
+    "pytest-timeout>=2.0",
+]
+docs = [
+    "properdocs>=1.6.7",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=0.26",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+    "mkdocs-section-index>=0.3",
+    "mkdocs-terok @ https://github.com/terok-ai/mkdocs-terok/releases/download/v0.8.0a1/mkdocs_terok-0.8.0a1-py3-none-any.whl",
 ]
 
-packages = [
-  { include = "terok_executor", from = "src" },
-]
-version = "0.3.2a1"
+[tool.uv]
+default-groups = ["dev", "test"]
 
-[tool.poetry.group.dev.dependencies]
-pre-commit = ">=4.0"
-ruff = ">=0.15.20"
-bandit = ">=1.7"
-docstr-coverage = "^2.3.2"
-complexipy = ">=6.0.1"
-vulture = ">=2.12"
-reuse = "^6.2.0"
-tach = "^0.35.0"
-mypy = ">=2.1.0,<3.0"
-import-linter = ">=2.13"
+[tool.hatch.metadata]
+allow-direct-references = true
 
-[tool.poetry.group.test.dependencies]
-pytest = ">=9.1.1"
-pytest-cov = ">=4.0"
-pytest-timeout = ">=2.0"
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.4.0a1"
 
-[tool.poetry.group.docs.dependencies]
-properdocs = ">=1.6.7"
-mkdocs-material = ">=9.7.6"
-mkdocstrings = {extras = ["python"], version = ">=0.26"}
-mkdocs-gen-files = ">=0.5"
-mkdocs-literate-nav = ">=0.6"
-mkdocs-section-index = ">=0.3"
-mkdocs-terok = "^0.7"
+[tool.hatch.build.targets.wheel]
+packages = ["src/terok_executor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -157,12 +169,3 @@ show_error_codes = true
 # attribute, so they report 0%; omit them rather than chase phantom misses.
 [tool.coverage.run]
 omit = ["*/terok_executor/resources/*"]
-
-[tool.poetry-dynamic-versioning]
-enable = true
-vcs = "git"
-pattern = "^v(?P<base>\\d+\\.\\d+\\.\\d+)(?:(?P<stage>a)(?P<revision>\\d+))?$"
-style = "pep440"
-
-[tool.poetry-dynamic-versioning.substitution]
-folders = [{path = "src"}]
