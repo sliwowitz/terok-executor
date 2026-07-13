@@ -44,6 +44,7 @@ from terok_executor.integrations.sandbox import RunSpec, Sandbox, SandboxConfig,
 from terok_executor.roster import AgentRoster
 from tests.constants import (
     CONTAINER_KEEPALIVE_COMMAND,
+    CONTAINER_WORKSPACE_DIR,
     INTEGRATION_VAULT_PASSPHRASE,
     PODMAN_BASE_IMAGE,
     PODMAN_PULL_TIMEOUT,
@@ -154,6 +155,10 @@ class ExecutorEnv:
     mounts_dir: Path
     """Base for the shared credential mounts (``ContainerEnvSpec.envs_dir``)."""
 
+    workspace_dir: Path
+    """Host side of the container's ``/workspace`` — the sandbox always runs
+    with that as the working directory, so every launch must mount it."""
+
     task_dir: Path
     """Per-task state dir; shield writes its dossier here on ``pre_start``."""
 
@@ -180,9 +185,11 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
         ),
         mounts_dir=tmp_path / "mounts",
         task_dir=tmp_path / "task",
+        workspace_dir=tmp_path / "workspace",
     )
     env.mounts_dir.mkdir(parents=True, exist_ok=True)
     env.task_dir.mkdir(parents=True, exist_ok=True)
+    env.workspace_dir.mkdir(parents=True, exist_ok=True)
     env.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=env.cfg):
@@ -226,12 +233,20 @@ def launch(executor_env: ExecutorEnv, podman_image: str) -> Iterator[Launcher]:
     ) -> str:
         name = unique_container_name(slug)
         started.append(name)
+        # The workspace mount is not optional: the sandbox runs every
+        # container with ``-w /workspace`` (as production does, where the
+        # task's workspace lives there), so podman refuses to start a
+        # container that lacks it.
+        workspace = VolumeSpec(
+            host_path=executor_env.workspace_dir,
+            container_path=CONTAINER_WORKSPACE_DIR,
+        )
         executor_env.sandbox().run(
             RunSpec(
                 container_name=name,
                 image=podman_image,
                 env=dict(env or {}),
-                volumes=volumes,
+                volumes=(workspace, *volumes),
                 command=CONTAINER_KEEPALIVE_COMMAND,
                 task_dir=executor_env.task_dir,
             )

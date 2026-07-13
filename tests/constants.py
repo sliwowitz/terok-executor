@@ -77,6 +77,12 @@ Names are suffixed with a random token per test and removed in a ``finally``
 makes it greppable in ``podman ps -a``."""
 
 CONTAINER_KEEPALIVE_COMMAND = ("sleep", "300")
+
+#: The sandbox hardcodes ``-w /workspace`` for every run, so a container
+#: without the workspace bind-mount cannot start at all ("workdir does not
+#: exist").  Production always mounts the task's workspace there; the
+#: integration launches must too.
+CONTAINER_WORKSPACE_DIR = "/workspace"
 """Entry command that keeps a test container up long enough to exec into."""
 
 CREDENTIAL_FILE_MODE = 0o600
