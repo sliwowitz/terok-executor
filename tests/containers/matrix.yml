@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+#
+# Multi-distro test matrix for terok-executor — declarative input to the
+# shared engine in terok-util.  Run with `uv run terok-matrix` from the
+# repo root (or `make test-matrix`).
+#
+# Executor's integration suite launches real containers through the same
+# Sandbox.run() path a task launch uses, so every slot needs the podman +
+# shield egress stack (nft, dnsmasq) and the OCI hooks installed by the
+# first phase — Sandbox refuses to start a container it cannot shield.
+# The nested rootless-podman image family provides all of it as-is; no
+# fragments/ overlay is needed.  There is no nix slot: executor without
+# podman has nothing to test.
+
+image-prefix: terok-executor-test
+flavor: podman
+expect: [podman, nft, dnsmasq, internet]
+groups: [test]
+
+slots:
+  debian12:
+  ubuntu2404:
+  ubuntu2604:
+  debian13:
+  fedora43:
+  fedora44:
+  podman:
+    extra-packages: [slirp4netns]
+  alpine:
+  void:
+  mageia:
+
+phases:
+  - name: installing shield hooks
+    run:
+      - terok-shield setup
+    expect-add: [hooks]
+  - name: unit tests
+    scope: unit
+    pytest: tests/unit/ -v --tb=short --durations=25
+  - name: integration tests
+    scope: integ
+    pytest: tests/integration/ -v --tb=short --durations=25
