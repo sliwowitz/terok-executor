@@ -8,7 +8,10 @@ that exposes the agent over JSON-RPC on stdio.  To learn which models
 the wrapper currently advertises, drive a minimal handshake:
 
 1. ``initialize`` — version negotiation
-2. ``session/new`` — receive the ``models`` block
+2. ``session/new`` — receive the ``configOptions`` block and read the
+   model selector out of it (ACP 1.16 retired the dedicated ``models``
+   block; a wrapper that offers no model selector reports no models,
+   which is legitimate rather than a failure)
 3. close stdin — agent exits cleanly
 
 The handshake is cheap but non-trivial to repeat; the result is cached
@@ -29,6 +32,8 @@ from typing import Any, NoReturn
 
 from acp import CLIENT_METHODS, PROTOCOL_VERSION, RequestError, spawn_agent_process
 from acp.schema import ClientCapabilities
+
+from .model_options import find_model_option, model_ids_in_option
 
 _logger = logging.getLogger(__name__)
 
@@ -53,8 +58,9 @@ async def probe_agent_models(
 
     Spawns the wrapper via `acp.spawn_agent_process`
     (which owns the asyncio stdio bridging and the graceful subprocess
-    shutdown dance), sends ``initialize`` and ``session/new``, reads
-    the ``models`` block, and returns the bare model ids.
+    shutdown dance), sends ``initialize`` and ``session/new``, reads the
+    model selector out of the returned ``configOptions``, and returns the
+    bare model ids.
 
     Raises [`ProbeError`][terok_executor.acp.probe.ProbeError] on
     timeout, transport failure, or any handshake error.  Callers (the
@@ -76,9 +82,10 @@ async def probe_agent_models(
     except Exception as exc:
         raise ProbeError(f"probe failed for agent {agent_id!r}: {exc}") from exc
 
-    if resp.models is None:
+    model_option = find_model_option(resp.config_options)
+    if model_option is None:
         return ()
-    return tuple(m.model_id for m in resp.models.available_models)
+    return tuple(model_ids_in_option(model_option))
 
 
 class _ProbeClient:
@@ -131,6 +138,14 @@ class _ProbeClient:
     async def kill_terminal(self, *_: object, **__: object) -> NoReturn:
         """Fast-fail — probe owns no terminals."""
         _not_supported_during_probe(CLIENT_METHODS["terminal_kill"])
+
+    async def create_elicitation(self, *_: object, **__: object) -> NoReturn:
+        """Fast-fail — probe has no user to elicit anything from."""
+        _not_supported_during_probe(CLIENT_METHODS["elicitation_create"])
+
+    async def complete_elicitation(self, *_: object, **__: object) -> None:
+        """Swallow — the probe never opened an elicitation to complete."""
+        return None
 
     async def ext_method(self, _name: str, _payload: dict[str, Any]) -> NoReturn:
         """Fast-fail — probe doesn't carry extension surfaces."""

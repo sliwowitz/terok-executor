@@ -20,9 +20,9 @@ from typing import Any
 import pytest
 from acp.schema import (
     InitializeResponse,
-    ModelInfo,
     NewSessionResponse,
-    SessionModelState,
+    SessionConfigOptionSelect,
+    SessionConfigSelectOption,
 )
 
 from terok_executor.acp import probe as probe_module
@@ -68,12 +68,21 @@ class _CannedBackend:
             raise self._raise_on_new_session
         if not self._models:
             return NewSessionResponse(session_id="be-1")
+        # ACP 1.16 retired the dedicated ``models`` block: a wrapper now
+        # advertises what it can run as a ``category="model"`` selector
+        # among its config options.
         return NewSessionResponse(
             session_id="be-1",
-            models=SessionModelState(
-                available_models=[ModelInfo(model_id=m, name=m) for m in self._models],
-                current_model_id=self._models[0],
-            ),
+            config_options=[
+                SessionConfigOptionSelect(
+                    id="model",
+                    name="Model",
+                    type="select",
+                    category="model",
+                    current_value=self._models[0],
+                    options=[SessionConfigSelectOption(value=m, name=m) for m in self._models],
+                )
+            ],
         )
 
 
@@ -101,7 +110,7 @@ class TestProbeAgentModels:
     """End-to-end probe with a patched ``spawn_agent_process``."""
 
     def test_happy_path_returns_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A normal handshake yields the model tuple from ``models.available_models``."""
+        """A normal handshake yields the model tuple from the config-option selector."""
         _patch_spawn(monkeypatch, _CannedBackend(models=["opus-4.6", "haiku-4.5"]))
         models = asyncio.run(
             probe_agent_models(
@@ -113,7 +122,7 @@ class TestProbeAgentModels:
         assert models == ("opus-4.6", "haiku-4.5")
 
     def test_no_models_block_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A wrapper that supports sessions but has no model picker → empty."""
+        """A wrapper that supports sessions but advertises no model selector → empty."""
         _patch_spawn(monkeypatch, _CannedBackend(models=None))
         models = asyncio.run(
             probe_agent_models(
