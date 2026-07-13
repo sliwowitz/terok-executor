@@ -56,3 +56,50 @@ CONTAINER_CLAUDE_MEMORY_OVERRIDE = "/home/dev/.claude/projects/${PROJECT_ID}-wor
 
 WORKSPACE_ROOT = Path("/workspace")
 """Canonical workspace root referenced in bundled instructions assertions."""
+
+# ── Integration tests: real podman containers ────────────────────────────────
+# Only the podman-backed suite under tests/integration/ reads these.  They
+# name the one image, the one container-name prefix, and the file modes the
+# credential contract is stated in — the suite hard-codes nothing itself.
+
+PODMAN_BASE_IMAGE = "docker.io/library/alpine:latest"
+"""Tiny base image the container tests launch.
+
+Alpine carries busybox ``stat``/``printenv``/``sleep``, which is the whole
+in-container vocabulary the suite needs.  Pulled once per session by the
+``podman_image`` fixture; every launch afterwards finds it locally."""
+
+PODMAN_CONTAINER_PREFIX = "terok-executor-itest"
+"""Prefix of every container the suite creates.
+
+Names are suffixed with a random token per test and removed in a ``finally``
+— an interrupted run leaves at most one identifiable stray, and the prefix
+makes it greppable in ``podman ps -a``."""
+
+CONTAINER_KEEPALIVE_COMMAND = ("sleep", "300")
+"""Entry command that keeps a test container up long enough to exec into."""
+
+CREDENTIAL_FILE_MODE = 0o600
+"""The mode every credential file executor places must land in.
+
+Owner-only, host-side *and* as seen from inside the container: glab aborts
+when its ``config.yml`` is looser than this (the 0644 bug class)."""
+
+LOOSE_FILE_MODE = 0o644
+"""World-readable mode a pre-0.3 launch left behind — the clamp's input."""
+
+PERMISSIVE_UMASK = 0o000
+"""Umask the credential-mode test runs under.
+
+A ``touch()`` without an explicit mode inherits the umask, so a 0022 umask
+masks the bug: only an all-permissive umask falsifies the claim that the
+0600 comes from executor rather than from the process environment."""
+
+INTEGRATION_VAULT_PASSPHRASE = "integration-test-passphrase"  # nosec: B105 — fixture key
+"""Passphrase for the throwaway SQLCipher vault each integration test seeds."""
+
+PODMAN_COMMAND_TIMEOUT = 60
+"""Seconds any single podman invocation in the suite may take."""
+
+PODMAN_PULL_TIMEOUT = 300
+"""Seconds the once-per-session base-image pull may take."""
