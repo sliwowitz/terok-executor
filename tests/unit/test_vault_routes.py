@@ -247,6 +247,94 @@ class TestScanLeakedCredentials:
         assert "No leaked" in capsys.readouterr().out
 
 
+class TestGlabConfigScan:
+    """glab's ``config.yml`` mixes settings and credentials — only a token is a leak.
+
+    The shared mount is writable by design (glab rewrites the file on
+    startup), so a non-empty settings-only file is the expected steady
+    state and must not be reported as a leaked credential.
+    """
+
+    def _write_glab_config(self, tmp_path: Path, content: str) -> Path:
+        """Materialise *content* as glab's credential file in a mock mount tree."""
+        from terok_executor import AgentRoster
+
+        roster = AgentRoster.shared()
+        mount = next(m for m in roster.mounts if m.provider == "glab" and m.credential_file)
+        cred_dir = tmp_path / mount.host_dir
+        cred_dir.mkdir(parents=True)
+        cred_file = cred_dir / mount.credential_file
+        cred_file.write_text(content)
+        return cred_file
+
+    def test_settings_only_config_not_flagged(self, tmp_path: Path) -> None:
+        """A config.yml holding only glab settings is benign."""
+        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+        self._write_glab_config(
+            tmp_path,
+            'last_seen_version: v1.107.0\nlast_update_check_timestamp: "2026-07-13T22:05:22+02:00"\n',
+        )
+
+        assert "glab" not in [p for p, _ in scan_leaked_credentials(tmp_path)]
+
+    def test_config_with_token_flagged(self, tmp_path: Path) -> None:
+        """A config.yml carrying a hosts.<host>.token entry is a real leak."""
+        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+        cred_file = self._write_glab_config(
+            tmp_path,
+            "git_protocol: ssh\nhosts:\n  gitlab.com:\n    token: glpat-real-secret\n",
+        )
+
+        assert ("glab", cred_file) in scan_leaked_credentials(tmp_path)
+
+    def test_unparseable_config_flagged(self, tmp_path: Path) -> None:
+        """A config.yml the scanner cannot parse is treated as a leak."""
+        from terok_executor.credentials.vault_commands import scan_leaked_credentials
+
+        cred_file = self._write_glab_config(tmp_path, "hosts: [not, a, mapping]\n")
+
+        assert ("glab", cred_file) in scan_leaked_credentials(tmp_path)
+
+
+class TestTokenlessGlabConfigFile:
+    """Verify _is_tokenless_glab_config_file classifies vendor files correctly."""
+
+    def test_tokenless_config_is_benign(self, tmp_path: Path) -> None:
+        """Settings-only config (no hosts section) reads as tokenless."""
+        from terok_executor.credentials.vault_commands import _is_tokenless_glab_config_file
+
+        cred_file = tmp_path / "config.yml"
+        cred_file.write_text("check_update: true\n")
+
+        assert _is_tokenless_glab_config_file(cred_file) is True
+
+    def test_empty_host_block_is_benign(self, tmp_path: Path) -> None:
+        """A hosts entry without a token (e.g. api_protocol only) reads as tokenless."""
+        from terok_executor.credentials.vault_commands import _is_tokenless_glab_config_file
+
+        cred_file = tmp_path / "config.yml"
+        cred_file.write_text("hosts:\n  gitlab.com:\n    api_protocol: https\n")
+
+        assert _is_tokenless_glab_config_file(cred_file) is True
+
+    def test_token_is_not_benign(self, tmp_path: Path) -> None:
+        """Any non-empty hosts.<host>.token makes the file a credential."""
+        from terok_executor.credentials.vault_commands import _is_tokenless_glab_config_file
+
+        cred_file = tmp_path / "config.yml"
+        cred_file.write_text("hosts:\n  gitlab.example.com:\n    token: glpat-abc\n")
+
+        assert _is_tokenless_glab_config_file(cred_file) is False
+
+    def test_missing_file_is_not_benign(self, tmp_path: Path) -> None:
+        """A missing file cannot be vouched for."""
+        from terok_executor.credentials.vault_commands import _is_tokenless_glab_config_file
+
+        assert _is_tokenless_glab_config_file(tmp_path / "config.yml") is False
+
+
 class TestVaultCommandHandlers:
     """Verify executor's vault CLI command handlers.
 

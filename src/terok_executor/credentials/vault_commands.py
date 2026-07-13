@@ -12,9 +12,9 @@ What lives here:
 
 - ``routes`` — regenerate ``routes.json`` from the YAML agent roster.
 - ``clean`` — remove leaked credential files from shared config mounts.
-- ``scan_leaked_credentials`` / ``_is_injected_credentials_file`` /
-  ``_is_injected_codex_auth_file`` — primitives the scan + clean
-  verbs share.
+- ``scan_leaked_credentials`` + the ``_BENIGN_CREDENTIAL_CHECKS``
+  registry of per-provider recognizers for credential files that are
+  legitimately non-empty — primitives the scan + clean verbs share.
 
 Both verbs operate on host-side files only.
 """
@@ -22,6 +22,7 @@ Both verbs operate on host-side files only.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,6 +83,41 @@ def _is_injected_codex_auth_file(path: Path) -> bool:
     )
 
 
+def _is_tokenless_glab_config_file(path: Path) -> bool:
+    """Check whether *path* is a glab ``config.yml`` that carries no token.
+
+    glab's ``config.yml`` doubles as a settings file the tool rewrites on
+    startup (update-check metadata, ``git_protocol``, …), so its shared
+    mount is writable by design and a non-empty file is the expected
+    steady state — only a ``hosts.<host>.token`` entry makes it a leak.
+
+    Any parse error or unexpected structure → ``False`` (treat as real leak).
+    """
+    from .vendor_files import RawGlabConfigFile, load_vendor_yaml
+
+    try:
+        cred = load_vendor_yaml(RawGlabConfigFile, path)
+    except ValueError:
+        return False
+    if cred is None:
+        return False
+    return not any(block.token for block in cred.hosts.values())
+
+
+_BENIGN_CREDENTIAL_CHECKS: dict[str, Callable[[Path], bool]] = {
+    "claude": _is_injected_credentials_file,
+    "codex": _is_injected_codex_auth_file,
+    "glab": _is_tokenless_glab_config_file,
+}
+"""Per-provider recognizers for credential files that are legitimately non-empty.
+
+Maps the mount's owning agent name to a predicate that returns ``True``
+when the file holds no real secret: a terok-injected phantom (claude,
+codex) or a settings-only vendor file (glab).  Providers without an
+entry treat any non-empty credential file as a leak.
+"""
+
+
 def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     """Return ``(provider, host_path)`` for credential files found in shared mounts.
 
@@ -90,8 +126,9 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     into containers.  This function checks each routed provider's mount for
     credential files that would leak real tokens alongside phantom ones.
 
-    Files injected by `_write_claude_credentials_file`
-    are recognised by their dummy ``accessToken`` marker and skipped.
+    Non-empty files recognised as benign by the provider's
+    `_BENIGN_CREDENTIAL_CHECKS` entry — terok-injected phantoms, or
+    glab's settings-only ``config.yml`` — are skipped.
 
     Symlinks are rejected to prevent a container from tricking the scan into
     reading arbitrary host files via a crafted symlink in the shared mount.
@@ -121,9 +158,8 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
             # Ensure resolved path stays within the mounts base
             if base_resolved not in path.resolve(strict=True).parents:
                 continue
-            if st.st_size > 0 and not (
-                _is_injected_credentials_file(path) or _is_injected_codex_auth_file(path)
-            ):
+            is_benign = _BENIGN_CREDENTIAL_CHECKS.get(mount.provider)
+            if st.st_size > 0 and not (is_benign and is_benign(path)):
                 leaked.append((mount.provider, path))
         except (OSError, TypeError) as exc:
             # Silently skipping turns a real leak into a no-result: the
