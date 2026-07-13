@@ -101,4 +101,12 @@ def _minimal_dump(data: dict) -> str:
 
 
 if __name__ == "__main__":
+    # The wrapper always passes both, but the module claims to be
+    # standalone-safe -- so say what is missing instead of an IndexError.
+    if len(sys.argv) != 3:  # noqa: PLR2004 — argv[0] + the two documented args
+        print(
+            f"usage: {pathlib.Path(sys.argv[0]).name} <workspace-path> <trusted-folders-toml>",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     sys.exit(main(sys.argv[1], pathlib.Path(sys.argv[2])))
