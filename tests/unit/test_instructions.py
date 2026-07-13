@@ -48,6 +48,31 @@ class TestBundledDefault:
         assert "sudo" in DEFAULT_INSTRUCTIONS
         assert "git" in DEFAULT_INSTRUCTIONS.lower()
 
+    @pytest.mark.parametrize(
+        ("family", "tool", "other_tool"),
+        [("deb", "sudo apt install", "dnf"), ("rpm", "sudo dnf install", "apt")],
+    )
+    def test_family_renders_its_package_manager(
+        self, family: str, tool: str, other_tool: str
+    ) -> None:
+        """Each family sees its own package manager and never the other's."""
+        text = bundled_default_instructions(family)
+        assert tool in text
+        assert other_tool not in text
+
+    def test_unknown_family_stays_generic(self) -> None:
+        """No family → no distro-specific claims that could be untrue."""
+        assert "apt" not in DEFAULT_INSTRUCTIONS
+        assert "dnf" not in DEFAULT_INSTRUCTIONS
+        assert "package manager" in DEFAULT_INSTRUCTIONS
+
+    @pytest.mark.parametrize("family", ["deb", "rpm", None])
+    def test_no_unrendered_jinja_leaks(self, family: str | None) -> None:
+        """The template renders fully for every family value."""
+        text = bundled_default_instructions(family)
+        assert "{%" not in text
+        assert "{{" not in text
+
 
 class TestResolveInstructions:
     """Tests for resolve_instructions()."""
@@ -87,6 +112,14 @@ class TestResolveInstructions:
     ) -> None:
         """Instructions resolve correctly for various config shapes."""
         assert resolve_instructions(config, provider) == expected
+
+    def test_family_reaches_the_spliced_default(self) -> None:
+        """*family* renders the bundled default wherever ``_inherit`` splices it."""
+        text = resolve_instructions(
+            {"instructions": ["Project preamble.", "_inherit"]}, "claude", family="rpm"
+        )
+        assert text.startswith("Project preamble.")
+        assert "sudo dnf install" in text
 
 
 class TestFileAppend:

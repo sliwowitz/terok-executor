@@ -20,6 +20,7 @@ from terok_executor.container.build import (
     build_base_images,
     build_sidecar_image,
     detect_family,
+    known_family,
     l0_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
@@ -1346,6 +1347,28 @@ class TestDetectFamily:
     def test_blank_falls_back_to_default(self) -> None:
         # _normalize_base_image turns blank into fedora:44 → rpm.
         assert detect_family("") == "rpm"
+
+
+class TestKnownFamily:
+    """The lenient variant: ``None`` for unrecognized images instead of raising."""
+
+    def test_unknown_returns_none(self) -> None:
+        assert known_family("rockylinux:9") is None
+
+    @pytest.mark.parametrize(
+        ("base_image", "expected"),
+        [("ubuntu:24.04", "deb"), ("fedora:44", "rpm")],
+    )
+    def test_known_matches_detect_family(self, base_image: str, expected: str) -> None:
+        assert known_family(base_image) == expected == detect_family(base_image)
+
+    def test_override_wins_for_unknown(self) -> None:
+        assert known_family("rockylinux:9", override="rpm") == "rpm"
+
+    def test_invalid_override_still_rejected(self) -> None:
+        # A bad explicit ``family:`` is a config error, not an unknown image.
+        with pytest.raises(BuildError, match="must be 'deb' or 'rpm'"):
+            known_family("ubuntu:24.04", override="alpine")
 
 
 class TestRenderFamilyAware:
