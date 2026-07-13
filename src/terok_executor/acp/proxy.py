@@ -23,18 +23,23 @@ implements **both** sides of the ACP protocol on the same object:
 Two phases drive the lifecycle:
 
 - **Pre-bind**: ``initialize`` and ``session/new`` answer locally,
-  advertising the aggregated ``agent:model`` list in
-  `acp.schema.SessionModelState` plus a mirroring
-  ``configOptions[category=model]``.  No backend process exists yet.
-- **Bound**: on the first model-picking client request — modern ACP's
-  ``session/set_model`` or older Zed's ``session/set_config_option(category=model)``,
-  or lazily on the first backend-needing method like ``session/prompt``
-  — the proxy spawns the in-container wrapper through
-  `acp.spawn_agent_process`, replays
-  ``initialize`` + ``session/new`` + ``session/set_model`` against it,
-  and from then on forwards typed calls in both directions.  Backend
-  responses and notifications carrying model ids are re-namespaced on
-  the way out so the client always sees ``agent:model`` ids.
+  advertising the aggregated ``agent:model`` list as a
+  ``configOptions[category=model]`` selector.  No backend process exists
+  yet.
+- **Bound**: on the first model-picking client request —
+  ``session/set_config_option(category=model)``, or lazily on the first
+  backend-needing method like ``session/prompt`` — the proxy spawns the
+  in-container wrapper through `acp.spawn_agent_process`, replays
+  ``initialize`` + ``session/new`` + ``session/set_config_option``
+  against it, and from then on forwards typed calls in both directions.
+  Backend responses and notifications carrying model ids are re-namespaced
+  on the way out so the client always sees ``agent:model`` ids.
+
+ACP 1.16 (SDK 0.11) retired the dedicated model channel —
+``session/set_model``, ``SessionModelState``, ``ModelInfo`` are all gone —
+and model selection now rides the generic config-option mechanism that
+older Zed already used.  That collapsed two code paths into one: the
+proxy speaks config options to the client *and* to the backend.
 
 V1 takes shortcuts where the design is still settling: one session per
 connection (Zed reconnects on every chat — fix on the roadmap), one
@@ -53,15 +58,21 @@ from acp import PROTOCOL_VERSION, RequestError, spawn_agent_process
 from acp.agent.connection import AgentSideConnection
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
+    AcpMcpServer,
     AgentMessageChunk,
+    AgentPlanContentUpdate,
+    AgentPlanRemovedUpdate,
     AgentPlanUpdate,
     AgentThoughtChunk,
     AuthenticateResponse,
     AvailableCommandsUpdate,
     ClientCapabilities,
     ConfigOptionUpdate,
+    CreateElicitationResponse,
     CreateTerminalResponse,
     CurrentModeUpdate,
+    ElicitationMode,
+    ElicitationSessionScope,
     EnvVariable,
     ForkSessionResponse,
     HttpMcpServer,
@@ -80,7 +91,6 @@ from acp.schema import (
     ResumeSessionResponse,
     SessionInfoUpdate,
     SetSessionConfigOptionResponse,
-    SetSessionModelResponse,
     SetSessionModeResponse,
     SseMcpServer,
     TerminalOutputResponse,
@@ -97,6 +107,7 @@ from .model_options import (
     MODEL_OPTION_CATEGORY,
     build_aggregated_session_new,
     build_model_option,
+    find_model_option,
     namespace_model_options_in_place,
     split_namespaced,
 )
@@ -135,12 +146,24 @@ SessionUpdatePayload = (
     | ToolCallStart
     | ToolCallProgress
     | AgentPlanUpdate
+    | AgentPlanContentUpdate
+    | AgentPlanRemovedUpdate
     | AvailableCommandsUpdate
     | CurrentModeUpdate
     | ConfigOptionUpdate
     | SessionInfoUpdate
     | UsageUpdate
 )
+
+McpServerConfig = HttpMcpServer | SseMcpServer | AcpMcpServer | McpServerStdio
+"""Every MCP server shape ``session/new`` and friends accept.
+
+Spelled once because the proxy forwards the client's ``mcpServers`` list
+verbatim through four session-opening methods, and the union must stay
+identical to the SDK's — ``list`` is invariant, so a member missing here
+(``AcpMcpServer`` was, before ACP 1.16 added it) makes every forward a
+type error rather than silently dropping a server.
+"""
 
 
 class ACPProxy:
@@ -159,10 +182,18 @@ class ACPProxy:
         self._bind_lock = asyncio.Lock()
         self._bound_agent: str | None = None
         self._backend_session_id: str | None = None
-        self._client_mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None
+        self._client_mcp_servers: list[McpServerConfig] | None = None
         self._client_additional_directories: list[str] | None = None
         self._client_capabilities: ClientCapabilities | None = None
         self._aggregated_models: list[str] = []
+        # Id of the *backend's* own model selector, learned from its
+        # ``session/new`` reply at bind time.  ACP 1.16 removed the
+        # dedicated ``session/set_model`` call, so re-picks now go through
+        # ``session/set_config_option`` and need the backend's option id —
+        # which is its to choose, not ours to assume.  ``None`` means the
+        # backend offers no model choice; a pick is then a no-op rather
+        # than an error.
+        self._backend_model_config_id: str | None = None
         # Namespaced ``agent:model`` advertised as ``currentModelId`` in
         # ``session/new``.  Lazy-bind target for clients that go straight
         # from ``session/new`` to ``session/prompt`` without an explicit
@@ -216,7 +247,7 @@ class ACPProxy:
         self,
         cwd: str,
         additional_directories: list[str] | None = None,
-        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
         **_kw: Any,
     ) -> NewSessionResponse:
         """Answer ``session/new`` with the aggregated model list.
@@ -238,24 +269,16 @@ class ACPProxy:
         self._default_namespaced = self._aggregated_models[0] if self._aggregated_models else None
         return build_aggregated_session_new(CLIENT_SESSION_ID, self._aggregated_models)
 
-    async def set_session_model(
-        self, model_id: str, session_id: str, **_kw: Any
-    ) -> SetSessionModelResponse | None:
-        """Bind on first call; same-agent re-pick forwards through."""
-        self._require_client_session(session_id)
-        await self._select_model(model_id)
-        return SetSessionModelResponse()
-
     async def set_config_option(
         self, config_id: str, session_id: str, value: str | bool, **_kw: Any
     ) -> SetSessionConfigOptionResponse | None:
         """Bind on ``category=model``; otherwise forward to the bound backend.
 
-        Older ACP clients (Zed v1.0.x at the time of writing) pick the
-        model through ``session/set_config_option(category="model")``;
-        modern clients use the dedicated ``session/set_model``.  Accept
-        both.  Non-model categories pass through to the bound backend;
-        a non-model option pre-bind is rejected.
+        This is now the *only* way a client picks a model: ACP 1.16
+        retired the dedicated ``session/set_model`` request, folding model
+        selection into the generic config-option channel that older Zed
+        already used.  Non-model options pass through to the bound
+        backend; a non-model option pre-bind is rejected.
         """
         self._require_client_session(session_id)
         if config_id == MODEL_OPTION_CATEGORY and isinstance(value, str):
@@ -272,18 +295,20 @@ class ACPProxy:
 
     async def prompt(
         self,
-        prompt: list,
         session_id: str,
-        message_id: str | None = None,
+        prompt: list,
         **_kw: Any,
     ) -> PromptResponse:
-        """Lazy-bind to the default model if needed, then forward."""
+        """Lazy-bind to the default model if needed, then forward.
+
+        ACP 1.16 dropped ``message_id`` from ``PromptRequest`` — message
+        ids now ride on the streamed content chunks instead — so there is
+        nothing left to relay but the prompt itself.
+        """
         self._require_client_session(session_id)
         await self._ensure_bound_for_default()
         backend, backend_session = self._require_bound()
-        return await backend.prompt(
-            prompt=prompt, session_id=backend_session, message_id=message_id
-        )
+        return await backend.prompt(prompt=prompt, session_id=backend_session)
 
     async def cancel(self, session_id: str, **_kw: Any) -> None:
         """Fire-and-forget cancel to the backend (no-op if not bound)."""
@@ -297,7 +322,7 @@ class ACPProxy:
         return await backend.authenticate(method_id=method_id)
 
     async def set_session_mode(
-        self, mode_id: str, session_id: str, **_kw: Any
+        self, session_id: str, mode_id: str, **_kw: Any
     ) -> SetSessionModeResponse | None:
         """Forward to bound backend."""
         self._require_client_session(session_id)
@@ -308,8 +333,8 @@ class ACPProxy:
         self,
         cwd: str,
         session_id: str,
+        mcp_servers: list[McpServerConfig] | None = None,
         additional_directories: list[str] | None = None,
-        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
         **_kw: Any,
     ) -> LoadSessionResponse | None:
         """Forward to bound backend (v1 advertises no session-load capability)."""
@@ -324,23 +349,24 @@ class ACPProxy:
 
     async def list_sessions(
         self,
-        additional_directories: list[str] | None = None,
-        cursor: str | None = None,
         cwd: str | None = None,
+        cursor: str | None = None,
         **_kw: Any,
     ) -> ListSessionsResponse:
-        """Forward to bound backend."""
+        """Forward to bound backend.
+
+        ``ListSessionsRequest`` lost ``additionalDirectories`` in ACP
+        1.16 — listing is scoped by ``cwd`` alone now.
+        """
         backend, _ = self._require_bound()
-        return await backend.list_sessions(
-            additional_directories=additional_directories, cursor=cursor, cwd=cwd
-        )
+        return await backend.list_sessions(cursor=cursor, cwd=cwd)
 
     async def fork_session(
         self,
-        cwd: str,
         session_id: str,
+        cwd: str,
         additional_directories: list[str] | None = None,
-        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
         **_kw: Any,
     ) -> ForkSessionResponse:
         """Forward to bound backend."""
@@ -355,10 +381,10 @@ class ACPProxy:
 
     async def resume_session(
         self,
-        cwd: str,
         session_id: str,
+        cwd: str,
         additional_directories: list[str] | None = None,
-        mcp_servers: list[HttpMcpServer | SseMcpServer | McpServerStdio] | None = None,
+        mcp_servers: list[McpServerConfig] | None = None,
         **_kw: Any,
     ) -> ResumeSessionResponse:
         """Forward to bound backend."""
@@ -413,9 +439,9 @@ class ACPProxy:
 
     async def request_permission(
         self,
-        options: list[PermissionOption],
         session_id: str,
         tool_call: ToolCallUpdate,
+        options: list[PermissionOption],
         **_kw: Any,
     ) -> RequestPermissionResponse:
         """Forward permission request to the connected client."""
@@ -426,10 +452,10 @@ class ACPProxy:
 
     async def read_text_file(
         self,
-        path: str,
         session_id: str,
-        limit: int | None = None,
+        path: str,
         line: int | None = None,
+        limit: int | None = None,
         **_kw: Any,
     ) -> ReadTextFileResponse:
         """Forward fs read to the connected client."""
@@ -439,7 +465,7 @@ class ACPProxy:
         )
 
     async def write_text_file(
-        self, content: str, path: str, session_id: str, **_kw: Any
+        self, session_id: str, path: str, content: str, **_kw: Any
     ) -> WriteTextFileResponse | None:
         """Forward fs write to the connected client."""
         del session_id
@@ -449,11 +475,11 @@ class ACPProxy:
 
     async def create_terminal(
         self,
-        command: str,
         session_id: str,
+        command: str,
         args: list[str] | None = None,
-        cwd: str | None = None,
         env: list[EnvVariable] | None = None,
+        cwd: str | None = None,
         output_byte_limit: int | None = None,
         **_kw: Any,
     ) -> CreateTerminalResponse:
@@ -504,6 +530,25 @@ class ACPProxy:
             session_id=CLIENT_SESSION_ID, terminal_id=terminal_id
         )
 
+    async def create_elicitation(
+        self, message: str, mode: ElicitationMode, **_kw: Any
+    ) -> CreateElicitationResponse:
+        """Forward an elicitation request to the connected client.
+
+        The backend addresses the elicitation to *its* session; the client
+        only knows [`CLIENT_SESSION_ID`][terok_executor.acp.proxy.CLIENT_SESSION_ID],
+        so session-scoped modes get the same id rewrite every other
+        backend → client frame gets.  Request-scoped modes carry no
+        session and pass through untouched.
+        """
+        if isinstance(mode, ElicitationSessionScope):
+            mode = mode.model_copy(update={"session_id": CLIENT_SESSION_ID})
+        return await self._require_client().create_elicitation(message=message, mode=mode)
+
+    async def complete_elicitation(self, elicitation_id: str, **_kw: Any) -> None:
+        """Forward the completion of an out-of-band elicitation to the client."""
+        await self._require_client().complete_elicitation(elicitation_id=elicitation_id)
+
     # ── Bind ──────────────────────────────────────────────────────────
 
     async def _select_model(self, namespaced: str) -> None:
@@ -533,8 +578,25 @@ class ACPProxy:
                         )
                     }
                 )
+        await self._set_backend_model(model_id)
+
+    async def _set_backend_model(self, model_id: str) -> None:
+        """Tell the bound backend to switch to *model_id*.
+
+        ACP 1.16 removed ``session/set_model``; a model is now just one
+        more config option, addressed by the id the backend gave its own
+        selector.  A backend that advertises no model selector has nothing
+        to switch — one model, always in use — so the pick is a no-op
+        rather than an error.
+        """
+        if self._backend_model_config_id is None:
+            return
         backend, backend_session = self._require_bound()
-        await backend.set_session_model(model_id=model_id, session_id=backend_session)
+        await backend.set_config_option(
+            config_id=self._backend_model_config_id,
+            session_id=backend_session,
+            value=model_id,
+        )
 
     async def _ensure_bound_for_default(self) -> None:
         """Bind to the advertised default model if no backend is bound yet."""
@@ -555,7 +617,12 @@ class ACPProxy:
 
         Callers hold [`_bind_lock`][terok_executor.acp.proxy.ACPProxy._bind_lock]
         — concurrent bind attempts from a racing ``prompt`` and
-        ``set_session_model`` collapse to one.
+        ``set_config_option`` collapse to one.
+
+        The backend's ``session/new`` reply is where we learn the id of its
+        model selector: the proxy namespaces model ids for the client, but
+        the option they live in belongs to the backend and is only named in
+        that reply.
         """
         command, *args = self._roster.wrapper_argv(agent_id)
         try:
@@ -573,7 +640,9 @@ class ACPProxy:
                 additional_directories=self._client_additional_directories,
             )
             self._backend_session_id = new_resp.session_id
-            await backend.set_session_model(model_id=model_id, session_id=self._backend_session_id)
+            model_option = find_model_option(new_resp.config_options)
+            self._backend_model_config_id = None if model_option is None else model_option.id
+            await self._set_backend_model(model_id)
         except Exception as exc:
             await self._teardown_backend()
             raise AgentBindError(f"bind {agent_id!r}: {exc}") from exc
@@ -589,6 +658,7 @@ class ACPProxy:
         self._backend_stack = AsyncExitStack()
         self._backend = None
         self._backend_session_id = None
+        self._backend_model_config_id = None
         # Keep _bound_agent set if we've already declared one — clearing
         # it would let a misbehaving client switch agents mid-session
         # past the v1 guard.  On clean disconnect the proxy is discarded

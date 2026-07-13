@@ -27,14 +27,16 @@ from acp.schema import (
     SessionConfigOptionSelect,
     SessionConfigSelectOption,
     SetSessionConfigOptionResponse,
-    SetSessionModelResponse,
 )
 
 from terok_executor.acp import proxy as proxy_module
 from terok_executor.acp.model_options import (
+    MODEL_OPTION_CATEGORY,
     build_aggregated_session_new,
     build_model_option,
+    find_model_option,
     humanise_model_id,
+    model_ids_in_option,
     namespace_model_options_in_place,
 )
 from terok_executor.acp.proxy import (
@@ -46,6 +48,11 @@ from terok_executor.acp.proxy import (
 # JSON-RPC error codes the proxy maps onto via `RequestError.invalid_*`.
 _JSONRPC_INVALID_REQUEST = -32600
 _JSONRPC_INVALID_PARAMS = -32602
+
+# The id a backend gives its *own* model selector.  Deliberately not the
+# proxy's ``"model"``: the proxy must address the backend by the id that
+# backend advertised, not by assuming its own convention holds downstream.
+_BACKEND_MODEL_CONFIG_ID = "llm"
 
 
 class _StubRoster:
@@ -79,12 +86,26 @@ class _FakeBackend:
         return InitializeResponse(protocol_version=kw["protocol_version"])
 
     async def new_session(self, **kw: Any) -> NewSessionResponse:
+        # A real 0.11 wrapper advertises its models as a select among its
+        # config options — the dedicated ``models`` block is gone.  The
+        # proxy reads this to learn which option a model pick addresses.
         self.calls.append(("new_session", kw))
-        return NewSessionResponse(session_id=self.session_id)
-
-    async def set_session_model(self, **kw: Any) -> SetSessionModelResponse:
-        self.calls.append(("set_session_model", kw))
-        return SetSessionModelResponse()
+        return NewSessionResponse(
+            session_id=self.session_id,
+            config_options=[
+                SessionConfigOptionSelect(
+                    id=_BACKEND_MODEL_CONFIG_ID,
+                    name="Model",
+                    type="select",
+                    category="model",
+                    current_value="opus-4.6",
+                    options=[
+                        SessionConfigSelectOption(value="opus-4.6", name="Opus"),
+                        SessionConfigSelectOption(value="haiku-4.5", name="Haiku"),
+                    ],
+                )
+            ],
+        )
 
     async def prompt(self, **kw: Any) -> PromptResponse:
         self.calls.append(("prompt", kw))
@@ -164,6 +185,29 @@ def _new_proxy(available: list[str]) -> ACPProxy:
     return ACPProxy(roster=_StubRoster(available))  # type: ignore[arg-type]
 
 
+async def _pick_model(
+    proxy: ACPProxy, namespaced: str, *, session_id: str = CLIENT_SESSION_ID
+) -> SetSessionConfigOptionResponse | None:
+    """Pick *namespaced* the way a client does.
+
+    Since ACP 1.16 the config-option channel is the *only* way to select a
+    model — ``session/set_model`` no longer exists — so this is what every
+    bind-driving test goes through.
+    """
+    return await proxy.set_config_option(
+        config_id=MODEL_OPTION_CATEGORY, session_id=session_id, value=namespaced
+    )
+
+
+def _backend_model_picks(backend: _FakeBackend) -> list[str]:
+    """Model values the proxy pushed onto *backend*'s own model selector."""
+    return [
+        kw["value"]
+        for name, kw in backend.calls
+        if name == "set_config_option" and kw["config_id"] == _BACKEND_MODEL_CONFIG_ID
+    ]
+
+
 class TestInitialize:
     """Pre-bind ``initialize`` is answered locally."""
 
@@ -194,15 +238,9 @@ class TestSessionNew:
         assert resp.session_id == CLIENT_SESSION_ID
 
     def test_aggregates_namespaced_model_options(self) -> None:
-        """Every available ``agent:model`` appears in both ``models`` and ``configOptions``."""
+        """Every available ``agent:model`` appears in the ``configOptions`` selector."""
         proxy = _new_proxy(["claude:opus-4.6", "codex:gpt-5.5"])
         resp = asyncio.run(proxy.new_session(cwd="/x", mcp_servers=[]))
-        assert resp.models is not None
-        assert [m.model_id for m in resp.models.available_models] == [
-            "claude:opus-4.6",
-            "codex:gpt-5.5",
-        ]
-        assert resp.models.current_model_id == "claude:opus-4.6"
         assert resp.config_options is not None
         model_opt = next(opt for opt in resp.config_options if opt.category == "model")
         assert isinstance(model_opt, SessionConfigOptionSelect)
@@ -226,22 +264,8 @@ class TestSessionNew:
         assert proxy._default_namespaced == "claude:opus-4.6"
 
 
-class TestSetModelPreBind:
-    """``session/set_model`` parsing before any bind."""
-
-    def test_unnamespaced_model_id_raises_invalid_params(self) -> None:
-        """Non ``agent:model`` values are rejected with -32602."""
-        proxy = _new_proxy(["claude:opus-4.6"])
-        asyncio.run(proxy.new_session(cwd="/x", mcp_servers=[]))
-        with pytest.raises(RequestError) as exc:
-            asyncio.run(
-                proxy.set_session_model(model_id="no-namespace", session_id=CLIENT_SESSION_ID)
-            )
-        assert exc.value.code == _JSONRPC_INVALID_PARAMS
-
-
 class TestSetConfigOptionPreBind:
-    """Older Zed sends model selection via ``set_config_option``."""
+    """Clients send model selection via ``set_config_option``."""
 
     def test_model_with_bad_namespace_raises(self) -> None:
         """Malformed ``agent:model`` short-circuits before any spawn."""
@@ -287,13 +311,11 @@ class TestPromptLazyBindGate:
 class TestSessionIdValidation:
     """Session-scoped handlers reject stale or pre-``session/new`` ids."""
 
-    def test_set_session_model_pre_new_session_rejected(self) -> None:
-        """Calling ``set_session_model`` before ``session/new`` errors."""
+    def test_model_pick_pre_new_session_rejected(self) -> None:
+        """Picking a model before ``session/new`` errors."""
         proxy = _new_proxy(["claude:opus-4.6"])
         with pytest.raises(RequestError) as exc:
-            asyncio.run(
-                proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
-            )
+            asyncio.run(_pick_model(proxy, "claude:opus-4.6"))
         assert exc.value.code == _JSONRPC_INVALID_REQUEST
 
     def test_prompt_with_unknown_session_id_rejected(self) -> None:
@@ -308,15 +330,14 @@ class TestSessionIdValidation:
 class TestBind:
     """End-to-end bind flow with a patched ``spawn_agent_process``."""
 
-    def test_set_session_model_drives_backend_handshake(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """First ``set_session_model`` spawns backend + replays the three frames.
+    def test_model_pick_drives_backend_handshake(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The first model pick spawns the backend + replays the three frames.
 
         The patched backend captures the exact arguments so we can pin
         the handshake shape: namespace stripped on the way down, client
         ``cwd`` overridden to the container workspace, ``mcp_servers``
-        defaulted to the empty list when the client didn't supply any.
+        defaulted to the empty list when the client didn't supply any,
+        and the pick addressed to the backend's *own* selector id.
         """
         backend = _FakeBackend()
         _patch_spawn(monkeypatch, backend)
@@ -325,21 +346,43 @@ class TestBind:
         async def _drive() -> None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/host/proj", mcp_servers=None)
-            resp = await proxy.set_session_model(
-                model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID
-            )
-            assert isinstance(resp, SetSessionModelResponse)
+            resp = await _pick_model(proxy, "claude:opus-4.6")
+            assert isinstance(resp, SetSessionConfigOptionResponse)
 
         asyncio.run(_drive())
 
         method_order = [name for name, _ in backend.calls]
-        assert method_order == ["initialize", "new_session", "set_session_model"]
+        assert method_order == ["initialize", "new_session", "set_config_option"]
         new_session_call = backend.calls[1][1]
         assert new_session_call["cwd"] == proxy_module.CONTAINER_WORKSPACE
         assert new_session_call["mcp_servers"] == []
         set_model_call = backend.calls[2][1]
-        assert set_model_call["model_id"] == "opus-4.6"  # namespace stripped
+        assert set_model_call["config_id"] == _BACKEND_MODEL_CONFIG_ID
+        assert set_model_call["value"] == "opus-4.6"  # namespace stripped
         assert set_model_call["session_id"] == backend.session_id
+
+    def test_backend_without_model_selector_binds_anyway(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A single-model wrapper advertises no selector — the pick is a no-op, not an error."""
+
+        class _NoModelsBackend(_FakeBackend):
+            async def new_session(self, **kw: Any) -> NewSessionResponse:
+                self.calls.append(("new_session", kw))
+                return NewSessionResponse(session_id=self.session_id)
+
+        backend = _NoModelsBackend()
+        _patch_spawn(monkeypatch, backend)
+        proxy = _new_proxy(["claude:opus-4.6"])
+
+        async def _drive() -> None:
+            await proxy.initialize(protocol_version=1)
+            await proxy.new_session(cwd="/x", mcp_servers=[])
+            await _pick_model(proxy, "claude:opus-4.6")
+
+        asyncio.run(_drive())
+        assert [name for name, _ in backend.calls] == ["initialize", "new_session"]
+        assert proxy._bound_agent == "claude"
 
     def test_additional_directories_forwarded_on_bind(
         self, monkeypatch: pytest.MonkeyPatch
@@ -354,7 +397,7 @@ class TestBind:
             await proxy.new_session(
                 cwd="/host/proj", mcp_servers=[], additional_directories=["/extra"]
             )
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
 
         asyncio.run(_drive())
         new_session_call = backend.calls[1][1]
@@ -369,11 +412,9 @@ class TestBind:
         async def _drive() -> None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
             with pytest.raises(RequestError) as exc:
-                await proxy.set_session_model(
-                    model_id="codex:gpt-5.5", session_id=CLIENT_SESSION_ID
-                )
+                await _pick_model(proxy, "codex:gpt-5.5")
             assert exc.value.code == _JSONRPC_INVALID_PARAMS
 
         asyncio.run(_drive())
@@ -387,14 +428,13 @@ class TestBind:
         async def _drive() -> None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
-            await proxy.set_session_model(model_id="claude:haiku-4.5", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
+            await _pick_model(proxy, "claude:haiku-4.5")
 
         asyncio.run(_drive())
 
-        set_model_calls = [kw for name, kw in backend.calls if name == "set_session_model"]
-        # First call is part of bind handshake, second is the re-pick.
-        assert [c["model_id"] for c in set_model_calls] == ["opus-4.6", "haiku-4.5"]
+        # First push is part of the bind handshake, second is the re-pick.
+        assert _backend_model_picks(backend) == ["opus-4.6", "haiku-4.5"]
 
     def test_bind_failure_propagates_as_agent_bind_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -412,9 +452,7 @@ class TestBind:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
             with pytest.raises(AgentBindError):
-                await proxy.set_session_model(
-                    model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID
-                )
+                await _pick_model(proxy, "claude:opus-4.6")
             # State reset — a retry should be possible.
             assert proxy._backend is None
             assert proxy._bound_agent is None
@@ -434,7 +472,7 @@ class TestBackendForwarding:
         async def _drive() -> SetSessionConfigOptionResponse | None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
             return await proxy.set_config_option(
                 config_id="theme",
                 session_id=CLIENT_SESSION_ID,
@@ -480,7 +518,7 @@ class TestBackendForwarding:
         assert [e.value for e in opt.options] == ["claude:opus-4.6", "claude:haiku-4.5"]
 
     def test_prompt_lazy_binds_to_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A client that skips ``set_session_model`` binds lazily on first ``prompt``."""
+        """A client that never picks a model binds lazily on first ``prompt``."""
         backend = _FakeBackend()
         _patch_spawn(monkeypatch, backend)
         proxy = _new_proxy(["claude:opus-4.6"])
@@ -492,9 +530,8 @@ class TestBackendForwarding:
 
         asyncio.run(_drive())
         method_order = [name for name, _ in backend.calls]
-        assert method_order == ["initialize", "new_session", "set_session_model", "prompt"]
-        set_model_call = backend.calls[2][1]
-        assert set_model_call["model_id"] == "opus-4.6"
+        assert method_order == ["initialize", "new_session", "set_config_option", "prompt"]
+        assert _backend_model_picks(backend) == ["opus-4.6"]
 
     def test_close_session_tears_backend_down(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``close_session`` reaps the wrapper; the proxy can rebind afterwards."""
@@ -505,7 +542,7 @@ class TestBackendForwarding:
         async def _drive() -> None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
             await proxy.close_session(session_id=CLIENT_SESSION_ID)
 
         asyncio.run(_drive())
@@ -633,7 +670,7 @@ class TestSessionUpdateForwarding:
         async def _drive() -> None:
             await proxy.initialize(protocol_version=1)
             await proxy.new_session(cwd="/x", mcp_servers=[])
-            await proxy.set_session_model(model_id="claude:opus-4.6", session_id=CLIENT_SESSION_ID)
+            await _pick_model(proxy, "claude:opus-4.6")
             # Inject the recorder *after* bind so the proxy's normal
             # initialise path isn't disturbed.
             proxy._client = _RecordingClient()  # type: ignore[assignment]
@@ -665,14 +702,73 @@ class TestSessionUpdateForwarding:
         assert model_opt.options[0].value == "claude:opus-4.6"
 
 
+class TestFindModelOption:
+    """Locating a backend's model selector among its config options."""
+
+    def test_skips_non_select_options_and_matches_category(self) -> None:
+        """A boolean knob is not a model selector; the ``category="model"`` select is."""
+        from acp.schema import SessionConfigOptionBoolean
+
+        toggle = SessionConfigOptionBoolean(
+            id="verbose", name="Verbose", type="boolean", current_value=True
+        )
+        models = SessionConfigOptionSelect(
+            id="llm",
+            name="Model",
+            type="select",
+            category="model",
+            current_value="opus-4.6",
+            options=[SessionConfigSelectOption(value="opus-4.6", name="Opus")],
+        )
+        assert find_model_option([toggle, models]) is models
+
+    def test_matches_well_known_id_when_category_absent(self) -> None:
+        """``category`` is optional in the spec — fall back to the well-known id."""
+        opt = SessionConfigOptionSelect(
+            id="model",
+            name="Model",
+            type="select",
+            current_value="opus-4.6",
+            options=[SessionConfigSelectOption(value="opus-4.6", name="Opus")],
+        )
+        assert find_model_option([opt]) is opt
+
+    def test_returns_none_when_no_model_selector(self) -> None:
+        """A single-model wrapper offers no selector at all."""
+        assert find_model_option(None) is None
+        assert find_model_option([]) is None
+
+    def test_model_ids_flattens_groups(self) -> None:
+        """Grouped selects (by provider/tier) collapse to one ordered id list."""
+        from acp.schema import SessionConfigSelectGroup
+
+        opt = SessionConfigOptionSelect(
+            id="model",
+            name="Model",
+            type="select",
+            category="model",
+            current_value="opus-4.6",
+            options=[
+                SessionConfigSelectGroup(
+                    group="anthropic",
+                    name="Anthropic",
+                    options=[
+                        SessionConfigSelectOption(value="opus-4.6", name="Opus"),
+                        SessionConfigSelectOption(value="haiku-4.5", name="Haiku"),
+                    ],
+                )
+            ],
+        )
+        assert model_ids_in_option(opt) == ["opus-4.6", "haiku-4.5"]
+
+
 class TestBuildHelpers:
     """The pre-bind aggregate builders."""
 
     def test_build_aggregated_session_new_empty_models(self) -> None:
-        """Empty list yields a schema-valid response with no models block."""
+        """Empty list yields a schema-valid response with no selector at all."""
         resp = build_aggregated_session_new("sess-x", [])
         assert resp.session_id == "sess-x"
-        assert resp.models is None
         assert resp.config_options is None
 
     def test_humanise_model_id_round_trip(self) -> None:
@@ -735,6 +831,14 @@ class _RecordingClient:
         self.calls.append(("kill_terminal", kw))
         return None
 
+    async def create_elicitation(self, **kw: Any) -> Any:
+        self.calls.append(("create_elicitation", kw))
+        return None
+
+    async def complete_elicitation(self, **kw: Any) -> None:
+        self.calls.append(("complete_elicitation", kw))
+        return None
+
 
 def _bound_proxy(
     monkeypatch: pytest.MonkeyPatch,
@@ -753,7 +857,7 @@ def _bound_proxy(
     async def _bind() -> None:
         await proxy.initialize(protocol_version=1)
         await proxy.new_session(cwd="/x", mcp_servers=[])
-        await proxy.set_session_model(model_id=available[0], session_id=CLIENT_SESSION_ID)
+        await _pick_model(proxy, available[0])
 
     asyncio.run(_bind())
     client = _RecordingClient()
@@ -788,12 +892,11 @@ class TestPostBindAgentForwarders:
         assert backend.calls[-1][1]["session_id"] == backend.session_id
 
     def test_list_sessions_forwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # ACP 1.16 scopes listing by ``cwd`` alone — ``additionalDirectories``
+        # is no longer part of the request.
         proxy, backend, _ = _bound_proxy(monkeypatch)
         asyncio.run(proxy.list_sessions(cursor="abc"))
-        assert backend.calls[-1] == (
-            "list_sessions",
-            {"additional_directories": None, "cursor": "abc", "cwd": None},
-        )
+        assert backend.calls[-1] == ("list_sessions", {"cursor": "abc", "cwd": None})
 
     def test_fork_session_forwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
         proxy, backend, _ = _bound_proxy(monkeypatch)
@@ -835,11 +938,22 @@ class TestPostBindAgentForwarders:
 
     def test_prompt_post_bind_forwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
         proxy, backend, _ = _bound_proxy(monkeypatch)
-        resp = asyncio.run(proxy.prompt(prompt=[], session_id=CLIENT_SESSION_ID, message_id="m1"))
+        resp = asyncio.run(proxy.prompt(prompt=[], session_id=CLIENT_SESSION_ID))
         assert isinstance(resp, PromptResponse)
         assert backend.calls[-1][0] == "prompt"
         assert backend.calls[-1][1]["session_id"] == backend.session_id
-        assert backend.calls[-1][1]["message_id"] == "m1"
+
+    def test_prompt_does_not_relay_retired_message_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A client still sending ``message_id`` gets it dropped, not forwarded.
+
+        ACP 1.16 removed the field from ``PromptRequest``; relaying it to a
+        0.11 backend would be a protocol violation.
+        """
+        proxy, backend, _ = _bound_proxy(monkeypatch)
+        asyncio.run(proxy.prompt(prompt=[], session_id=CLIENT_SESSION_ID, message_id="m1"))
+        assert "message_id" not in backend.calls[-1][1]
 
 
 class TestClientSideForwarders:
@@ -909,3 +1023,43 @@ class TestClientSideForwarders:
         name, kw = client.calls[-1]
         assert name == method
         assert kw == {"session_id": CLIENT_SESSION_ID, "terminal_id": "term-1"}
+
+
+class TestElicitationForwarding:
+    """The elicitation pair ACP 1.16 added to the ``Client`` protocol."""
+
+    def test_session_scoped_elicitation_gets_session_id_rewritten(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The backend's session id never leaks to the client — same rule as every other frame."""
+        from acp.schema import ElicitationFormSessionMode, ElicitationSchema
+
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        mode = ElicitationFormSessionMode(
+            session_id="be-1",
+            requested_schema=ElicitationSchema(properties={}, required=[]),
+        )
+        asyncio.run(proxy.create_elicitation(message="pick one", mode=mode))
+        name, kw = client.calls[-1]
+        assert name == "create_elicitation"
+        assert kw["message"] == "pick one"
+        assert kw["mode"].session_id == CLIENT_SESSION_ID
+
+    def test_request_scoped_elicitation_passes_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A request-scoped mode carries no session, so there is nothing to rewrite."""
+        from acp.schema import ElicitationFormRequestMode, ElicitationSchema
+
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        mode = ElicitationFormRequestMode(
+            request_id="req-9",
+            requested_schema=ElicitationSchema(properties={}, required=[]),
+        )
+        asyncio.run(proxy.create_elicitation(message="auth", mode=mode))
+        assert client.calls[-1][1]["mode"] is mode
+
+    def test_complete_elicitation_forwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        asyncio.run(proxy.complete_elicitation(elicitation_id="e-1"))
+        assert client.calls[-1] == ("complete_elicitation", {"elicitation_id": "e-1"})

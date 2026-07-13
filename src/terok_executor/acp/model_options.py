@@ -12,14 +12,20 @@ models:
   — the pre-bind ``session/new`` reply that advertises the union of
   every authenticated agent's models under one selector.
 - [`build_model_option`][terok_executor.acp.model_options.build_model_option]
-  — the ``configOptions[category=model]`` entry that mirrors the
-  aggregate selector for clients that read it instead of ``models``.
+  — the ``configOptions[category=model]`` entry carrying that aggregate
+  selector.  Since ACP 1.16 retired the dedicated ``models`` block, this
+  is the only channel on which models are advertised.
+- [`find_model_option`][terok_executor.acp.model_options.find_model_option]
+  — the mirror image: which of a *backend's* config options is its model
+  selector, so the probe can read its ids and the proxy can write a pick
+  into it.
 - [`namespace_model_options_in_place`][terok_executor.acp.model_options.namespace_model_options_in_place]
   — the post-bind rewrite that puts the ``agent:`` prefix back on the
   bare model ids a bound backend emits in its own config options.
 
 Plus the small vocabulary helpers ([`split_namespaced`][terok_executor.acp.model_options.split_namespaced],
-[`humanise_model_id`][terok_executor.acp.model_options.humanise_model_id])
+[`humanise_model_id`][terok_executor.acp.model_options.humanise_model_id],
+[`model_ids_in_option`][terok_executor.acp.model_options.model_ids_in_option])
 that callers across the proxy share.
 """
 
@@ -27,12 +33,10 @@ from __future__ import annotations
 
 from acp import NewSessionResponse
 from acp.schema import (
-    ModelInfo,
     SessionConfigOptionBoolean,
     SessionConfigOptionSelect,
     SessionConfigSelectGroup,
     SessionConfigSelectOption,
-    SessionModelState,
 )
 
 MODEL_OPTION_CATEGORY = "model"
@@ -53,22 +57,23 @@ OpenRouter-style ids like ``anthropic/claude-opus-4``."""
 def build_aggregated_session_new(session_id: str, models: list[str]) -> NewSessionResponse:
     """Build the pre-bind ``session/new`` reply for *models*.
 
-    Empty *models* yields a schema-valid response with no ``models`` or
-    ``configOptions`` block — both have non-nullable required fields the
-    proxy can't fill in for an empty list, and modelling "no models" as
-    an empty selector trips client validation.
+    ACP 1.16 retired the dedicated ``models`` block (``SessionModelState``
+    / ``ModelInfo``) that used to ride alongside ``configOptions``; the
+    ``category="model"`` selector is now the only channel through which an
+    agent advertises what it can run.  So the aggregate selector this
+    builds is no longer a mirror of the real thing — it *is* the real
+    thing.
+
+    Empty *models* yields a schema-valid response with no ``configOptions``
+    block — a select has non-nullable required fields the proxy can't fill
+    in for an empty list, and modelling "no models" as an empty selector
+    trips client validation.
     """
     if not models:
         return NewSessionResponse(session_id=session_id)
     current = models[0]
     return NewSessionResponse(
         session_id=session_id,
-        models=SessionModelState(
-            available_models=[
-                ModelInfo(model_id=ident, name=humanise_model_id(ident)) for ident in models
-            ],
-            current_model_id=current,
-        ),
         config_options=[build_model_option(models, current=current)],
     )
 
@@ -87,6 +92,48 @@ def build_model_option(namespaced_models: list[str], *, current: str) -> Session
             for ident in namespaced_models
         ],
     )
+
+
+def find_model_option(
+    config_options: list[SessionConfigOptionSelect | SessionConfigOptionBoolean] | None,
+) -> SessionConfigOptionSelect | None:
+    """Pick the model selector out of an agent's ``configOptions``.
+
+    Since ACP 1.16 dropped the dedicated ``models`` block, the model
+    selector is just one select among the agent's config options and has
+    to be recognised by convention.  ``category`` is the semantic marker
+    the spec provides, but it is optional ("UX only"), so a wrapper that
+    omits it is matched on the well-known ``id`` instead.  Returns
+    ``None`` when the agent exposes no model choice at all — a
+    single-model wrapper, which callers must treat as legitimate rather
+    than as an error.
+
+    The one place this rule lives: the probe reads models *out* of the
+    option, the proxy writes a pick *into* it, and both must agree on
+    which option they mean.
+    """
+    for opt in config_options or ():
+        if not isinstance(opt, SessionConfigOptionSelect):
+            continue
+        if opt.category == MODEL_OPTION_CATEGORY or opt.id == MODEL_OPTION_CATEGORY:
+            return opt
+    return None
+
+
+def model_ids_in_option(opt: SessionConfigOptionSelect) -> list[str]:
+    """List the model ids a selector offers, flattening any groups.
+
+    ACP lets a select present its options either flat or bucketed into
+    named groups (providers, tiers, …).  The roster only cares about the
+    ids, so both shapes collapse to one ordered list.
+    """
+    ids: list[str] = []
+    for entry in opt.options:
+        if isinstance(entry, SessionConfigSelectGroup):
+            ids.extend(sub.value for sub in entry.options)
+        else:
+            ids.append(entry.value)
+    return ids
 
 
 def namespace_model_options_in_place(
