@@ -197,8 +197,11 @@ class TestProbeClient:
 
         from terok_executor.acp.probe import _ProbeClient
 
+        # Build the coroutine outside the block so the only call that can
+        # raise inside it is the one under test.
+        elicit = _ProbeClient().create_elicitation(message="pick", mode=None)
         with pytest.raises(RequestError):
-            asyncio.run(_ProbeClient().create_elicitation(message="pick", mode=None))
+            asyncio.run(elicit)
 
     def test_complete_elicitation_swallowed(self) -> None:
         """The probe never opened an elicitation, so completing one is a no-op."""
