@@ -191,6 +191,21 @@ class TestProbeClient:
 
         asyncio.run(_ProbeClient().ext_notification("evt", {}))
 
+    def test_create_elicitation_fast_fails(self) -> None:
+        """The probe has no user to elicit from — don't hang the handshake waiting."""
+        from acp import RequestError
+
+        from terok_executor.acp.probe import _ProbeClient
+
+        with pytest.raises(RequestError):
+            asyncio.run(_ProbeClient().create_elicitation(message="pick", mode=None))
+
+    def test_complete_elicitation_swallowed(self) -> None:
+        """The probe never opened an elicitation, so completing one is a no-op."""
+        from terok_executor.acp.probe import _ProbeClient
+
+        asyncio.run(_ProbeClient().complete_elicitation(elicitation_id="e-1"))
+
     def test_on_connect_is_noop(self) -> None:
         """``on_connect`` is a protocol hook the probe doesn't use."""
         from terok_executor.acp.probe import _ProbeClient

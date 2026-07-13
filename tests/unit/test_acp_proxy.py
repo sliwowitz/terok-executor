@@ -34,7 +34,9 @@ from terok_executor.acp.model_options import (
     MODEL_OPTION_CATEGORY,
     build_aggregated_session_new,
     build_model_option,
+    find_model_option,
     humanise_model_id,
+    model_ids_in_option,
     namespace_model_options_in_place,
 )
 from terok_executor.acp.proxy import (
@@ -700,6 +702,66 @@ class TestSessionUpdateForwarding:
         assert model_opt.options[0].value == "claude:opus-4.6"
 
 
+class TestFindModelOption:
+    """Locating a backend's model selector among its config options."""
+
+    def test_skips_non_select_options_and_matches_category(self) -> None:
+        """A boolean knob is not a model selector; the ``category="model"`` select is."""
+        from acp.schema import SessionConfigOptionBoolean
+
+        toggle = SessionConfigOptionBoolean(
+            id="verbose", name="Verbose", type="boolean", current_value=True
+        )
+        models = SessionConfigOptionSelect(
+            id="llm",
+            name="Model",
+            type="select",
+            category="model",
+            current_value="opus-4.6",
+            options=[SessionConfigSelectOption(value="opus-4.6", name="Opus")],
+        )
+        assert find_model_option([toggle, models]) is models
+
+    def test_matches_well_known_id_when_category_absent(self) -> None:
+        """``category`` is optional in the spec — fall back to the well-known id."""
+        opt = SessionConfigOptionSelect(
+            id="model",
+            name="Model",
+            type="select",
+            current_value="opus-4.6",
+            options=[SessionConfigSelectOption(value="opus-4.6", name="Opus")],
+        )
+        assert find_model_option([opt]) is opt
+
+    def test_returns_none_when_no_model_selector(self) -> None:
+        """A single-model wrapper offers no selector at all."""
+        assert find_model_option(None) is None
+        assert find_model_option([]) is None
+
+    def test_model_ids_flattens_groups(self) -> None:
+        """Grouped selects (by provider/tier) collapse to one ordered id list."""
+        from acp.schema import SessionConfigSelectGroup
+
+        opt = SessionConfigOptionSelect(
+            id="model",
+            name="Model",
+            type="select",
+            category="model",
+            current_value="opus-4.6",
+            options=[
+                SessionConfigSelectGroup(
+                    group="anthropic",
+                    name="Anthropic",
+                    options=[
+                        SessionConfigSelectOption(value="opus-4.6", name="Opus"),
+                        SessionConfigSelectOption(value="haiku-4.5", name="Haiku"),
+                    ],
+                )
+            ],
+        )
+        assert model_ids_in_option(opt) == ["opus-4.6", "haiku-4.5"]
+
+
 class TestBuildHelpers:
     """The pre-bind aggregate builders."""
 
@@ -767,6 +829,14 @@ class _RecordingClient:
 
     async def kill_terminal(self, **kw: Any) -> Any:
         self.calls.append(("kill_terminal", kw))
+        return None
+
+    async def create_elicitation(self, **kw: Any) -> Any:
+        self.calls.append(("create_elicitation", kw))
+        return None
+
+    async def complete_elicitation(self, **kw: Any) -> None:
+        self.calls.append(("complete_elicitation", kw))
         return None
 
 
@@ -953,3 +1023,43 @@ class TestClientSideForwarders:
         name, kw = client.calls[-1]
         assert name == method
         assert kw == {"session_id": CLIENT_SESSION_ID, "terminal_id": "term-1"}
+
+
+class TestElicitationForwarding:
+    """The elicitation pair ACP 1.16 added to the ``Client`` protocol."""
+
+    def test_session_scoped_elicitation_gets_session_id_rewritten(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The backend's session id never leaks to the client — same rule as every other frame."""
+        from acp.schema import ElicitationFormSessionMode, ElicitationSchema
+
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        mode = ElicitationFormSessionMode(
+            session_id="be-1",
+            requested_schema=ElicitationSchema(properties={}, required=[]),
+        )
+        asyncio.run(proxy.create_elicitation(message="pick one", mode=mode))
+        name, kw = client.calls[-1]
+        assert name == "create_elicitation"
+        assert kw["message"] == "pick one"
+        assert kw["mode"].session_id == CLIENT_SESSION_ID
+
+    def test_request_scoped_elicitation_passes_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A request-scoped mode carries no session, so there is nothing to rewrite."""
+        from acp.schema import ElicitationFormRequestMode, ElicitationSchema
+
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        mode = ElicitationFormRequestMode(
+            request_id="req-9",
+            requested_schema=ElicitationSchema(properties={}, required=[]),
+        )
+        asyncio.run(proxy.create_elicitation(message="auth", mode=mode))
+        assert client.calls[-1][1]["mode"] is mode
+
+    def test_complete_elicitation_forwards(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        proxy, _backend, client = _bound_proxy(monkeypatch)
+        asyncio.run(proxy.complete_elicitation(elicitation_id="e-1"))
+        assert client.calls[-1] == ("complete_elicitation", {"elicitation_id": "e-1"})
