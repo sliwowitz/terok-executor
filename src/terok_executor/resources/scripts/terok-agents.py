@@ -250,14 +250,14 @@ def render_provider_protocols(protocols: object) -> str:
     if not rows:
         return ""
     width = max(len(str(r["protocol"])) for r in rows)
-    lines = [f"  {_DIM}Providers by wire protocol (authenticate one to enable its agents):{_RESET}"]
+    lines = [f"{_DIM}Providers by wire protocol (authenticate one to enable its agents):{_RESET}"]
     for row in rows:
         authed = set(row.get("authenticated") or [])
         names = ", ".join(
             f"{_MAGENTA}{p}{_RESET}" if p in authed else f"{_DIM}{p}{_RESET}"
             for p in row["candidates"]
         )
-        lines.append(f"    {str(row['protocol']):<{width}}  {names}")
+        lines.append(f"  {str(row['protocol']):<{width}}  {names}")
     return "\n".join(lines)
 
 
