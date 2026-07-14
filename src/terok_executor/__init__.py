@@ -68,6 +68,7 @@ if TYPE_CHECKING:
         ImageBuilder as ImageBuilder,
         ImageSet as ImageSet,
         build_project_image as build_project_image,
+        known_family as known_family,
     )
     from .container.cache import seed_workspace_from_clone_cache as seed_workspace_from_clone_cache
     from .container.env import (
@@ -157,6 +158,7 @@ _LAZY: dict[str, str] = {
     "ImageBuilder": ".container.build",
     "ImageSet": ".container.build",
     "build_project_image": ".container.build",
+    "known_family": ".container.build",
     # Container environment assembly
     "ContainerEnvSpec": ".container.env",
     "assemble_container_env": ".container.env",

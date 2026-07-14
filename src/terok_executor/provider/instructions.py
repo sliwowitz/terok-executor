@@ -33,6 +33,8 @@ def resolve_instructions(
     config: dict[str, Any],
     agent_name: str,
     project_root: Path | None = None,
+    *,
+    family: str | None = None,
 ) -> str:
     """Resolve instructions from a merged config dict.
 
@@ -42,6 +44,10 @@ def resolve_instructions(
     - List (with ``_inherit``): splices bundled default at each ``_inherit`` sentinel
     - Absent/None: returns bundled default
 
+    *family* is the task image's package family (``"deb"``/``"rpm"``, or
+    ``None`` when unknown) — wherever the bundled default is used, its
+    package-manager guidance is rendered for that family.
+
     After resolving the YAML value, appends the contents of
     ``project_root/instructions.md`` (if it exists and is non-empty).
 
@@ -50,7 +56,7 @@ def resolve_instructions(
     from .providers import resolve_agent_value
 
     val = config.get("instructions")
-    default = bundled_default_instructions()
+    default = bundled_default_instructions(family)
 
     if val is None:
         base = default
@@ -93,10 +99,26 @@ def has_custom_instructions(
     return bool(project_root and (project_root / "instructions.md").is_file())
 
 
-def bundled_default_instructions() -> str:
-    """Read and return the bundled default instructions from package resources."""
+def bundled_default_instructions(family: str | None = None) -> str:
+    """Render the bundled default instructions for a package *family*.
+
+    The bundled ``default.md`` is a Jinja2 template branching on *family*,
+    like the Dockerfile templates: package-manager guidance renders as
+    ``apt`` for ``"deb"`` bases and ``dnf`` for ``"rpm"`` bases, and stays
+    deliberately generic when the family is unknown (``None``) — better no
+    tool advice than wrong tool advice.
+    """
+    from jinja2 import BaseLoader, Environment
+
     ref = importlib.resources.files("terok_executor.resources.instructions").joinpath("default.md")
-    return ref.read_text(encoding="utf-8")
+    env = Environment(  # nosec B701 — Markdown output, not HTML
+        loader=BaseLoader(),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+        autoescape=False,
+    )
+    return env.from_string(ref.read_text(encoding="utf-8")).render(family=family)
 
 
 # ── Private helpers ──────────────────────────────────────────────────────

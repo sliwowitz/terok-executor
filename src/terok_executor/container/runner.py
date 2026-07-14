@@ -1181,11 +1181,15 @@ class AgentRunner:
         *project_root* is passed to [`resolve_instructions`][terok_executor.resolve_instructions] so that
         ``<repo>/instructions.md`` is appended when present.
         """
+        from terok_executor.container.build import known_family
         from terok_executor.provider.agents import AgentConfigSpec, prepare_agent_config_dir
         from terok_executor.provider.instructions import resolve_instructions
 
         resolved_instructions = instructions or resolve_instructions(
-            {}, agent, project_root=project_root
+            {},
+            agent,
+            project_root=project_root,
+            family=known_family(self._base_image, self._family),
         )
 
         spec = AgentConfigSpec(

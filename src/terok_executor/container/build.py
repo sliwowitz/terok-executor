@@ -371,8 +371,8 @@ class ImageBuilder:
 # ── Underlying free functions (now private — call via ImageBuilder) ──
 
 
-def detect_family(base_image: str, override: str | None = None) -> str:
-    """Resolve the package family (``deb`` or ``rpm``) for *base_image*.
+def known_family(base_image: str, override: str | None = None) -> str | None:
+    """The package family (``deb``/``rpm``) for *base_image*, or ``None`` if unrecognized.
 
     *override* — when set, must be ``"deb"`` or ``"rpm"`` and wins over
     detection (used to support unknown bases via project config).
@@ -381,8 +381,7 @@ def detect_family(base_image: str, override: str | None = None) -> str:
     (Ubuntu/Debian, Fedora, the official Podman container, NVIDIA CUDA/HPC
     SDK).  NVIDIA images are inspected at the tag level so UBI variants
     (e.g. ``…:13.0.0-devel-ubi9``) resolve to ``rpm`` while Ubuntu
-    variants resolve to ``deb``.  Unknown images raise [`BuildError`][terok_executor.container.build.BuildError]
-    with a hint to set ``family:`` explicitly.
+    variants resolve to ``deb``.
     """
     if override is not None:
         if override not in {"deb", "rpm"}:
@@ -393,10 +392,23 @@ def detect_family(base_image: str, override: str | None = None) -> str:
     for prefix, fam in _KNOWN_FAMILIES:
         if name_lc == prefix or name_lc.startswith(prefix + "/"):
             return fam(tag) if callable(fam) else fam
-    raise BuildError(
-        f"Cannot infer package family for base image {base_image!r}. "
-        "Set `family: deb` or `family: rpm` under image: in project.yml."
-    )
+    return None
+
+
+def detect_family(base_image: str, override: str | None = None) -> str:
+    """Resolve the package family for *base_image*, raising for unknown images.
+
+    Same detection as [`known_family`][terok_executor.container.build.known_family], except that an
+    unrecognized image raises [`BuildError`][terok_executor.container.build.BuildError] with a hint to set
+    ``family:`` explicitly — an image build cannot proceed without one.
+    """
+    family = known_family(base_image, override)
+    if family is None:
+        raise BuildError(
+            f"Cannot infer package family for base image {base_image!r}. "
+            "Set `family: deb` or `family: rpm` under image: in project.yml."
+        )
+    return family
 
 
 def build_project_image(
