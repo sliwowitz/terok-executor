@@ -8,7 +8,11 @@
 A friendlier view of ``~/.terok/agents.json`` (written per task by
 ``terok-agents``) — grouped by agent, coloured, ready pairs only.  ``--all``
 also lists the pairs that aren't ready (and why-not is implicit: the provider
-doesn't serve the agent's wire protocol, or isn't authenticated).
+doesn't serve the agent's wire protocol, or isn't authenticated), plus the
+locked providers — candidates no one has authenticated yet, which the user
+can unlock by running ``terok auth <provider>`` on the host.  The default
+view compresses that into a one-line hint so the unlock path is never more
+than one command away.
 
 Agents are the CLI tools (cyan, matching ``hilfe``); providers are the LLM
 endpoints (magenta).  Self-contained (stdlib only): it runs inside task
@@ -46,9 +50,11 @@ def main(argv: list[str]) -> int:
     for pair in manifest.get("pairs", []):
         bucket = ready if pair.get("ready") else blocked
         bucket[pair["agent"]].append(pair["provider"])
+    locked = _locked_providers(manifest)
 
     if not ready and not blocked:
         print("No (agent, provider) pairs — authenticate a provider on the host.", file=sys.stderr)
+        _print_locked(locked)
         return 0
 
     agents = sorted(ready if not show_all else {**ready, **blocked})
@@ -62,9 +68,59 @@ def main(argv: list[str]) -> int:
         for agent in sorted(blocked):
             names = ", ".join(sorted(set(blocked[agent])))
             print(f"  {_DIM}{agent:<{width}}  {names}{_RESET}")
+        _print_locked(locked)
     else:
         print(f"\n{_DIM}Use: <agent> --provider <name>   ·   not-ready too: providers --all{_RESET}")
+        _print_locked_hint(locked)
     return 0
+
+
+def _locked_providers(manifest: dict) -> list[tuple[str, list[str]]]:
+    """Return ``(protocol, providers)`` rows for the not-yet-authenticated candidates.
+
+    Derived from the manifest's ``protocols`` view: per wire protocol in play,
+    the candidate providers minus the authenticated ones.  Protocols whose
+    candidates are all authenticated drop out — there is nothing to unlock.
+    """
+    rows: list[tuple[str, list[str]]] = []
+    for row in manifest.get("protocols", []):
+        if not isinstance(row, dict):
+            continue
+        authed = set(row.get("authenticated") or [])
+        candidates = [p for p in row.get("candidates") or [] if p not in authed]
+        if candidates:
+            rows.append((str(row.get("protocol")), candidates))
+    return rows
+
+
+def _print_locked(locked: list[tuple[str, list[str]]]) -> None:
+    """Print the locked-providers section: what to authenticate on the host.
+
+    One row per wire protocol (matching the ``hilfe`` providers section, so the
+    protocol column links a dimmed agent to the providers that would enable
+    it), headed by the unlock command.  Prints nothing when nothing is locked.
+    """
+    if not locked:
+        return
+    print(
+        f"\n{_BOLD}Locked providers{_RESET}"
+        f"{_DIM} — unlock on the host:{_RESET} terok auth {_MAGENTA}<provider>{_RESET}"
+    )
+    width = max(len(protocol) for protocol, _ in locked)
+    for protocol, providers in locked:
+        print(f"  {_DIM}{protocol:<{width}}  {', '.join(providers)}{_RESET}")
+
+
+def _print_locked_hint(locked: list[tuple[str, list[str]]]) -> None:
+    """Print the default view's one-line pointer at the locked providers."""
+    if not locked:
+        return
+    count = len({provider for _, providers in locked for provider in providers})
+    noun = "provider" if count == 1 else "providers"
+    print(
+        f"{_DIM}{count} locked {noun} — unlock on the host: "
+        f"terok auth <provider>   ·   list: providers --all{_RESET}"
+    )
 
 
 if __name__ == "__main__":
