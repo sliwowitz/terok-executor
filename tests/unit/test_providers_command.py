@@ -131,7 +131,7 @@ class TestLockedProviders:
         out, _ = _run(command, monkeypatch, tmp_path, capsys, ANTHROPIC_ONLY_MANIFEST)
         plain = _plain(out)
         # openrouter, blablador, kisski, mistral, openai — distinct across protocols.
-        assert "5 locked providers — unlock on the host: terok auth <provider>" in plain
+        assert "5 locked providers - unlock on the host: terok auth <provider>" in plain
         assert "Also list non-ready providers: providers --all" in plain
         assert "Use: <agent> --provider <name>" in plain
         # The full per-protocol breakdown stays behind --all.

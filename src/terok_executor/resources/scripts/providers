@@ -42,7 +42,7 @@ def main(argv: list[str]) -> int:
     try:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        print(f"No readiness manifest at {MANIFEST} — run inside a terok task.", file=sys.stderr)
+        print(f"No readiness manifest at {MANIFEST} - run inside a terok task.", file=sys.stderr)
         return 1
 
     ready: dict[str, list[str]] = defaultdict(list)
@@ -53,7 +53,7 @@ def main(argv: list[str]) -> int:
     locked = _locked_providers(manifest)
 
     if not ready and not blocked:
-        print("No (agent, provider) pairs — authenticate a provider on the host.", file=sys.stderr)
+        print("No (agent, provider) pairs - authenticate a provider on the host.", file=sys.stderr)
         _print_locked(locked)
         return 0
 
@@ -105,7 +105,7 @@ def _print_locked(locked: list[tuple[str, list[str]]]) -> None:
         return
     print(
         f"\n{_BOLD}Locked providers{_RESET}"
-        f"{_DIM} — unlock on the host:{_RESET} terok auth {_MAGENTA}<provider>{_RESET}"
+        f"{_DIM} - unlock on the host:{_RESET} terok auth {_MAGENTA}<provider>{_RESET}"
     )
     width = max(len(protocol) for protocol, _ in locked)
     for protocol, providers in locked:
@@ -119,7 +119,7 @@ def _print_locked_hint(locked: list[tuple[str, list[str]]]) -> None:
     count = len({provider for _, providers in locked for provider in providers})
     noun = "provider" if count == 1 else "providers"
     print(
-        f"{_DIM}{count} locked {noun} — unlock on the host:{_RESET} "
+        f"{_DIM}{count} locked {noun} - unlock on the host:{_RESET} "
         f"terok auth {_MAGENTA}<provider>{_RESET}"
     )
 
