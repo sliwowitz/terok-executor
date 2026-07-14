@@ -81,7 +81,9 @@ _terok_providers() {
         done
     fi
     printf '\n'
-    [ -n "$_byproto" ] && printf '%s\n' "$_byproto"
+    # Blank line between the authenticated-providers sentence and the
+    # wire-protocol table — without it the two dense lines read as one.
+    [ -n "$_byproto" ] && printf '\n%s\n' "$_byproto"
     printf '  Point any agent at a provider it speaks to: \033[36m<agent> --provider <name>\033[0m\n'
     printf '  (e.g. \033[36mopencode --provider openrouter\033[0m).  \033[36mopencode\033[0m reaches any of them;\n'
     printf '  native CLIs default to their own.  Ready pairs: \033[36mproviders\033[0m\n'
