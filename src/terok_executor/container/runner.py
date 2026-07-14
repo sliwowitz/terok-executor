@@ -22,7 +22,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, cast
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
@@ -1214,8 +1214,8 @@ class AgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            assert proc.stdout is not None
-            for line in proc.stdout:
+            stdout = cast(IO[bytes], proc.stdout)
+            for line in stdout:
                 sys.stdout.buffer.write(line)
                 sys.stdout.buffer.flush()
             proc.wait(timeout=timeout)
