@@ -76,7 +76,7 @@ even `rm`).
 | `--restricted` | No auto-approve, no-new-privileges |
 | `--branch <ref>` | Check out a specific git branch |
 | `--name <name>` | Container name override |
-| `--gpu` | Enable GPU passthrough |
+| `--gpus <spec>` | GPU passthrough: `all`, or vendors `nvidia`/`amd`/`intel` (comma-separated) |
 | `--memory <limit>` / `--cpus <n>` | Container memory / CPU limits (e.g. `4g`, `2.0`) |
 | `--workspace <dir>` | Mount a host directory at `/workspace` (default: the workspace lives in the container) |
 | `--rm` | Remove the container when it exits (podman `--rm`) |
