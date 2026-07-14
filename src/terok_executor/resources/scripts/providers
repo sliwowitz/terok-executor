@@ -70,8 +70,9 @@ def main(argv: list[str]) -> int:
             print(f"  {_DIM}{agent:<{width}}  {names}{_RESET}")
         _print_locked(locked)
     else:
-        print(f"\n{_DIM}Use: <agent> --provider <name>   ·   not-ready too: providers --all{_RESET}")
+        print(f"\n{_DIM}Also list non-ready providers:{_RESET} providers --all")
         _print_locked_hint(locked)
+        print(f"\n{_DIM}Use:{_RESET} {_CYAN}<agent>{_RESET} --provider {_MAGENTA}<name>{_RESET}")
     return 0
 
 
@@ -118,8 +119,8 @@ def _print_locked_hint(locked: list[tuple[str, list[str]]]) -> None:
     count = len({provider for _, providers in locked for provider in providers})
     noun = "provider" if count == 1 else "providers"
     print(
-        f"{_DIM}{count} locked {noun} — unlock on the host: "
-        f"terok auth <provider>   ·   list: providers --all{_RESET}"
+        f"{_DIM}{count} locked {noun} — unlock on the host:{_RESET} "
+        f"terok auth {_MAGENTA}<provider>{_RESET}"
     )
 
 

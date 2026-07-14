@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -20,6 +21,13 @@ from types import ModuleType
 import pytest
 
 import terok_executor.resources.scripts as _scripts_pkg
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    """Strip SGR escapes so assertions read the text a user actually sees."""
+    return _ANSI_RE.sub("", text)
 
 
 def _load_command() -> ModuleType:
@@ -121,10 +129,11 @@ class TestLockedProviders:
     ) -> None:
         """The default view compresses the locked list into a one-line pointer."""
         out, _ = _run(command, monkeypatch, tmp_path, capsys, ANTHROPIC_ONLY_MANIFEST)
+        plain = _plain(out)
         # openrouter, blablador, kisski, mistral, openai — distinct across protocols.
-        assert "5 locked providers" in out
-        assert "terok auth <provider>" in out
-        assert "providers --all" in out
+        assert "5 locked providers — unlock on the host: terok auth <provider>" in plain
+        assert "Also list non-ready providers: providers --all" in plain
+        assert "Use: <agent> --provider <name>" in plain
         # The full per-protocol breakdown stays behind --all.
         assert "Locked providers" not in out
 
