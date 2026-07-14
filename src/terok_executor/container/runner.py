@@ -20,6 +20,7 @@ import logging
 import shlex
 import sys
 import uuid
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, cast
@@ -29,6 +30,26 @@ from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSp
 from terok_executor.paths import container_state_dir
 
 from .build import BuildError, ImageBuilder
+
+
+def _fold_deprecated_gpu(
+    gpu: bool | None, gpus: bool | str | Sequence[str] | None
+) -> bool | str | Sequence[str] | None:
+    """Fold the deprecated ``gpu`` bool into the ``gpus`` selector.
+
+    ``gpu=`` predates the vendor selector; it keeps working with a
+    ``DeprecationWarning``.  Deprecated since 0.4.0; will be removed
+    in terok-executor 0.6.0.  An explicit ``gpus`` value wins.
+    """
+    if gpu is None:
+        return gpus
+    warnings.warn(
+        'gpu= is deprecated, to be removed in terok-executor 0.6.0; use gpus="all" / vendor names instead',
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return gpus if gpus is not None else gpu
+
 
 if TYPE_CHECKING:
     import subprocess
@@ -164,6 +185,7 @@ class AgentRunner:
         follow: bool = False,
         unrestricted: bool = True,
         gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -208,7 +230,7 @@ class AgentRunner:
             follow=follow,
             mode="headless",
             unrestricted=unrestricted,
-            gpus=gpus,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -235,6 +257,7 @@ class AgentRunner:
         name: str | None = None,
         unrestricted: bool = True,
         gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -265,7 +288,7 @@ class AgentRunner:
             name=name,
             mode="interactive",
             unrestricted=unrestricted,
-            gpus=gpus,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -293,6 +316,7 @@ class AgentRunner:
         public_url: str | None = None,
         unrestricted: bool = True,
         gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -328,7 +352,7 @@ class AgentRunner:
             port=port,
             public_url=public_url,
             unrestricted=unrestricted,
-            gpus=gpus,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -400,6 +424,7 @@ class AgentRunner:
         name: str,
         task_dir: Path,
         gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         ephemeral: bool = False,
@@ -439,6 +464,9 @@ class AgentRunner:
                 (every vendor detected on the host), ``"nvidia"``,
                 ``"amd"``, ``"intel"``, a comma-separated string, or a
                 list of vendors; ``None``/``False`` disables.
+            gpu: Deprecated bool alias for *gpus* (pre-vendor API).
+                Emits a ``DeprecationWarning``; an explicit *gpus*
+                wins.  Will be removed in terok-executor 0.6.0.
             memory: Podman ``--memory`` value (``"4g"`` etc.); ``None`` = unlimited.
             cpus: Podman ``--cpus`` value (``"2.0"`` etc.); ``None`` = unlimited.
             ephemeral: When True, podman removes the container as soon as
@@ -503,7 +531,7 @@ class AgentRunner:
         )
 
         try:
-            spec_gpus = normalize_gpus(gpus)
+            spec_gpus = normalize_gpus(_fold_deprecated_gpu(gpu, gpus))
         except ValueError as exc:
             raise BuildError(str(exc)) from exc
 

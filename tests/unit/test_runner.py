@@ -205,6 +205,44 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.gpus == ("amd", "intel")
 
+    def test_deprecated_gpu_kwarg_still_works(self, tmp_path: Path) -> None:
+        """``gpu=True`` warns but keeps enabling passthrough (as ``"all"``)."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.warns(DeprecationWarning, match="gpu="),
+        ):
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, gpu=True
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.gpus == "all"
+
+    def test_explicit_gpus_wins_over_deprecated_gpu(self, tmp_path: Path) -> None:
+        """When both are passed, the new selector takes precedence."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.warns(DeprecationWarning, match="gpu="),
+        ):
+            runner.run_headless(
+                "claude",
+                None,
+                workspace=tmp_path,
+                prompt="test",
+                follow=False,
+                gpu=True,
+                gpus="amd",
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.gpus == ("amd",)
+
     def test_unknown_gpu_vendor_becomes_build_error(self, tmp_path: Path) -> None:
         """A typo'd vendor fails as BuildError before any podman call."""
         from terok_executor.container.build import BuildError
