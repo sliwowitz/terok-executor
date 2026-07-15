@@ -57,9 +57,16 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 RUN set -eux; \
     uid_owner="$(getent passwd 1000 | cut -d: -f1 || true)"; \
     if [ -n "$uid_owner" ] && [ "$uid_owner" != "dev" ]; then \
+      uid_home="$(getent passwd 1000 | cut -d: -f6)"; \
       if getent group "$uid_owner" >/dev/null; then groupmod -n dev "$uid_owner" || true; fi; \
       usermod -l dev "$uid_owner"; \
-      usermod -d /home/dev -m dev; \
+      usermod -d /home/dev dev; \
+      # ``usermod -m`` moves the home with rename(2), which overlayfs \
+      # rejects (EXDEV) for lower-layer directories during image builds; \
+      # mv makes the same move via its copy+delete fallback instead. \
+      if [ -d "$uid_home" ] && [ "$uid_home" != "/home/dev" ] && [ ! -e /home/dev ]; then \
+        mv "$uid_home" /home/dev; \
+      fi; \
       # usermod -l / groupmod -n don't touch /etc/sub{u,g}id; rewrite \
       # those entries so pre-configured rootless ranges (e.g. the podman \
       # image's `podman:100000:65536`) keep working under the new name. \
