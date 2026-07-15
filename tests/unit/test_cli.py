@@ -216,7 +216,8 @@ class TestShowConfigAndOverrides:
         _cfg._credentials_section.cache_clear()
         _cfg._shield_section.cache_clear()
 
-    def test_show_config_emits_yaml_with_redacted_passphrase(self, tmp_path: Path) -> None:
+    def test_show_config_never_leaks_a_leftover_plaintext_passphrase(self, tmp_path: Path) -> None:
+        """A stale ``credentials.passphrase`` key (tier removed in sandbox) stays off stdout."""
         cfg_path = tmp_path / "config.yml"
         cfg_path.write_text(
             "services:\n  mode: tcp\ncredentials:\n  passphrase: secret-pw\n",
@@ -225,7 +226,6 @@ class TestShowConfigAndOverrides:
         out, _, rc = _run_cli("--config", str(cfg_path), "show-config")
         assert rc == 0
         assert "services_mode: tcp" in out
-        assert "credentials_passphrase: <redacted>" in out
         assert "secret-pw" not in out
 
     def test_raw_flag_bypasses_config_file(self, tmp_path: Path) -> None:
