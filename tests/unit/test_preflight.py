@@ -29,7 +29,40 @@ def _pf(**overrides) -> Preflight:
 def test_podman_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Podman found and responds → ok."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"5.0.0\n", stderr=b"")
-    assert _pf().check_podman().ok is True
+    r = _pf().check_podman()
+    assert r.ok is True
+    assert r.message == "ok"
+
+
+@patch("terok_executor.preflight.subprocess.run")
+@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+def test_podman_below_floor_warns_but_passes(_which: MagicMock, mock_run: MagicMock) -> None:
+    """A pre-4.3 podman passes with a degraded-behavior warning, not a FAIL."""
+    mock_run.return_value = MagicMock(returncode=0, stdout=b"3.4.4\n", stderr=b"")
+    r = _pf().check_podman()
+    assert r.ok is True
+    assert "3.4.4" in r.message
+    assert "degraded" in r.message
+
+
+@patch("terok_executor.preflight.subprocess.run")
+@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+def test_podman_floor_boundary_is_plain_ok(_which: MagicMock, mock_run: MagicMock) -> None:
+    """Podman 4.3 itself is the tested floor — no warning."""
+    mock_run.return_value = MagicMock(returncode=0, stdout=b"4.3.0\n", stderr=b"")
+    r = _pf().check_podman()
+    assert r.ok is True
+    assert r.message == "ok"
+
+
+@patch("terok_executor.preflight.subprocess.run")
+@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+def test_podman_unparseable_version_is_plain_ok(_which: MagicMock, mock_run: MagicMock) -> None:
+    """Garbage version output counts as modern — the binary already responded."""
+    mock_run.return_value = MagicMock(returncode=0, stdout=b"weird\n", stderr=b"")
+    r = _pf().check_podman()
+    assert r.ok is True
+    assert r.message == "ok"
 
 
 @patch("terok_executor.preflight.shutil.which", return_value=None)

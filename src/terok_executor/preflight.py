@@ -25,6 +25,14 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+MIN_PODMAN_VERSION = (4, 3)
+"""Oldest podman the launch path is tested against.
+
+4.3 introduced the ``keep-id:uid=…`` userns mode terok prefers and
+matches the oldest distro in the test matrix (Debian 12).  Older
+clients are warned about, not blocked: terok-util downgrades the
+userns args for them, so launches degrade rather than break."""
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -200,7 +208,13 @@ class Preflight:
     # ── Prerequisite probes ────────────────────────────────────────
 
     def check_podman(self) -> CheckResult:  # noqa: PLR6301
-        """Verify that podman is installed and responds to ``podman version``."""
+        """Verify that podman is installed, responds, and meets the tested version floor.
+
+        A podman older than [`MIN_PODMAN_VERSION`][terok_executor.preflight.MIN_PODMAN_VERSION]
+        still passes (``ok``) — launches degrade rather than break, and
+        blocking would kill unofficial use on frozen-distro hosts — but
+        the result message carries the warning instead of a bare "ok".
+        """
         if not shutil.which("podman"):
             return CheckResult("podman", False, "not found on PATH")
         try:
@@ -214,6 +228,15 @@ class Preflight:
         if result.returncode != 0:
             detail = (result.stderr or b"").decode(errors="ignore").strip() or "non-zero exit"
             return CheckResult("podman", False, f"found but not responding: {detail}")
+        version = (result.stdout or b"").decode(errors="ignore").strip()
+        if _version_below_floor(version):
+            floor = ".".join(map(str, MIN_PODMAN_VERSION))
+            return CheckResult(
+                "podman",
+                True,
+                f"version {version} is older than the tested minimum {floor} — "
+                "unsupported; expect degraded behavior",
+            )
         return CheckResult("podman", True, "ok")
 
     def check_git(self) -> CheckResult:  # noqa: PLR6301
@@ -426,6 +449,19 @@ def _fix_credentials(
 
 
 # ── Printing ───────────────────────────────────────────────────────────
+
+
+def _version_below_floor(version: str) -> bool:
+    """Whether *version* parses and sits below the tested podman floor.
+
+    Unparseable output counts as modern — the probe already proved the
+    binary responds, and a false warning helps nobody.
+    """
+    try:
+        major, minor = (int(part) for part in version.split(".")[:2])
+    except ValueError:
+        return False
+    return (major, minor) < MIN_PODMAN_VERSION
 
 
 def _print_step(result: CheckResult) -> None:
