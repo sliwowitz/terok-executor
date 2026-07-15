@@ -407,3 +407,43 @@ class TestPiProvider:
         monkeypatch.setattr(pp.os, "execvpe", lambda f, a, e: captured.update(argv=a))
         pp.main(["hi"])
         assert captured["argv"] == ["pi", "hi"]
+
+
+class TestOpencodeModelFetchFeedback:
+    """The model-list refresh announces itself and fails with a reason.
+
+    Regression: the refresh can stall for its full 30s timeout (e.g. a
+    half-dead vault bridge that accepts but never answers), and the
+    socket-level ``TimeoutError`` escaped the ``URLError``-only handler —
+    a silent freeze followed by a raw traceback.
+    """
+
+    def test_timeout_returns_none_with_reason(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """A socket-level timeout → ``None`` plus a stderr warning, no traceback."""
+
+        def _hang(*_a, **_k):
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(ocp.request, "urlopen", _hang)
+        assert ocp._fetch_models(_LOOPBACK + "/v1", "tok") is None
+        err = capsys.readouterr().err
+        assert "model-list refresh" in err
+        assert "timed out" in err
+
+    def test_main_announces_the_refresh(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """``main`` prints the update notice before fetching — no silent freeze."""
+        monkeypatch.setattr(ocp.sys, "argv", ["blablador"])
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_DISPLAY_NAME", "Helmholtz Blablador")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
+        monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
+        monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
+        monkeypatch.setattr(ocp.os.path, "exists", lambda _p: False)
+        monkeypatch.setattr(ocp.subprocess, "call", lambda cmd, env=None: 0)
+        assert ocp.main() == 0
+        assert "Updating the model list from Helmholtz Blablador" in capsys.readouterr().err

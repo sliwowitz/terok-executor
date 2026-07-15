@@ -25,7 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from urllib import error, request
+from urllib import request
 
 # Hardcoded fallbacks for manual invocation (when env vars not set)
 _FALLBACK_PROVIDERS = {
@@ -138,7 +138,14 @@ def _load_api_key(config: dict[str, str]) -> str | None:
 
 
 def _fetch_models(base_url: str, api_key: str) -> list[str] | None:
-    """Fetch available models from the API. Returns None on failure."""
+    """Fetch available models from the API. Returns None on failure.
+
+    ``OSError`` is the whole network-failure family here — ``HTTPError``,
+    ``URLError`` and the socket-level ``TimeoutError`` a half-dead proxy
+    produces are all subclasses.  A failure is announced with its reason
+    rather than swallowed: the fetch can stall for the full timeout, and
+    a silent ``None`` would leave the user staring at a frozen launcher.
+    """
     url = base_url.rstrip("/") + "/models"
     req = request.Request(
         url,
@@ -151,7 +158,8 @@ def _fetch_models(base_url: str, api_key: str) -> list[str] | None:
     try:
         with request.urlopen(req, timeout=30) as resp:  # nosec B310
             payload = json.loads(resp.read().decode("utf-8"))
-    except (error.HTTPError, error.URLError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Warning: model-list refresh from {url} failed: {exc}", file=sys.stderr)
         return None
 
     items = []
@@ -371,7 +379,9 @@ def main() -> int:
     )
     base_url = base_url.rstrip("/")
 
-    # Fetch models from API
+    # Fetch models from API — announce first: the refresh can legitimately
+    # take up to the 30s timeout, and a silent launcher reads as frozen.
+    print(f"Updating the model list from {config['display_name']}...", file=sys.stderr)
     fetched_models = _fetch_models(base_url, api_key)
 
     if args.list_models:
