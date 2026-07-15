@@ -65,6 +65,7 @@ RUN set -eux; \
       # rejects (EXDEV) for lower-layer directories during image builds; \
       # mv makes the same move via its copy+delete fallback instead. \
       if [ -d "$uid_home" ] && [ "$uid_home" != "/home/dev" ] && [ ! -e /home/dev ]; then \
+        mkdir -p /home; \
         mv "$uid_home" /home/dev; \
       fi; \
       # usermod -l / groupmod -n don't touch /etc/sub{u,g}id; rewrite \
