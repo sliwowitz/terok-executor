@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a6.dev409+gb39aa011b"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fgpu-vendors#b39aa011be453c285684292df7832156905649dd" }
+version = "0.5.0a6.dev412+gd4a30ebab"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fgpu-vendors#d4a30ebab6d79493d1dd9e6066d8f17d79392478" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
