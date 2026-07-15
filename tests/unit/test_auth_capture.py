@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -1082,6 +1083,29 @@ class TestAuthenticateOauthGate:
                 )
 
 
+@pytest.fixture
+def podman_free(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Neutralise the auth module's raw podman subprocess calls.
+
+    ``prepare_oauth_session`` pre-cleans a stale auth container and
+    ``AuthSession.cleanup`` force-removes it on exit — both via bare
+    ``subprocess.run(["podman", …])``.  Unit tests must not depend on a
+    host podman (CI runners happen to ship one; dev containers don't),
+    and must never reach a real one: the pre-clean would ``podman rm -f``
+    a genuine ``host-auth-claude`` container if the operator had one.
+    The stub records each argv and answers returncode 1 ("no such
+    container"), so both call sites take their nothing-to-remove path.
+    """
+    calls: list[list[str]] = []
+
+    def _record(argv: list[str], **_kwargs: object) -> object:
+        calls.append(list(argv))
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr("terok_executor.credentials.auth.subprocess.run", _record)
+    return calls
+
+
 class TestPrepareOauthSession:
     """Verify the hold-don't-call session API the TUI dispatches against."""
 
@@ -1098,8 +1122,9 @@ class TestPrepareOauthSession:
             modes=("oauth", "api_key"),
         )
 
-    @pytest.mark.needs_podman
-    def test_argv_includes_provider_command_and_mount(self, tmp_path: Path) -> None:
+    def test_argv_includes_provider_command_and_mount(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
         """``argv`` ends with the provider command and contains the temp-dir mount."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
@@ -1115,8 +1140,9 @@ class TestPrepareOauthSession:
                 assert session.auth_dir.is_dir()
         assert not session.auth_dir.exists()  # cleanup ran
 
-    @pytest.mark.needs_podman
-    def test_title_and_banner_reflect_scope(self, tmp_path: Path) -> None:
+    def test_title_and_banner_reflect_scope(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
         """Banner mentions the provider label and either the project or host-wide scope."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
@@ -1129,8 +1155,9 @@ class TestPrepareOauthSession:
                 assert "Banner line one." in session.banner
                 assert "$ podman run" in session.banner
 
-    @pytest.mark.needs_podman
-    def test_capture_delegates_to_capture_credentials(self, tmp_path: Path) -> None:
+    def test_capture_delegates_to_capture_credentials(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
         """``session.capture()`` forwards to ``_capture_credentials`` with stored kwargs."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
@@ -1154,9 +1181,8 @@ class TestPrepareOauthSession:
                     expose_token=True,
                 )
 
-    @pytest.mark.needs_podman
-    def test_cleanup_is_idempotent(self, tmp_path: Path) -> None:
-        """Calling ``cleanup`` twice does not raise."""
+    def test_cleanup_is_idempotent(self, tmp_path: Path, podman_free: list[list[str]]) -> None:
+        """Calling ``cleanup`` twice does not raise; the temp dir is released once."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
@@ -1165,6 +1191,7 @@ class TestPrepareOauthSession:
             )
         session.cleanup()
         session.cleanup()
+        assert not session.auth_dir.exists()
 
     def test_authenticator_prepare_oauth_rejects_api_key_only_provider(
         self, tmp_path: Path
@@ -1216,28 +1243,26 @@ class TestDeviceAuth:
         assert not AUTH_PROVIDERS["claude"].supports_device_auth
         assert not AUTH_PROVIDERS["vibe"].supports_device_auth
 
-    def test_session_appends_flag_and_drops_port(self, tmp_path: Path) -> None:
+    def test_session_appends_flag_and_drops_port(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
         """Device-auth runs ``<command> --device-auth`` with no port forwarding."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
-        with (
-            patch("terok_executor.credentials.auth._check_podman"),
-            patch("terok_executor.credentials.auth._cleanup_existing_container"),
-        ):
+        with patch("terok_executor.credentials.auth._check_podman"):
             with prepare_oauth_session(
                 self._codex(), None, mounts_dir=tmp_path, image="img", device_auth=True
             ) as session:
                 assert session.argv[-2:] == ["setup-codex-auth.sh", "--device-auth"]
                 assert "-p" not in session.argv  # the device-code flow needs no callback port
 
-    def test_browser_flow_keeps_port_and_plain_command(self, tmp_path: Path) -> None:
+    def test_browser_flow_keeps_port_and_plain_command(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
         """Without device-auth the browser flow keeps its port-forward and command."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
-        with (
-            patch("terok_executor.credentials.auth._check_podman"),
-            patch("terok_executor.credentials.auth._cleanup_existing_container"),
-        ):
+        with patch("terok_executor.credentials.auth._check_podman"):
             with prepare_oauth_session(
                 self._codex(), None, mounts_dir=tmp_path, image="img"
             ) as session:
