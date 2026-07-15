@@ -50,7 +50,9 @@ def test_podman_below_floor_warns_but_passes(_which: MagicMock, mock_run: MagicM
 def test_podman_floor_boundary_is_plain_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Podman 4.3 itself is the tested floor — no warning."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"4.3.0\n", stderr=b"")
-    assert _pf().check_podman().message == "ok"
+    r = _pf().check_podman()
+    assert r.ok is True
+    assert r.message == "ok"
 
 
 @patch("terok_executor.preflight.subprocess.run")
