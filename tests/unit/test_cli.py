@@ -289,3 +289,18 @@ class TestResolveHostGitIdentity:
 
         assert name is None
         assert email is None
+
+
+class TestLockedVaultHint:
+    """A locked vault must exit with a remediation hint, not a bare diagnostic."""
+
+    def test_no_passphrase_error_gets_unlock_hint(self) -> None:
+        """sandbox#278 keeps raise sites diagnostic-only; the CLI adds the verb to run."""
+        from terok_executor.integrations.sandbox import NoPassphraseError
+
+        with patch("terok_executor.cli.CommandTree") as tree:
+            tree.dispatch.side_effect = NoPassphraseError("no SQLCipher passphrase available")
+            out, err, rc = _run_cli("agents", "list")
+        assert rc == 2
+        assert "no SQLCipher passphrase available" in err
+        assert "terok-executor vault unlock" in err
