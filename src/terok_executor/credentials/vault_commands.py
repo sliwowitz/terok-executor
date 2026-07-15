@@ -130,6 +130,11 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
     `_BENIGN_CREDENTIAL_CHECKS` entry — terok-injected phantoms, or
     glab's settings-only ``config.yml`` — are skipped.
 
+    A credential file that does not exist is a definitive clean result,
+    not a skipped check: an agent that ships in the image but was never
+    authenticated on this host has nothing to leak.  Only genuine read
+    failures (permissions, I/O errors) warrant the skip warning.
+
     Symlinks are rejected to prevent a container from tricking the scan into
     reading arbitrary host files via a crafted symlink in the shared mount.
     """
@@ -161,6 +166,10 @@ def scan_leaked_credentials(mounts_base: Path) -> list[tuple[str, Path]]:
             is_benign = _BENIGN_CREDENTIAL_CHECKS.get(mount.provider)
             if st.st_size > 0 and not (is_benign and is_benign(path)):
                 leaked.append((mount.provider, path))
+        except FileNotFoundError:
+            # No credential file at all — the agent was never authenticated
+            # on this host, so there is nothing to scan and nothing to leak.
+            continue
         except (OSError, TypeError) as exc:
             # Silently skipping turns a real leak into a no-result: the
             # operator would believe the scan was clean.  Surface a
