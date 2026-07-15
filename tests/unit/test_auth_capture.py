@@ -1095,6 +1095,11 @@ def podman_free(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     a genuine ``host-auth-claude`` container if the operator had one.
     The stub records each argv and answers returncode 1 ("no such
     container"), so both call sites take their nothing-to-remove path.
+
+    ``podman_userns_args`` is stubbed separately: since terok-util
+    0.3.1a2 it probes ``podman version`` through the same (stubbed)
+    ``subprocess.run``, and the recorder's bare namespace has no
+    ``stdout`` for it to parse.
     """
     calls: list[list[str]] = []
 
@@ -1103,6 +1108,10 @@ def podman_free(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         return SimpleNamespace(returncode=1)
 
     monkeypatch.setattr("terok_executor.credentials.auth.subprocess.run", _record)
+    monkeypatch.setattr(
+        "terok_executor.credentials.auth.podman_userns_args",
+        lambda: ["--userns=keep-id:uid=1000,gid=1000"],
+    )
     return calls
 
 

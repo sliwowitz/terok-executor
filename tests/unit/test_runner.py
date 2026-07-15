@@ -179,18 +179,85 @@ class TestAgentRunner:
         assert spec.unrestricted is True
         assert spec.env.get("TEROK_UNRESTRICTED") == "1"
 
-    def test_gpu_flag_sets_gpu_enabled(self, tmp_path: Path) -> None:
-        """GPU flag propagates to RunSpec.gpu_enabled."""
+    def test_gpu_selector_reaches_runspec(self, tmp_path: Path) -> None:
+        """The gpus selector normalizes and propagates to RunSpec.gpus."""
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
         with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
             runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, gpus=True
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.gpus == "all"
+
+    def test_gpu_vendor_string_reaches_runspec(self, tmp_path: Path) -> None:
+        """A comma-separated vendor string normalizes to a vendor tuple."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, gpus="amd,intel"
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.gpus == ("amd", "intel")
+
+    def test_deprecated_gpu_kwarg_still_works(self, tmp_path: Path) -> None:
+        """``gpu=True`` warns but keeps enabling passthrough (as ``"all"``)."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.warns(DeprecationWarning, match="gpu="),
+        ):
+            runner.run_headless(
                 "claude", None, workspace=tmp_path, prompt="test", follow=False, gpu=True
             )
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.gpu_enabled is True
+        assert spec.gpus == "all"
+
+    def test_explicit_gpus_wins_over_deprecated_gpu(self, tmp_path: Path) -> None:
+        """When both are passed, the new selector takes precedence."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.warns(DeprecationWarning, match="gpu="),
+        ):
+            runner.run_headless(
+                "claude",
+                None,
+                workspace=tmp_path,
+                prompt="test",
+                follow=False,
+                gpu=True,
+                gpus="amd",
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.gpus == ("amd",)
+
+    def test_unknown_gpu_vendor_becomes_build_error(self, tmp_path: Path) -> None:
+        """A typo'd vendor fails as BuildError before any podman call."""
+        from terok_executor.container.build import BuildError
+
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with (
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+            pytest.raises(BuildError, match="matrox"),
+        ):
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, gpus="matrox"
+            )
+        sandbox.run.assert_not_called()
 
     def test_memory_propagates(self, tmp_path: Path) -> None:
         """Memory limit flows through to RunSpec.memory."""
@@ -467,7 +534,7 @@ class TestLaunchPrepared:
             command=["bash"],
             name="terok-x",
             task_dir=tmp_path,
-            gpu=True,
+            gpus="nvidia,amd",
             memory="4g",
             cpus="2.0",
             unrestricted=False,
@@ -481,7 +548,7 @@ class TestLaunchPrepared:
         assert spec.env == {"FOO": "bar"}
         assert spec.command == ("bash",)
         assert spec.task_dir == tmp_path
-        assert spec.gpu_enabled is True
+        assert spec.gpus == ("nvidia", "amd")
         assert spec.memory == "4g"
         assert spec.cpus == "2.0"
         assert spec.unrestricted is False
@@ -628,7 +695,7 @@ class TestLaunchPrepared:
                 command=[],
                 name="c",
                 task_dir=tmp_path,
-                gpu=True,
+                gpus=True,
             )
 
     def test_sidecar_identity_propagates(self, tmp_path: Path) -> None:

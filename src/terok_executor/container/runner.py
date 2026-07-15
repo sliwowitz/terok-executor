@@ -20,6 +20,7 @@ import logging
 import shlex
 import sys
 import uuid
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, cast
@@ -30,9 +31,29 @@ from terok_executor.paths import container_state_dir
 
 from .build import BuildError, ImageBuilder
 
+
+def _fold_deprecated_gpu(
+    gpu: bool | None, gpus: bool | str | Sequence[str] | None
+) -> bool | str | Sequence[str] | None:
+    """Fold the deprecated ``gpu`` bool into the ``gpus`` selector.
+
+    ``gpu=`` predates the vendor selector; it keeps working with a
+    ``DeprecationWarning``.  Deprecated since 0.4.0; will be removed
+    in terok-executor 0.6.0.  An explicit ``gpus`` value wins.
+    """
+    if gpu is None:
+        return gpus
+    warnings.warn(
+        'gpu= is deprecated, to be removed in terok-executor 0.6.0; use gpus="all" / vendor names instead',
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return gpus if gpus is not None else gpu
+
+
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from terok_executor.integrations.sandbox import (
         ContainerRuntime,
@@ -163,7 +184,8 @@ class AgentRunner:
         name: str | None = None,
         follow: bool = False,
         unrestricted: bool = True,
-        gpu: bool = False,
+        gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -208,7 +230,7 @@ class AgentRunner:
             follow=follow,
             mode="headless",
             unrestricted=unrestricted,
-            gpu=gpu,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -234,7 +256,8 @@ class AgentRunner:
         gate: bool = True,
         name: str | None = None,
         unrestricted: bool = True,
-        gpu: bool = False,
+        gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -265,7 +288,7 @@ class AgentRunner:
             name=name,
             mode="interactive",
             unrestricted=unrestricted,
-            gpu=gpu,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -292,7 +315,8 @@ class AgentRunner:
         name: str | None = None,
         public_url: str | None = None,
         unrestricted: bool = True,
-        gpu: bool = False,
+        gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -328,7 +352,7 @@ class AgentRunner:
             port=port,
             public_url=public_url,
             unrestricted=unrestricted,
-            gpu=gpu,
+            gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
             workspace=workspace,
@@ -399,7 +423,8 @@ class AgentRunner:
         command: list[str],
         name: str,
         task_dir: Path,
-        gpu: bool = False,
+        gpus: bool | str | Sequence[str] | None = None,
+        gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         ephemeral: bool = False,
@@ -435,7 +460,13 @@ class AgentRunner:
             command: Command + args to execute as PID 1.
             name: Container name (must be unique on the host).
             task_dir: Per-task directory used for per-container shield state.
-            gpu: Pass GPU device args when True.
+            gpus: GPU vendors to pass through — ``"all"``/``True``
+                (every vendor detected on the host), ``"nvidia"``,
+                ``"amd"``, ``"intel"``, a comma-separated string, or a
+                list of vendors; ``None``/``False`` disables.
+            gpu: Deprecated bool alias for *gpus* (pre-vendor API).
+                Emits a ``DeprecationWarning``; an explicit *gpus*
+                wins.  Will be removed in terok-executor 0.6.0.
             memory: Podman ``--memory`` value (``"4g"`` etc.); ``None`` = unlimited.
             cpus: Podman ``--cpus`` value (``"2.0"`` etc.); ``None`` = unlimited.
             ephemeral: When True, podman removes the container as soon as
@@ -495,8 +526,14 @@ class AgentRunner:
             Sharing,
             VolumeSpec,
             allocate_per_container_resources,
+            normalize_gpus,
             write_sidecar,
         )
+
+        try:
+            spec_gpus = normalize_gpus(_fold_deprecated_gpu(gpu, gpus))
+        except ValueError as exc:
+            raise BuildError(str(exc)) from exc
 
         cfg = self.sandbox.config
 
@@ -595,7 +632,7 @@ class AgentRunner:
             volumes=tuple(volumes),
             command=tuple(command),
             task_dir=task_dir,
-            gpu_enabled=gpu,
+            gpus=spec_gpus,
             memory=memory,
             cpus=cpus,
             extra_args=tuple(extra_args or ()),
@@ -807,7 +844,7 @@ class AgentRunner:
         port: int | None = None,
         public_url: str | None = None,
         unrestricted: bool = True,
-        gpu: bool = False,
+        gpus: bool | str | Sequence[str] | None = None,
         memory: str | None = None,
         cpus: str | None = None,
         workspace: Path | None = None,
@@ -974,7 +1011,7 @@ class AgentRunner:
             command=command,
             name=cname,
             task_dir=task_dir,
-            gpu=gpu,
+            gpus=gpus,
             memory=memory,
             cpus=cpus,
             ephemeral=ephemeral,

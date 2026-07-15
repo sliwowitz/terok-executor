@@ -215,6 +215,7 @@ def _handle_run(
     branch: str | None = None,
     name: str | None = None,
     restricted: bool = False,
+    gpus: str | None = None,
     gpu: bool = False,
     memory: str | None = None,
     cpus: str | None = None,
@@ -231,6 +232,10 @@ def _handle_run(
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Run an agent in a hardened container."""
+    if gpu:
+        print(
+            "Warning: --gpu is deprecated and will be removed in terok-executor 0.6.0; use --gpus all"
+        )
     _setup_verdict_or_exit(skip=no_preflight)
     if not _preflight_or_exit(
         agent, base=base, family=family, assume_yes=yes, skip_preflight=no_preflight
@@ -264,7 +269,7 @@ def _handle_run(
         "name": name,
         "branch": branch,
         "unrestricted": not restricted,
-        "gpu": gpu,
+        "gpus": gpus if gpus is not None else ("all" if gpu else None),
         "memory": memory,
         "cpus": cpus,
         "workspace": Path(workspace) if workspace else None,
@@ -771,7 +776,13 @@ RUN_COMMAND = CommandDef(
             action="store_true",
             help="Restrict agent permissions (no auto-approve, no-new-privileges)",
         ),
-        ArgDef(name="--gpu", action="store_true", help="Enable GPU passthrough"),
+        ArgDef(
+            name="--gpus",
+            help="GPU passthrough: 'all', or vendors 'nvidia'/'amd'/'intel' (comma-separated)",
+        ),
+        ArgDef(
+            name="--gpu", action="store_true", help="Deprecated, removed in 0.6.0: use --gpus all"
+        ),
         ArgDef(name="--memory", help="Container memory limit (e.g. 4g, 512m)"),
         ArgDef(name="--cpus", help="Container CPU limit (e.g. 2.0, 0.5)"),
         ArgDef(
