@@ -99,7 +99,22 @@ def main(argv: list[str] | None = None) -> None:
         # package defers this out of import so ``--version`` / ``--help``
         # (which exit above) never pay the roster YAML load.
         _ensure_bootstrapped()
-        CommandTree.dispatch(args)
+        from terok_executor.integrations.sandbox import NoPassphraseError
+
+        try:
+            CommandTree.dispatch(args)
+        except NoPassphraseError as exc:
+            # sandbox#278 stripped CLI-hint text from the library raise
+            # sites so they stay diagnostic-only.  Standalone runs have no
+            # orchestrator to add the remediation, so this front-end is
+            # the operator-facing surface (mirrors terok's own wrapper).
+            print(
+                f"error: {exc}\n"
+                "hint:  run `terok-executor vault unlock` to provision the"
+                " vault passphrase for this session.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2) from exc
     elif hasattr(args, "_group_help"):
         args._group_help.print_help()
     else:

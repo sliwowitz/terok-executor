@@ -291,10 +291,14 @@ depends_on = [
 
 # CLI entry point — wires command registry to argparse
 [[modules]]
+# The dispatch wrapper catches sandbox's NoPassphraseError to add the
+# operator-facing unlock hint (the raise sites are diagnostic-only per
+# sandbox#278) — the one sandbox symbol the CLI front-end consumes.
 path = "terok_executor.cli"
 depends_on = [
     "terok_executor",
     "terok_executor._tree",
+    "terok_executor.integrations.sandbox",
 ]
 
 # Agent-level container health checks

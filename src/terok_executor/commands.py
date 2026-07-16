@@ -539,8 +539,9 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
     against the standalone reading to verify the orchestrator's
     config-equality contract.
 
-    Sensitive fields (``credentials_passphrase``) are redacted; the
-    output shape stays stable so two runs can be compared field-by-field.
+    The config carries no secret material (the plaintext passphrase
+    tier is gone from sandbox); the output shape stays stable so two
+    runs can be compared field-by-field.
     """
     import dataclasses
     import sys
@@ -560,8 +561,6 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
         return value
 
     data = {k: _scalar(v) for k, v in dataclasses.asdict(cfg).items()}
-    if data.get("credentials_passphrase") is not None:
-        data["credentials_passphrase"] = "<redacted>"
 
     yaml = YAML()
     yaml.default_flow_style = False
@@ -1091,7 +1090,7 @@ SETUP_COMMAND = CommandDef(
             default=None,
             help=(
                 "Force credentials-DB passphrase storage to a specific tier"
-                " (systemd-creds | keyring | session-file | config); required"
+                " (systemd-creds | keyring | session-file); required"
                 " on a non-TTY host without systemd-creds"
             ),
         ),
