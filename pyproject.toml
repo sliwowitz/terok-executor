@@ -34,7 +34,7 @@ dynamic = ["version"]
 # pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
     "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox@feat/passphrase-change",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.3.1a2/terok_util-0.3.1a2-py3-none-any.whl",
+    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.3.1a3/terok_util-0.3.1a3-py3-none-any.whl",
     "ruamel.yaml==0.19.1",
     "Jinja2~=3.1",
     "tomli-w~=1.2",
