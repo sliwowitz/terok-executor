@@ -159,9 +159,10 @@ _AGENT_DIGEST_LEN = 12
 # quay.io/podman/stable, nvcr.io/nvidia/nvhpc.  Other images in the
 # same family path will match but are unsupported.
 _NVIDIA_UBI_TAG_RE: re.Pattern[str] = re.compile(r"ubi\d+", re.IGNORECASE)
+_RPM_MARKER_RE: re.Pattern[str] = re.compile(r"almalinux|centos|rhel|rocky|ubi", re.IGNORECASE)
 
 
-def _nvidia_family(tag: str) -> str:
+def _nvidia_family(name: str, tag: str) -> str:
     """Pick the family for a matched NVIDIA image from its *tag*.
 
     NVIDIA tags carry an explicit ``ubuntu`` or ``ubi[N]`` marker; absence
@@ -170,11 +171,23 @@ def _nvidia_family(tag: str) -> str:
     return "rpm" if _NVIDIA_UBI_TAG_RE.search(tag) else "deb"
 
 
-_KNOWN_FAMILIES: tuple[tuple[str, str | Callable[[str], str]], ...] = (
+def _distro_marker_family(name: str, tag: str) -> str:
+    """Family from an RPM-distro marker anywhere in the name or tag.
+
+    ROCm encodes the distro in the image *name* (``rocm/dev-ubuntu-24.04``
+    vs ``rocm/dev-almalinux-8``); Intel's oneAPI images in the *tag*.
+    Ubuntu is both vendors' default, so no marker means ``deb``.
+    """
+    return "rpm" if _RPM_MARKER_RE.search(f"{name}:{tag}") else "deb"
+
+
+_KNOWN_FAMILIES: tuple[tuple[str, str | Callable[[str, str], str]], ...] = (
     ("registry.fedoraproject.org/fedora", "rpm"),
     ("quay.io/podman", "rpm"),
     ("nvcr.io/nvidia", _nvidia_family),
     ("nvidia", _nvidia_family),
+    ("rocm", _distro_marker_family),
+    ("intel", _distro_marker_family),
     ("ubuntu", "deb"),
     ("debian", "deb"),
     ("fedora", "rpm"),
@@ -379,20 +392,23 @@ def known_family(base_image: str, override: str | None = None) -> str | None:
     detection (used to support unknown bases via project config).
 
     Detection matches a small allowlist of known image prefixes
-    (Ubuntu/Debian, Fedora, the official Podman container, NVIDIA CUDA/HPC
-    SDK).  NVIDIA images are inspected at the tag level so UBI variants
+    (Ubuntu/Debian, Fedora, the official Podman container, NVIDIA
+    CUDA/HPC SDK, AMD ROCm, Intel oneAPI); an explicit ``docker.io/``
+    (or ``docker.io/library/``) qualifier is ignored for matching.
+    NVIDIA images are inspected at the tag level so UBI variants
     (e.g. ``…:13.0.0-devel-ubi9``) resolve to ``rpm`` while Ubuntu
-    variants resolve to ``deb``.
+    variants resolve to ``deb``; ROCm and oneAPI images resolve from an
+    RPM-distro marker in the name or tag, defaulting to ``deb``.
     """
     if override is not None:
         if override not in {"deb", "rpm"}:
             raise BuildError(f"family must be 'deb' or 'rpm', got {override!r}")
         return override
     name, tag = _split_image_ref(_normalize_base_image(base_image))
-    name_lc = name.lower()
+    name_lc = name.lower().removeprefix("docker.io/library/").removeprefix("docker.io/")
     for prefix, fam in _KNOWN_FAMILIES:
         if name_lc == prefix or name_lc.startswith(prefix + "/"):
-            return fam(tag) if callable(fam) else fam
+            return fam(name_lc, tag) if callable(fam) else fam
     return None
 
 

@@ -1335,6 +1335,36 @@ class TestDetectFamily:
     @pytest.mark.parametrize(
         ("base_image", "expected"),
         [
+            # ROCm encodes the distro in the image name.
+            ("rocm/dev-ubuntu-24.04:latest", "deb"),
+            ("docker.io/rocm/dev-ubuntu-24.04:latest", "deb"),
+            ("rocm/dev-almalinux-8:latest", "rpm"),
+            ("rocm/rocm-terminal:latest", "deb"),
+            # Intel oneAPI encodes it in the tag; Ubuntu is the default.
+            ("intel/oneapi-basekit:latest", "deb"),
+            ("docker.io/intel/oneapi-basekit:latest", "deb"),
+            ("intel/oneapi-basekit:2025.1-rockylinux9", "rpm"),
+        ],
+    )
+    def test_rocm_and_oneapi_distro_markers(self, base_image: str, expected: str) -> None:
+        assert detect_family(base_image) == expected
+
+    @pytest.mark.parametrize(
+        ("base_image", "expected"),
+        [
+            ("docker.io/ubuntu:24.04", "deb"),
+            ("docker.io/library/ubuntu:24.04", "deb"),
+            ("docker.io/fedora:44", "rpm"),
+        ],
+    )
+    def test_docker_io_qualifier_is_ignored_for_matching(
+        self, base_image: str, expected: str
+    ) -> None:
+        assert detect_family(base_image) == expected
+
+    @pytest.mark.parametrize(
+        ("base_image", "expected"),
+        [
             # Digest-only refs — tag parsing must not consume the digest.
             (
                 "ubuntu@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
