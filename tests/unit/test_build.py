@@ -281,6 +281,31 @@ class TestBuildProjectImage:
         assert "--no-cache" in cmd
         assert "--pull=always" in cmd
 
+    def test_pull_flag_spelling_follows_host_podman(self, tmp_path: Path) -> None:
+        """Old podman gets ``--pull-always`` — the helper's spelling is passed through."""
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_project_image
+
+        dockerfile = tmp_path / "Dockerfile"
+        dockerfile.touch()
+        with (
+            patch(
+                "terok_executor.container.build.podman_pull_always_args",
+                return_value=["--pull-always"],
+            ),
+            patch("subprocess.run") as run_mock,
+        ):
+            build_project_image(
+                dockerfile=dockerfile,
+                context_dir=tmp_path,
+                target_tag="proj:tag",
+                pull_always=True,
+            )
+        cmd = run_mock.call_args[0][0]
+        assert "--pull-always" in cmd
+        assert "--pull=always" not in cmd
+
     def test_missing_podman_becomes_build_error(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 

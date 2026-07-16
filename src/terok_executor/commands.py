@@ -984,7 +984,11 @@ BUILD_COMMAND = CommandDef(
             help='Comma-separated roster entries to install, or "all" (default).',
         ),
         ArgDef(name="--rebuild", action="store_true", help="Force rebuild (cache bust)"),
-        ArgDef(name="--full-rebuild", action="store_true", help="Force --no-cache --pull=always"),
+        ArgDef(
+            name="--full-rebuild",
+            action="store_true",
+            help="Force --no-cache and re-pull of base images",
+        ),
         ArgDef(name="--sidecar", action="store_true", help="Also build sidecar L1 (CodeRabbit)"),
     ),
 )
