@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import BaseLoader, Environment
+from terok_util import podman_pull_always_args
 
 # ── Vocabulary ──
 
@@ -456,7 +457,7 @@ def build_project_image(
     if no_cache:
         cmd.append("--no-cache")
     if pull_always:
-        cmd.append("--pull=always")
+        cmd += podman_pull_always_args()
     cmd.append(str(context_dir))
 
     print("$", shlex.join(cmd))
@@ -494,7 +495,7 @@ def build_base_images(
             ``depends_on``).  Same selection drives the OCI label, the L1
             tag suffix, the in-container manifest, and the help fragments.
         rebuild: Force rebuild with cache bust (refreshes agent installs).
-        full_rebuild: Force rebuild with ``--no-cache --pull=always``.
+        full_rebuild: Force rebuild with ``--no-cache`` and a forced base-image re-pull.
         build_dir: Build context directory (must be empty or absent).
         tag_as_default: When ``True``, additionally tag the L1 with the
             unsuffixed default-alias [`l1_image_tag(base_image)`][terok_executor.container.build.l1_image_tag].
