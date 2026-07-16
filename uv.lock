@@ -2276,7 +2276,7 @@ requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "rich", specifier = "~=15.0" },
     { name = "ruamel-yaml", specifier = "==0.19.1" },
-    { name = "terok-sandbox", git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fpassphrase-change" },
+    { name = "terok-sandbox", url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a9/terok_sandbox-0.5.0a9-py3-none-any.whl" },
     { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a3/terok_util-0.3.1a3-py3-none-any.whl" },
     { name = "tomli-w", specifier = "~=1.2" },
 ]
@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a9.dev418+g0a6f15972"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fpassphrase-change#0a6f159723209b033eacfef337f395b0051043df" }
+version = "0.5.0a9"
+source = { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a9/terok_sandbox-0.5.0a9-py3-none-any.whl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2327,6 +2327,26 @@ dependencies = [
     { name = "terok-clearance" },
     { name = "terok-shield" },
     { name = "terok-util" },
+]
+wheels = [
+    { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a9/terok_sandbox-0.5.0a9-py3-none-any.whl", hash = "sha256:0044b263021ef2cf69bbff3a74522299e3399d6fa8920c8798d0acdffe252ae9" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = "~=3.14.1" },
+    { name = "cryptography", specifier = "~=49.0" },
+    { name = "jinja2", specifier = "~=3.1" },
+    { name = "keyring", specifier = "~=25.7" },
+    { name = "packaging", specifier = "~=26.2" },
+    { name = "platformdirs", specifier = "~=4.10" },
+    { name = "prompt-toolkit", specifier = "~=3.0" },
+    { name = "pydantic", specifier = "~=2.13" },
+    { name = "ruamel-yaml", specifier = "==0.19.1" },
+    { name = "sqlcipher3", specifier = "==0.6.2" },
+    { name = "terok-clearance", url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.8.0a6/terok_clearance-0.8.0a6-py3-none-any.whl" },
+    { name = "terok-shield", url = "https://github.com/terok-ai/terok-shield/releases/download/v0.8.0a6/terok_shield-0.8.0a6-py3-none-any.whl" },
+    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a3/terok_util-0.3.1a3-py3-none-any.whl" },
 ]
 
 [[package]]
