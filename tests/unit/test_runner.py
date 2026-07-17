@@ -203,7 +203,7 @@ class TestAgentRunner:
             )
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.gpus == ("amd", "intel")
+        assert spec.gpus == (("amd", None), ("intel", None))
 
     def test_deprecated_gpu_kwarg_still_works(self, tmp_path: Path) -> None:
         """``gpu=True`` warns but keeps enabling passthrough (as ``"all"``)."""
@@ -241,7 +241,7 @@ class TestAgentRunner:
             )
 
         spec = sandbox.run.call_args[0][0]
-        assert spec.gpus == ("amd",)
+        assert spec.gpus == (("amd", None),)
 
     def test_unknown_gpu_vendor_becomes_build_error(self, tmp_path: Path) -> None:
         """A typo'd vendor fails as BuildError before any podman call."""
@@ -548,7 +548,7 @@ class TestLaunchPrepared:
         assert spec.env == {"FOO": "bar"}
         assert spec.command == ("bash",)
         assert spec.task_dir == tmp_path
-        assert spec.gpus == ("nvidia", "amd")
+        assert spec.gpus == (("nvidia", None), ("amd", None))
         assert spec.memory == "4g"
         assert spec.cpus == "2.0"
         assert spec.unrestricted is False

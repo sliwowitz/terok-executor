@@ -777,7 +777,7 @@ RUN_COMMAND = CommandDef(
         ),
         ArgDef(
             name="--gpus",
-            help="GPU passthrough: 'all', or vendors 'nvidia'/'amd'/'intel' (comma-separated)",
+            help="GPU passthrough: 'all', vendors 'nvidia'/'amd'/'intel', or devices 'amd:1' (comma-separated)",
         ),
         ArgDef(
             name="--gpu", action="store_true", help="Deprecated, removed in 0.6.0: use --gpus all"
