@@ -188,6 +188,7 @@ class AgentRunner:
         gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
+        caps: Sequence[str] | None = None,
         workspace: Path | None = None,
         ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
@@ -233,6 +234,7 @@ class AgentRunner:
             gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
+            caps=caps,
             workspace=workspace,
             ephemeral=ephemeral,
             hooks=hooks,
@@ -260,6 +262,7 @@ class AgentRunner:
         gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
+        caps: Sequence[str] | None = None,
         workspace: Path | None = None,
         ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
@@ -291,6 +294,7 @@ class AgentRunner:
             gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
+            caps=caps,
             workspace=workspace,
             ephemeral=ephemeral,
             hooks=hooks,
@@ -319,6 +323,7 @@ class AgentRunner:
         gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
+        caps: Sequence[str] | None = None,
         workspace: Path | None = None,
         ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
@@ -355,6 +360,7 @@ class AgentRunner:
             gpus=_fold_deprecated_gpu(gpu, gpus),
             memory=memory,
             cpus=cpus,
+            caps=caps,
             workspace=workspace,
             ephemeral=ephemeral,
             hooks=hooks,
@@ -427,6 +433,7 @@ class AgentRunner:
         gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
+        caps: Sequence[str] | None = None,
         ephemeral: bool = False,
         unrestricted: bool = True,
         sealed: bool = False,
@@ -469,6 +476,12 @@ class AgentRunner:
                 wins.  Will be removed in terok-executor 0.6.0.
             memory: Podman ``--memory`` value (``"4g"`` etc.); ``None`` = unlimited.
             cpus: Podman ``--cpus`` value (``"2.0"`` etc.); ``None`` = unlimited.
+            caps: Linux capabilities to grant (``--cap-add``); every
+                entry must be on
+                [`GRANTABLE_CAPS`][terok_sandbox.sandbox.GRANTABLE_CAPS]
+                (sandbox rejects anything else at command-assembly
+                time).  Typed channel for capability grants — never
+                pass ``--cap-add`` via *extra_args*.
             ephemeral: When True, podman removes the container as soon as
                 it exits (``--rm``); the default keeps it for
                 ``start``/``rm``, matching ``podman run``.
@@ -635,6 +648,7 @@ class AgentRunner:
             gpus=spec_gpus,
             memory=memory,
             cpus=cpus,
+            caps=tuple(caps or ()),
             extra_args=tuple(extra_args or ()),
             unrestricted=unrestricted,
             sealed=sealed,
@@ -847,6 +861,7 @@ class AgentRunner:
         gpus: bool | str | Sequence[str] | None = None,
         memory: str | None = None,
         cpus: str | None = None,
+        caps: Sequence[str] | None = None,
         workspace: Path | None = None,
         ephemeral: bool = False,
         hooks: LifecycleHooks | None = None,
@@ -1014,6 +1029,7 @@ class AgentRunner:
             gpus=gpus,
             memory=memory,
             cpus=cpus,
+            caps=caps,
             ephemeral=ephemeral,
             unrestricted=unrestricted,
             extra_args=extra_args or None,
