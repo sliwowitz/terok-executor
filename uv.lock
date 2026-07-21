@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a13.dev427+g08e1f107e"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fgrantable-caps#08e1f107eb70eb0ed9b403bbad2b3fc0e6a18ae1" }
+version = "0.5.0a13.dev428+gd4f7ac4bc"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fgrantable-caps#d4f7ac4bccb6e75667b1aeca54a775e851b049df" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
