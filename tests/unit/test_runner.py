@@ -285,6 +285,19 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.cpus == "2.0"
 
+    def test_caps_propagate(self, tmp_path: Path) -> None:
+        """Capability grants flow through to RunSpec.caps as a tuple."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", follow=False, caps=["perfmon"]
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.caps == ("perfmon",)
+
     def test_resource_limits_default_none(self, tmp_path: Path) -> None:
         """Resource limits default to None when not specified."""
         sandbox = _mock_sandbox()
@@ -296,6 +309,7 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.memory is None
         assert spec.cpus is None
+        assert spec.caps == ()
 
     def test_run_interactive_command(self, tmp_path: Path) -> None:
         """Interactive mode includes init-ssh-and-repo.sh in command."""
@@ -537,6 +551,7 @@ class TestLaunchPrepared:
             gpus="nvidia,amd",
             memory="4g",
             cpus="2.0",
+            caps=["perfmon"],
             unrestricted=False,
             sealed=True,
             extra_args=["-p", "127.0.0.1:8080:8080"],
@@ -551,6 +566,7 @@ class TestLaunchPrepared:
         assert spec.gpus == (("nvidia", None), ("amd", None))
         assert spec.memory == "4g"
         assert spec.cpus == "2.0"
+        assert spec.caps == ("perfmon",)
         assert spec.unrestricted is False
         assert spec.sealed is True
         assert spec.extra_args == ("-p", "127.0.0.1:8080:8080")
