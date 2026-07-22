@@ -485,6 +485,24 @@ def build_project_image(
         raise BuildError(f"Image build failed: {exc}") from exc
 
 
+def _tag_image(source: str, alias: str) -> None:
+    """Point *alias* at the *source* image via ``podman tag``.
+
+    Idempotent: re-tagging an alias that already resolves to *source* is a
+    no-op.  Used by [`build_base_images`][terok_executor.container.build.build_base_images]
+    to apply the default-alias tag on a cache hit, where no ``podman build``
+    (and therefore no ``-t`` tagging) runs.
+    """
+    cmd = ["podman", "tag", source, alias]
+    print("$", shlex.join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        raise BuildError("podman not found; please install podman") from exc
+    except subprocess.CalledProcessError as exc:
+        raise BuildError(f"Image tag failed ({alias!r} -> {source!r}): {exc}") from exc
+
+
 def build_base_images(
     base_image: str = DEFAULT_BASE_IMAGE,
     *,
@@ -548,6 +566,17 @@ def build_base_images(
     # with explicit family) can still be reused without supplying it again.
     if not rebuild and not full_rebuild:
         if _image_exists(l0_tag) and _image_exists(l1_tag):
+            # The default alias is applied only as an extra ``-t`` target at
+            # build time, so a cache hit would otherwise skip it entirely.
+            # A prior non-default build (a project or per-agent L1) leaves the
+            # suffixed L1 present while the alias is absent; without this the
+            # ``tag_as_default`` request is silently dropped and
+            # ``ensure_default_l1`` hands back an alias tag that was never
+            # created — ``podman run`` then fails to resolve it.  ``podman
+            # tag`` is idempotent, so re-pointing an already-correct alias is
+            # a no-op.
+            for alias in extra_tags:
+                _tag_image(l1_tag, alias)
             return ImageSet(l0=l0_tag, l1=l1_tag)
 
     fam = detect_family(base_image, override=family)
