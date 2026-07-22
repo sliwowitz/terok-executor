@@ -215,6 +215,7 @@ def _handle_run(
     branch: str | None = None,
     name: str | None = None,
     restricted: bool = False,
+    debug: bool = False,
     gpus: str | None = None,
     gpu: bool = False,
     memory: str | None = None,
@@ -269,6 +270,7 @@ def _handle_run(
         "name": name,
         "branch": branch,
         "unrestricted": not restricted,
+        "allow_debugger": debug,
         "gpus": gpus if gpus is not None else ("all" if gpu else None),
         "memory": memory,
         "cpus": cpus,
@@ -774,6 +776,12 @@ RUN_COMMAND = CommandDef(
             name="--restricted",
             action="store_true",
             help="Restrict agent permissions (no auto-approve, no-new-privileges)",
+        ),
+        ArgDef(
+            name="--debug",
+            action="store_true",
+            help="Debug mode: leave supervisor children ptrace-able so a debugger "
+            "can attach (skips PR_SET_DUMPABLE only; core-limit + mlockall still apply)",
         ),
         ArgDef(
             name="--gpus",

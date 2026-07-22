@@ -180,6 +180,30 @@ class TestSharedDirArgs:
         assert call_kwargs.kwargs["shared_dir"] == Path("/tmp/terok-testing/shared")
         assert call_kwargs.kwargs["shared_mount"] == "/data"
 
+    def test_handle_run_forwards_debug_as_allow_debugger(self) -> None:
+        """``--debug`` reaches the runner as ``allow_debugger``; default is False."""
+        from terok_executor.commands import _handle_run
+
+        with (
+            patch("terok_executor.commands._setup_verdict_or_exit"),
+            patch("terok_executor.commands._preflight_or_exit", return_value=True),
+            patch("terok_executor.container.runner.AgentRunner") as mock_cls,
+        ):
+            mock_runner = mock_cls.return_value
+            mock_runner.run_headless.return_value = "terok-executor-test"
+            _handle_run(agent="claude", repo=".", prompt="test", debug=True)
+        assert mock_runner.run_headless.call_args.kwargs["allow_debugger"] is True
+
+        with (
+            patch("terok_executor.commands._setup_verdict_or_exit"),
+            patch("terok_executor.commands._preflight_or_exit", return_value=True),
+            patch("terok_executor.container.runner.AgentRunner") as mock_cls,
+        ):
+            mock_runner = mock_cls.return_value
+            mock_runner.run_headless.return_value = "terok-executor-test"
+            _handle_run(agent="claude", repo=".", prompt="test")
+        assert mock_runner.run_headless.call_args.kwargs["allow_debugger"] is False
+
     def test_handle_run_omits_shared_mount_when_no_dir(self) -> None:
         """_handle_run omits shared_mount from common dict when shared_dir is None."""
         from terok_executor.commands import _handle_run
