@@ -33,7 +33,7 @@ dynamic = ["version"]
 # Dependency pins follow the policy in AGENTS.md ("Dependency Pinning &
 # pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
-    "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox.git@feat/gate-agent-hooks",
+    "terok-sandbox @ https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a14/terok_sandbox-0.5.0a14-py3-none-any.whl",
     "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.3.1a3/terok_util-0.3.1a3-py3-none-any.whl",
     "ruamel.yaml==0.19.1",
     "Jinja2~=3.1",
@@ -91,7 +91,7 @@ allow-direct-references = true
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.4.0a13"
+fallback-version = "0.4.0a14"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terok_executor"]
