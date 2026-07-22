@@ -1072,6 +1072,52 @@ class TestDefaultAliasTagging:
         # Both the suffixed tag AND the unsuffixed default alias appear as -t targets.
         assert default_alias in l1_cmd
 
+    def test_applies_alias_on_cache_hit(self) -> None:
+        """A cache hit still applies the default alias via ``podman tag``.
+
+        Regression: a prior non-default build leaves the suffixed L1 present
+        while the alias is absent.  ``tag_as_default=True`` must not be
+        silently dropped just because no rebuild is needed — otherwise
+        ``ensure_default_l1`` returns an alias tag that never got created.
+        """
+        from unittest.mock import patch
+
+        from terok_executor.container.build import (
+            DEFAULT_BASE_IMAGE,
+            build_base_images,
+            l1_image_tag,
+        )
+
+        default_alias = l1_image_tag(DEFAULT_BASE_IMAGE)
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            result = build_base_images(tag_as_default=True)
+
+        # No ``podman build`` runs (cache hit), but the alias is tagged.
+        assert mock_run.call_count == 1
+        tag_cmd = mock_run.call_args_list[0][0][0]
+        assert tag_cmd[:2] == ["podman", "tag"]
+        assert tag_cmd[2] == result.l1
+        assert tag_cmd[3] == default_alias
+
+    def test_no_alias_tag_on_cache_hit_without_default(self) -> None:
+        """A cache hit for a non-default build tags nothing (no alias to apply)."""
+        from unittest.mock import patch
+
+        from terok_executor.container.build import build_base_images
+
+        with (
+            patch("terok_executor.container.build._check_podman"),
+            patch("terok_executor.container.build._image_exists", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            build_base_images(tag_as_default=False)
+
+        mock_run.assert_not_called()
+
 
 class TestImageAgents:
     """Verify the ``ai.terok.agents`` OCI label reader."""
