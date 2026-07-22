@@ -204,6 +204,40 @@ class TestSharedDirArgs:
             _handle_run(agent="claude", repo=".", prompt="test")
         assert mock_runner.run_headless.call_args.kwargs["allow_debugger"] is False
 
+    @pytest.mark.parametrize("verb", ["run", "run-tool"])
+    def test_debug_flag_parses_on_run_verbs(self, verb: str) -> None:
+        """The actual CLI parser maps ``--debug`` to ``args.debug`` and defaults False.
+
+        Complements the ``_handle_run`` tests above, which bypass the parser:
+        this exercises the real ``RUN_COMMAND`` / ``RUN_TOOL_COMMAND`` token
+        mapping so a missing/mis-``dest``ed ``--debug`` ArgDef would fail here.
+        """
+        import argparse
+
+        from terok_executor._tree import COMMANDS
+
+        def parse(argv: list[str]) -> argparse.Namespace:
+            parser = argparse.ArgumentParser(prog="terok-executor")
+            COMMANDS.wire(parser, argv=argv)
+            return parser.parse_args(argv)
+
+        assert parse([verb, "claude", ".", "--debug"]).debug is True
+        assert parse([verb, "claude", "."]).debug is False
+
+    def test_handle_run_tool_forwards_debug_as_allow_debugger(self) -> None:
+        """``run-tool --debug`` reaches ``run_tool`` as ``allow_debugger``."""
+        from terok_executor.commands import _handle_run_tool
+
+        with (
+            patch("terok_executor.commands._setup_verdict_or_exit"),
+            patch("terok_executor.commands._preflight_or_exit", return_value=True),
+            patch("terok_executor.container.runner.AgentRunner") as mock_cls,
+        ):
+            mock_runner = mock_cls.return_value
+            mock_runner.run_tool.return_value = "terok-executor-tool"
+            _handle_run_tool(tool="coderabbit", repo=".", debug=True)
+        assert mock_runner.run_tool.call_args.kwargs["allow_debugger"] is True
+
     def test_handle_run_omits_shared_mount_when_no_dir(self) -> None:
         """_handle_run omits shared_mount from common dict when shared_dir is None."""
         from terok_executor.commands import _handle_run

@@ -403,6 +403,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Launch a sidecar tool container. Returns container name.
 
@@ -411,7 +412,8 @@ class AgentRunner:
         store — not a phantom token.
 
         See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
-        for the *project_id* / *task_id* / *dossier_path* semantics.
+        for the *project_id* / *task_id* / *dossier_path* / *allow_debugger*
+        semantics.
         """
         return self._run(
             agent=tool,
@@ -429,6 +431,7 @@ class AgentRunner:
             project_id=project_id,
             supervisor_task_id=task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
         )
 
     def launch_prepared(

@@ -325,6 +325,7 @@ def _handle_run_tool(
     timezone: str | None = None,
     yes: bool = False,
     no_preflight: bool = False,
+    debug: bool = False,
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Run a tool in a sidecar container."""
@@ -354,6 +355,7 @@ def _handle_run_tool(
         workspace=Path(workspace) if workspace else None,
         ephemeral=ephemeral,
         timezone=timezone,
+        allow_debugger=debug,
     )
     print(f"Container: {cname}")
 
@@ -906,6 +908,12 @@ RUN_TOOL_COMMAND = CommandDef(
             action="store_true",
             dest="no_preflight",
             help="Skip prerequisite checks entirely (caller manages setup)",
+        ),
+        ArgDef(
+            name="--debug",
+            action="store_true",
+            help="Debug mode: leave supervisor children ptrace-able so a debugger "
+            "can attach (skips PR_SET_DUMPABLE only; core-limit + mlockall still apply)",
         ),
     ),
 )
