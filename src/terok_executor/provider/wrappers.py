@@ -119,6 +119,7 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         "is_opencode": agent.name == "opencode",
         "provider_launcher": provider_launcher,
         **_claude_provider_context(agent),
+        **_readiness_guard_context(agent, provider_launcher),
         "author_name": shlex.quote(agent.git_author_name),
         "author_email": shlex.quote(agent.git_author_email),
         "refuse_pattern": "|".join(agent.refuse_subcommands),
@@ -154,6 +155,29 @@ def _claude_provider_context(agent: Agent) -> dict[str, str]:
         "provider_base_url_env": base_url_env,
         "provider_bearer_env": bearer_env,
     }
+
+
+def _readiness_guard_context(agent: Agent, provider_launcher: str) -> dict[str, object]:
+    """Resolve whether this wrapper pre-flights provider readiness, and against whom.
+
+    A native, protocol-routed agent (codex, vibe) launches its bare binary on
+    the default path, trusting a vault-materialized credential to be there. When
+    no provider serving its wire protocol was authenticated at container-creation
+    time, that credential is absent and the agent dies with an opaque parse error
+    (codex: ``EOF while parsing a value at line 1 column 0``). The guard checks
+    the effective provider's ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>`` handle —
+    the same startup snapshot ``hilfe`` and ``providers`` read — and refuses with
+    an actionable message instead.
+
+    Truthy only for agents that both route through a launcher and carry a fixed
+    protocol + default provider to check; harnesses (opencode, pi, no default)
+    and bindingless CLIs (copilot) opt out and render no guard.
+    """
+    binding = agent.provider_binding
+    default = binding.default if binding else None
+    if not (provider_launcher and default and agent.protocol):
+        return {"readiness_guard": False, "default_provider": ""}
+    return {"readiness_guard": True, "default_provider": default}
 
 
 def _extra_args_expansion(agent: Agent, session_path: str) -> str:
