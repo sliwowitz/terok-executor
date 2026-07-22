@@ -40,6 +40,23 @@
     local _runner=({{ c.binary }})
     [ -n "$_provider" ] && _runner=({{ c.provider_launcher }} --provider "$_provider")
 {%- endif %}
+{%- if c.readiness_guard %}
+    # Pre-flight: refuse when the effective provider (the selected one, else the
+    # baked default) has no authenticated, protocol-serving vault handle in this
+    # container's startup snapshot.  Without it {{ c.binary }} would launch
+    # against an empty credential and die with an opaque parse error; the same
+    # snapshot backs the `hilfe` / `providers` readiness views, so this never
+    # refuses an invocation those would call ready.
+    local _eff="${_provider:-{{ c.default_provider }}}"
+    local _handle="TEROK_PROVIDER_${_eff^^}_BASE_{{ c.provider_protocol_var }}"
+    if [ -z "${!_handle:-}" ]; then
+        echo "terok: {{ c.name }} has no authenticated {{ c.provider_protocol }} provider ('${_eff}')." >&2
+        echo "  Authenticate one on the host:  terok auth {{ c.name }}" >&2
+        echo "  Ready pairs in this container: providers" >&2
+        echo "  (Authenticating on the host after this task started needs a fresh task to take effect.)" >&2
+        return 1
+    fi
+{%- endif %}
     [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
         . /usr/local/share/terok/terok-env-git-identity.sh
 {%- if c.is_vibe %}

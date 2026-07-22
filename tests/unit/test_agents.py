@@ -122,6 +122,33 @@ class TestRuntimeProviderWrappers:
         assert AGENTS["opencode"].protocol == "openai-chat"
         assert AGENTS["pi"].protocol == "openai-chat"
 
+    def test_codex_preflight_refuses_without_a_ready_provider(self) -> None:
+        """Codex checks its effective provider's vault handle before launch, so an
+        unauthenticated task fails with an actionable message instead of codex's
+        opaque ``EOF while parsing a value`` on an empty credential file."""
+        wrapper = generate_agent_wrapper(AGENTS["codex"])
+        assert 'local _eff="${_provider:-openai}"' in wrapper
+        assert 'local _handle="TEROK_PROVIDER_${_eff^^}_BASE_OPENAI_RESPONSES"' in wrapper
+        assert 'if [ -z "${!_handle:-}" ]; then' in wrapper
+        assert "codex has no authenticated openai-responses provider" in wrapper
+        assert "terok auth codex" in wrapper
+
+    def test_vibe_preflight_checks_its_own_default_and_protocol(self) -> None:
+        """Vibe's guard resolves against its baked default (mistral) and wire
+        protocol (openai-chat), independent of codex's."""
+        wrapper = generate_agent_wrapper(AGENTS["vibe"])
+        assert 'local _eff="${_provider:-mistral}"' in wrapper
+        assert 'local _handle="TEROK_PROVIDER_${_eff^^}_BASE_OPENAI_CHAT"' in wrapper
+        assert "vibe has no authenticated openai-chat provider" in wrapper
+
+    def test_preflight_guard_scoped_to_native_protocol_agents(self) -> None:
+        """The guard is emitted only for native, protocol-routed CLIs (codex, vibe).
+        Harnesses select a provider at runtime and bindingless CLIs have no default
+        to check, so they must not carry it."""
+        for name in ("opencode", "pi", "copilot", "claude"):
+            wrapper = generate_agent_wrapper(AGENTS[name])
+            assert 'local _handle="TEROK_PROVIDER_' not in wrapper, name
+
 
 class TestWriteSessionHook:
     """Tests for _write_session_hook."""
