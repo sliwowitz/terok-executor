@@ -215,6 +215,7 @@ def _handle_run(
     branch: str | None = None,
     name: str | None = None,
     restricted: bool = False,
+    debug: bool = False,
     gpus: str | None = None,
     gpu: bool = False,
     memory: str | None = None,
@@ -269,6 +270,7 @@ def _handle_run(
         "name": name,
         "branch": branch,
         "unrestricted": not restricted,
+        "allow_debugger": debug,
         "gpus": gpus if gpus is not None else ("all" if gpu else None),
         "memory": memory,
         "cpus": cpus,
@@ -323,6 +325,7 @@ def _handle_run_tool(
     timezone: str | None = None,
     yes: bool = False,
     no_preflight: bool = False,
+    debug: bool = False,
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Run a tool in a sidecar container."""
@@ -352,6 +355,7 @@ def _handle_run_tool(
         workspace=Path(workspace) if workspace else None,
         ephemeral=ephemeral,
         timezone=timezone,
+        allow_debugger=debug,
     )
     print(f"Container: {cname}")
 
@@ -776,6 +780,12 @@ RUN_COMMAND = CommandDef(
             help="Restrict agent permissions (no auto-approve, no-new-privileges)",
         ),
         ArgDef(
+            name="--debug",
+            action="store_true",
+            help="Debug mode: leave supervisor children ptrace-able so a debugger "
+            "can attach (skips PR_SET_DUMPABLE only; core-limit + mlockall still apply)",
+        ),
+        ArgDef(
             name="--gpus",
             help="GPU passthrough: 'all', vendors 'nvidia'/'amd'/'intel', or devices 'amd:1' (comma-separated)",
         ),
@@ -898,6 +908,12 @@ RUN_TOOL_COMMAND = CommandDef(
             action="store_true",
             dest="no_preflight",
             help="Skip prerequisite checks entirely (caller manages setup)",
+        ),
+        ArgDef(
+            name="--debug",
+            action="store_true",
+            help="Debug mode: leave supervisor children ptrace-able so a debugger "
+            "can attach (skips PR_SET_DUMPABLE only; core-limit + mlockall still apply)",
         ),
     ),
 )

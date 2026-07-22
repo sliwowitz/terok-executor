@@ -767,6 +767,42 @@ class TestLaunchPrepared:
         assert kwargs["task_id"] == ""
         assert kwargs["dossier_path"] is None
 
+    def test_allow_debugger_propagates_to_sidecar(self, tmp_path: Path) -> None:
+        """``allow_debugger=True`` reaches ``write_sidecar`` so the supervisor
+        children leave themselves ptrace-able."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+                allow_debugger=True,
+            )
+
+        assert write_sidecar.call_args.kwargs["allow_debugger"] is True
+
+    def test_allow_debugger_defaults_to_hardened(self, tmp_path: Path) -> None:
+        """Absent the flag, the sidecar records full hardening (fail-closed)."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
+            runner.launch_prepared(
+                env={},
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        assert write_sidecar.call_args.kwargs["allow_debugger"] is False
+
     def test_gate_fields_written_when_token_in_env(self, tmp_path: Path) -> None:
         """A ``TEROK_GATE_TOKEN`` in the env wires the gate into the sidecar.
 

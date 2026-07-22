@@ -201,6 +201,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Launch a headless agent run. Returns container name.
 
@@ -217,6 +218,11 @@ class AgentRunner:
         *project_id*, *task_id*, *dossier_path* propagate the terok
         orchestrator's identity into the per-container supervisor sidecar.
         Defaults preserve the standalone-executor case (no terok above).
+
+        *allow_debugger* relaxes the supervisor children's self-hardening
+        (skips only the ``PR_SET_DUMPABLE`` clear, so a debugger can
+        attach) — see
+        [`launch_prepared`][terok_executor.container.runner.AgentRunner.launch_prepared].
         """
         return self._run(
             agent=agent,
@@ -247,6 +253,7 @@ class AgentRunner:
             project_id=project_id,
             supervisor_task_id=task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
         )
 
     def run_interactive(
@@ -275,6 +282,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Launch an interactive container. Returns container name.
 
@@ -307,6 +315,7 @@ class AgentRunner:
             project_id=project_id,
             supervisor_task_id=task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
         )
 
     def run_web(
@@ -336,6 +345,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Launch a toad web container. Returns container name.
 
@@ -373,6 +383,7 @@ class AgentRunner:
             project_id=project_id,
             supervisor_task_id=task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
         )
 
     def run_tool(
@@ -392,6 +403,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Launch a sidecar tool container. Returns container name.
 
@@ -400,7 +412,8 @@ class AgentRunner:
         store — not a phantom token.
 
         See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
-        for the *project_id* / *task_id* / *dossier_path* semantics.
+        for the *project_id* / *task_id* / *dossier_path* / *allow_debugger*
+        semantics.
         """
         return self._run(
             agent=tool,
@@ -418,6 +431,7 @@ class AgentRunner:
             project_id=project_id,
             supervisor_task_id=task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
         )
 
     def launch_prepared(
@@ -445,6 +459,7 @@ class AgentRunner:
         project_id: str = "",
         task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
         per_container: PerContainerResources | None = None,
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
@@ -516,6 +531,15 @@ class AgentRunner:
                 shield reads at container start.  Default ``None``
                 omits the field from the sidecar — only orchestrated
                 runs carry a dossier.
+            allow_debugger: Relax the supervisor children's
+                self-hardening so a debugger can attach — written into
+                the sidecar as ``allow_debugger`` and honoured by
+                [`write_sidecar`][terok_sandbox.launch.write_sidecar].
+                Only the ``PR_SET_DUMPABLE`` clear is skipped;
+                ``RLIMIT_CORE`` and ``mlockall`` still apply.  Default
+                ``False`` keeps the full production hardening.  The
+                explicit flag is the sole authority (fail-closed): it
+                is never derived from ``-O`` / ``__debug__``.
             per_container: Pre-allocated per-container socket dir / TCP
                 ports.  When provided, the launch uses these instead of
                 allocating its own — so a caller that already threaded
@@ -611,6 +635,7 @@ class AgentRunner:
             gate_base_path=str(cfg.gate_base_path) if gate_active else None,
             gate_token=env["TEROK_GATE_TOKEN"] if gate_active else None,
             gate_port=per_container.gate_port if gate_active else None,
+            allow_debugger=allow_debugger,
         )
         # Fail closed: a missing sidecar means the supervisor OCI hook
         # never fires, so the container would launch with no vault,
@@ -875,6 +900,7 @@ class AgentRunner:
         project_id: str = "",
         supervisor_task_id: str = "",
         dossier_path: Path | str | None = None,
+        allow_debugger: bool = False,
     ) -> str:
         """Unified launch flow for all modes (headless, interactive, web, tool)."""
         from terok_executor.integrations.sandbox import allocate_per_container_resources
@@ -1037,6 +1063,7 @@ class AgentRunner:
             project_id=project_id,
             task_id=supervisor_task_id,
             dossier_path=dossier_path,
+            allow_debugger=allow_debugger,
             per_container=per_container,
         )
 
