@@ -477,7 +477,8 @@ class AgentRunner:
             memory: Podman ``--memory`` value (``"4g"`` etc.); ``None`` = unlimited.
             cpus: Podman ``--cpus`` value (``"2.0"`` etc.); ``None`` = unlimited.
             caps: Linux capabilities to grant (``--cap-add``); every
-                entry must be on sandbox's ``GRANTABLE_CAPS`` allowlist
+                entry must be on
+                [`GRANTABLE_CAPS`][terok_sandbox.sandbox.GRANTABLE_CAPS]
                 (sandbox rejects anything else at command-assembly
                 time).  Typed channel for capability grants — never
                 pass ``--cap-add`` via *extra_args*.
