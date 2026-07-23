@@ -1327,3 +1327,27 @@ class TestExposedProviderMaterialization:
         from terok_executor.container.env import _materialize_exposed_providers
 
         assert _materialize_exposed_providers(roster, tmp_path, frozenset({"claude"})) == {}
+
+
+class TestEgressProjection:
+    """assemble_container_env computes the roster egress projection into result.egress."""
+
+    def test_result_carries_projection(self, base_spec, roster):
+        """Dedicated provider hosts are denied; shared-domain apexes are not."""
+        result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
+        assert "api.anthropic.com" in result.egress.deny_to_vault
+        assert "gitlab.com" not in result.egress.deny_to_vault
+
+    def test_exposed_agent_frees_its_provider(self, workspace, envs_dir, roster):
+        """A spec exposing 'claude' frees anthropic's host (real cred in-container)."""
+        spec = _spec(workspace, envs_dir, expose_credential_providers=frozenset({"claude"}))
+        result = assemble_container_env(spec, roster, caller_manages_vault=True)
+        assert "api.anthropic.com" not in result.egress.deny_to_vault
+        assert "api.openai.com" in result.egress.deny_to_vault
+
+    def test_default_result_has_empty_projection(self):
+        """A bare ContainerEnvResult defaults to an empty projection."""
+        from terok_executor.container.env import ContainerEnvResult
+        from terok_executor.roster.types import EgressProjection
+
+        assert ContainerEnvResult(env={}, volumes=()).egress == EgressProjection()

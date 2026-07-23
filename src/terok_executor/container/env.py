@@ -25,12 +25,13 @@ from __future__ import annotations
 import logging
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import Sharing, VolumeSpec
+from terok_executor.roster.types import EgressProjection
 
 _CONTAINER_RUNTIME_DIR = "/run/terok"
 """Container-side mount point — must match [`terok_sandbox.CONTAINER_RUNTIME_DIR`][terok_sandbox.CONTAINER_RUNTIME_DIR]."""
@@ -232,6 +233,13 @@ class ContainerEnvResult:
     volumes: tuple[VolumeSpec, ...]
     """Typed volume specs — the sandbox decides whether to mount or inject."""
 
+    egress: EgressProjection = field(default_factory=EgressProjection)
+    """Roster-derived egress projection — shield's generated t20 / t30 tiers.
+
+    The firewall half of credential containment: relayed provider endpoints
+    denied direct (the vault relays them), exposed-credential providers left
+    reachable.  Empty by construction when no provider is vault-routed."""
+
 
 # ── Public API ──
 
@@ -260,7 +268,8 @@ def assemble_container_env(
             delegated.
 
     Returns:
-        Assembled env dict and volume tuple.
+        Assembled env dict, volume tuple, and the roster egress projection
+        (shield's generated t20 / t30 tiers).
     """
     from terok_executor.paths import mounts_dir as _mounts_dir
 
@@ -384,7 +393,15 @@ def assemble_container_env(
     # 13. Extra volumes
     volumes.extend(spec.extra_volumes)
 
-    return ContainerEnvResult(env=env, volumes=tuple(volumes))
+    # 14. Egress projection — the firewall half of credential containment.
+    #     The vault contains the credential; shield's generated deny tier keeps
+    #     the agent from bypassing it by reaching the provider host directly.
+    #     Derived from the same (roster, exposed-providers) inputs as the vault
+    #     work above; exposed providers hold the real credential in-container, so
+    #     they are skipped (they need the direct route).
+    egress = roster.compose_egress(exposed_credential_providers=spec.expose_credential_providers)
+
+    return ContainerEnvResult(env=env, volumes=tuple(volumes), egress=egress)
 
 
 # ── Private helpers ──
