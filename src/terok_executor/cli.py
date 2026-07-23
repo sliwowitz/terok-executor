@@ -59,6 +59,12 @@ def main(argv: list[str] | None = None) -> None:
     pulls the run stack, not the whole ``terok_sandbox`` command tree.
     """
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    # One-time unified logging: routes every getLogger(__name__) to journald
+    # (when present) or stderr.  The ``acp`` daemon reconfigures with its own
+    # identifier/format when dispatched (configure is idempotent).
+    from terok_util import configure
+
+    configure(identifier="terok-executor")
     os.environ.setdefault(_SETUP_INVOCATION_ENV, _SETUP_INVOCATION)
     parser = argparse.ArgumentParser(
         prog="terok-executor",
