@@ -110,7 +110,10 @@ if TYPE_CHECKING:
         get_agent as get_agent,
         resolve_agent_value as resolve_agent_value,
     )
-    from .roster import AgentRoster as AgentRoster
+    from .roster import (
+        AgentRoster as AgentRoster,
+        EgressProjection as EgressProjection,
+    )
     from .sandbox import ensure_sandbox_ready as ensure_sandbox_ready
     from .storage import (
         SharedMountStorageInfo as SharedMountStorageInfo,
@@ -169,6 +172,7 @@ _LAZY: dict[str, str] = {
     "AgentRunner": ".container.runner",
     # Roster (agent catalog + config resolution)
     "AgentRoster": ".roster",
+    "EgressProjection": ".roster",
     # Command registries
     "COMMANDS": "._tree",
     "AGENT_COMMANDS": ".commands:COMMANDS",
