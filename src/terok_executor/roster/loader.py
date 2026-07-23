@@ -36,6 +36,7 @@ from terok_executor.provider.providers import Agent
 
 from .schema import RawAgentYaml, RawProvider, RawProviderBinding, VaultRouteEntry
 from .types import (
+    EgressProjection,
     HelpSpec,
     InstallSpec,
     MountDef,
@@ -53,7 +54,7 @@ _USER_AGENTS_DIR_NAME = "agents"
 _USER_PROVIDERS_DIR_NAME = "providers"
 _YAML_SUFFIX = ".yaml"
 
-ROSTER_VERSION = 2
+ROSTER_VERSION = 3
 """Schema version of the agent-roster YAML format.
 
 Bundled agent YAMLs and user override files declare a top-level
@@ -279,6 +280,54 @@ class AgentRoster:
             TypeAdapter(dict[str, VaultRouteEntry])
             .dump_json(routes, indent=2, exclude_none=True)
             .decode()
+        )
+
+    def deny_to_vault_hosts(
+        self, *, exposed_providers: frozenset[str] = frozenset()
+    ) -> frozenset[str]:
+        """Hosts to deny directly at the egress firewall (shield ``security_deny``, t20).
+
+        Every provider the vault relays contributes its
+        [`relayed_hosts`][terok_executor.roster.types.Provider.relayed_hosts]
+        (upstream + path overrides + OAuth-refresh endpoint) — the agent must
+        reach those *only* through the loopback vault.  Two classes are skipped:
+
+        - **``shared_domain`` providers** (``gitlab.com``, ``sonarcloud.io``):
+          the API rides an apex that also serves ``git push`` / docs, so a
+          host-level deny would kill legitimate traffic; credential containment
+          carries the weight instead.
+        - **``exposed_providers``**: terok's experimental ``expose_oauth_token``
+          mode hands the agent its *real* credential in-container (vault
+          bypassed), so it must reach the endpoint directly.
+
+        A pure function of the roster and *exposed_providers*, mirroring
+        [`generate_routes_json`][terok_executor.roster.loader.AgentRoster.generate_routes_json]:
+        the vault routes every provider, so every relayed host is denied.
+        """
+        hosts: set[str] = set()
+        for name, provider in self._providers.items():
+            if provider.shared_domain or name in exposed_providers:
+                continue
+            hosts |= provider.relayed_hosts()
+        return frozenset(hosts)
+
+    def compose_egress(
+        self, *, exposed_providers: frozenset[str] = frozenset()
+    ) -> EgressProjection:
+        """Project the roster into the shield's egress tiers.
+
+        Bundles the [`deny_to_vault_hosts`][terok_executor.roster.loader.AgentRoster.deny_to_vault_hosts]
+        set (t20) with the union of every provider's
+        [`egress_allow`][terok_executor.roster.types.Provider.egress_allow]
+        (t30) into one [`EgressProjection`][terok_executor.roster.types.EgressProjection];
+        both tuples are sorted and de-duplicated for a deterministic bundle.
+        """
+        provider_allow = {host for p in self._providers.values() for host in p.egress_allow}
+        return EgressProjection(
+            deny_to_vault=tuple(
+                sorted(self.deny_to_vault_hosts(exposed_providers=exposed_providers))
+            ),
+            provider_allow=tuple(sorted(provider_allow)),
         )
 
     def collect_all_auto_approve_env(self) -> dict[str, str]:
