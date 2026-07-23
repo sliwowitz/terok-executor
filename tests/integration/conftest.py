@@ -181,7 +181,7 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
             state_dir=tmp_path / "state",
             vault_dir=tmp_path / "vault",
             config_dir=tmp_path / "config",
-            credentials_passphrase=INTEGRATION_VAULT_PASSPHRASE,
+            credentials_passphrase_command=f"echo {INTEGRATION_VAULT_PASSPHRASE}",
         ),
         mounts_dir=tmp_path / "mounts",
         task_dir=tmp_path / "task",
