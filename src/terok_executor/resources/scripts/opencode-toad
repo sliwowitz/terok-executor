@@ -19,9 +19,13 @@ TOAD_THEME = "dracula"
 TOAD_CONFIG = Path.home() / ".config" / "toad" / "toad.json"
 
 # Map from toad wrapper name to ACP command
+# Toad wrapper names are per-provider coinages ("blablatoad"), so they cannot be
+# derived from the provider name — this map mirrors the symlinks each provider
+# declares in its ``install.run_as_root``, and has to grow with them.
 _PROG_TO_ACP = {
     "blablatoad": "blablador-acp",
     "kisskitoad": "kisski-acp",
+    "openroutertoad": "openrouter-acp",
 }
 
 

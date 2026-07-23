@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import re
+from importlib import resources
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +22,7 @@ from terok_executor.roster import (
 )
 from terok_executor.roster.loader import _load_bundled_agents
 from terok_executor.roster.schema import RawAgentYaml
+from tests.constants import CONTAINER_BIN_DIR
 
 
 def _agent_provider(name: str, data: dict) -> Agent:
@@ -836,3 +839,34 @@ class TestStrictValidation:
                 RawAgentYaml.model_validate(data)
             except ValidationError as exc:
                 pytest.fail(f"bundled {name}.yaml fails validation:\n{exc}")
+
+
+class TestToadWrapperCoverage:
+    """The bundled toad launcher must know every toad alias the roster installs."""
+
+    @staticmethod
+    def _installed_toad_aliases() -> set[str]:
+        """Collect the ``*toad`` command names providers symlink to opencode-toad."""
+        pattern = re.compile(rf"opencode-toad\s+{re.escape(CONTAINER_BIN_DIR)}/(\S+)")
+        return {
+            match
+            for provider in AgentRoster.shared().providers.values()
+            if provider.install_spec
+            for match in pattern.findall(provider.install_spec.run_as_root)
+        }
+
+    def test_launcher_maps_every_installed_alias(self) -> None:
+        """A toad alias missing from the launcher's map installs but cannot run.
+
+        ``openroutertoad`` shipped in exactly that state — symlinked by
+        openrouter.yaml, absent from the map, dying with ``unknown toad
+        wrapper``.  The alias names are per-provider coinages that cannot be
+        derived, so only this check keeps the two lists in step.
+        """
+        script = (
+            resources.files("terok_executor") / "resources" / "scripts" / "opencode-toad"
+        ).read_text(encoding="utf-8")
+        aliases = self._installed_toad_aliases()
+        assert aliases, "expected the roster to install toad aliases"
+        for alias in aliases:
+            assert f'"{alias}":' in script, f"{alias} is symlinked but unmapped"

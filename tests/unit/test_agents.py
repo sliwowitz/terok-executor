@@ -17,8 +17,15 @@ from terok_executor.provider.agents import (
     _write_session_hook,
     prepare_agent_config_dir,
 )
-from terok_executor.provider.providers import AGENTS
-from terok_executor.provider.wrappers import generate_agent_wrapper
+from terok_executor.provider.providers import AGENTS, OPENCODE_PROVIDERS
+from terok_executor.provider.wrappers import (
+    IDENTITY_EMAIL_ENV,
+    IDENTITY_NAME_ENV,
+    OPENCODE_HARNESS,
+    generate_agent_wrapper,
+    generate_all_wrappers,
+    generate_provider_shortcut,
+)
 from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,
@@ -318,3 +325,49 @@ class TestInjectOpencodeInstructions:
             _inject_opencode_instructions(config_path)
             data = json.loads(config_path.read_text(encoding="utf-8"))
             assert data["instructions"] == [str(CONTAINER_INSTRUCTIONS_PATH)]
+
+
+class TestProviderShortcutWrappers:
+    """Tests for the one-word aliases of curated OpenCode providers."""
+
+    def test_alias_delegates_to_harness_wrapper(self) -> None:
+        """Alias calls the harness wrapper with --provider, not the launcher symlink."""
+        alias = generate_provider_shortcut("blablador")
+        assert "blablador() {" in alias
+        assert f'{OPENCODE_HARNESS} --provider blablador "$@"' in alias
+        # Reaching opencode-provider directly is what stripped the alias of the
+        # wrapper's session/prompt/timeout handling in the first place.
+        assert "opencode-provider" not in alias
+
+    def test_alias_carries_provider_git_identity(self) -> None:
+        """Alias hands the harness wrapper the provider's identity, matching ACP."""
+        alias = generate_provider_shortcut("blablador")
+        assert f"export {IDENTITY_NAME_ENV}=Blablador" in alias
+        assert f"export {IDENTITY_EMAIL_ENV}=noreply@blablador.localhost" in alias
+
+    def test_alias_does_not_reimplement_wrapper_features(self) -> None:
+        """Alias is pure delegation, so harness features are inherited, not copied."""
+        alias = generate_provider_shortcut("kisski")
+        code = "\n".join(line for line in alias.splitlines() if not line.lstrip().startswith("#"))
+        for duplicated in ("initial-prompt.txt", "--terok-timeout", "_resume_args"):
+            assert duplicated not in code
+
+    def test_every_curated_provider_gets_an_alias(self) -> None:
+        """Aliases are generated from the roster, so a new provider needs no wiring."""
+        wrappers = generate_all_wrappers()
+        assert OPENCODE_PROVIDERS, "expected curated OpenCode providers in the roster"
+        for name in OPENCODE_PROVIDERS:
+            assert f"{name}() {{" in wrappers
+
+    def test_harness_wrapper_defaults_to_its_own_identity(self) -> None:
+        """Without an override the harness commits as itself, not as a provider."""
+        wrapper = generate_agent_wrapper(AGENTS[OPENCODE_HARNESS])
+        assert f'_agent_name="${{{IDENTITY_NAME_ENV}:-}}"' in wrapper
+        assert "_agent_name=opencode" in wrapper
+        assert "_agent_email=noreply@opencode.ai" in wrapper
+
+    def test_harness_wrapper_applies_resolved_identity(self) -> None:
+        """The git identity call reads the resolved variables, not a baked literal."""
+        wrapper = generate_agent_wrapper(AGENTS[OPENCODE_HARNESS])
+        assert '_terok_apply_git_identity "$_agent_name" "$_agent_email"' in wrapper
+        assert "_terok_apply_git_identity opencode noreply@opencode.ai" not in wrapper

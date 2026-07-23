@@ -24,7 +24,13 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment
 
-from .providers import AGENTS, LAUNCHER_ALWAYS, LAUNCHER_ON_PROVIDER_SELECT, Agent
+from .providers import (
+    AGENTS,
+    LAUNCHER_ALWAYS,
+    LAUNCHER_ON_PROVIDER_SELECT,
+    OPENCODE_PROVIDERS,
+    Agent,
+)
 
 INITIAL_PROMPT_PATH = "/home/dev/.terok/initial-prompt.txt"
 """Container path of the per-task initial prompt the TUI/CLI writes at launch."""
@@ -37,6 +43,21 @@ INSTRUCTIONS_PATH = "/home/dev/.terok/instructions.md"
 
 CONTAINER_WORKSPACE = "/workspace"
 """Container path the host-side repo is bind-mounted at (see container/env.py)."""
+
+OPENCODE_HARNESS = "opencode"
+"""Agent whose wrapper the curated OpenCode providers delegate to.
+
+Every provider in
+[`OPENCODE_PROVIDERS`][terok_executor.provider.providers.OPENCODE_PROVIDERS] is
+driven by this harness: their one-word commands select a provider on it rather
+than naming an agent of their own.
+"""
+
+IDENTITY_NAME_ENV = "TEROK_AGENT_IDENTITY_NAME"
+"""Env var a provider alias sets to override the harness wrapper's git author name."""
+
+IDENTITY_EMAIL_ENV = "TEROK_AGENT_IDENTITY_EMAIL"
+"""Env var a provider alias sets to override the harness wrapper's git author email."""
 
 _TEMPLATE_NAME = "agent-wrappers.sh.j2"
 
@@ -52,9 +73,15 @@ def generate_all_wrappers() -> str:
     support, and session-resume logic, plus the two shared helper functions
     they call.  This lets interactive CLI users invoke any agent regardless of
     which agent was configured as default.
+
+    Each curated OpenCode provider additionally gets a one-word alias
+    (``blablador()``, ``kisski()``, …) that delegates to the harness wrapper, so
+    those commands inherit its feature set instead of reaching the launcher
+    symlink directly and losing it.
     """
     agents = [_wrapper_context(a) for a in AGENTS.values()]
-    return _env().from_string(_template_source()).render(agents=agents)
+    shortcuts = [_shortcut_context(name) for name in OPENCODE_PROVIDERS]
+    return _env().from_string(_template_source()).render(agents=agents, shortcuts=shortcuts)
 
 
 def generate_agent_wrapper(agent: Agent) -> str:
@@ -72,6 +99,18 @@ def generate_agent_wrapper(agent: Agent) -> str:
     if ctx["is_claude"]:
         return str(macros.claude_wrapper(ctx))
     return str(macros.generic_wrapper(ctx))
+
+
+def generate_provider_shortcut(name: str) -> str:
+    """Render one curated provider's one-word alias, without the shared helpers.
+
+    Companion to
+    [`generate_agent_wrapper`][terok_executor.provider.wrappers.generate_agent_wrapper]
+    for inspecting a single alias; the full file is produced by
+    [`generate_all_wrappers`][terok_executor.provider.wrappers.generate_all_wrappers].
+    """
+    macros: Any = _env().from_string(_template_source()).module
+    return str(macros.provider_shortcut(_shortcut_context(name)))
 
 
 # ── Per-agent data preparation ───────────────────────────────────────────────
@@ -131,6 +170,36 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         "headless_cmd": f'{wrap}timeout "$_timeout" {cmd}{extra} "$@"',
         "interactive_cmd": f'{wrap}command {cmd}{extra} "$@"',
     }
+
+
+def _shortcut_context(name: str) -> dict[str, str]:
+    """Prepare the data the template renders into one curated provider's alias.
+
+    The alias delegates to the harness wrapper rather than the launcher symlink
+    it shadows, so it inherits session resume, initial-prompt seeding,
+    ``--terok-timeout`` and auto-approve — and keeps inheriting whatever that
+    wrapper grows later, with nothing to duplicate per provider.
+
+    Git authorship is handed over explicitly rather than derived inside the
+    harness wrapper: a bare ``opencode --provider blablador`` stays attributed to
+    the harness, while the pinned alias keeps the per-model attribution the ACP
+    wrapper already uses.
+    """
+    return {
+        "name": name,
+        "target": OPENCODE_HARNESS,
+        "author_name": shlex.quote(_display_name(name)),
+        "author_email": shlex.quote(f"noreply@{name}.localhost"),
+    }
+
+
+def _display_name(provider: str) -> str:
+    """Capitalise a provider name for git authorship (``blablador`` → ``Blablador``).
+
+    Mirrors ``${PROVIDER^}`` in ``opencode-provider-acp`` so a commit made from
+    the CLI alias and one made through ACP carry the same author.
+    """
+    return provider[:1].upper() + provider[1:]
 
 
 def _claude_provider_context(agent: Agent) -> dict[str, str]:
