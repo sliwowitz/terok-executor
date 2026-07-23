@@ -844,17 +844,6 @@ class TestStrictValidation:
 class TestToadWrapperCoverage:
     """The bundled toad launcher must know every toad alias the roster installs."""
 
-    @staticmethod
-    def _installed_toad_aliases() -> set[str]:
-        """Collect the ``*toad`` command names providers symlink to opencode-toad."""
-        pattern = re.compile(rf"opencode-toad\s+{re.escape(CONTAINER_BIN_DIR)}/(\S+)")
-        return {
-            match
-            for provider in AgentRoster.shared().providers.values()
-            if provider.install_spec
-            for match in pattern.findall(provider.install_spec.run_as_root)
-        }
-
     def test_launcher_maps_every_installed_alias(self) -> None:
         """A toad alias missing from the launcher's map installs but cannot run.
 
@@ -870,3 +859,14 @@ class TestToadWrapperCoverage:
         assert aliases, "expected the roster to install toad aliases"
         for alias in aliases:
             assert f'"{alias}":' in script, f"{alias} is symlinked but unmapped"
+
+    @staticmethod
+    def _installed_toad_aliases() -> set[str]:
+        """Collect the ``*toad`` command names providers symlink to opencode-toad."""
+        pattern = re.compile(rf"opencode-toad\s+{re.escape(CONTAINER_BIN_DIR)}/(\S+)")
+        return {
+            match
+            for provider in AgentRoster.shared().providers.values()
+            if provider.install_spec
+            for match in pattern.findall(provider.install_spec.run_as_root)
+        }
