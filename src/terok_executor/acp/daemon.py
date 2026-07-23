@@ -99,11 +99,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cname, sock_str = args
     level = logging.DEBUG if os.environ.get("TEROK_ACP_DEBUG") else logging.INFO
-    # ``force=True`` because some import path (pydantic, acp, asyncio,
-    # sandbox) may have already configured the root logger by the time
-    # we get here — without ``force`` the second ``basicConfig`` is a
-    # silent no-op and the DEBUG knob does nothing.
-    logging.basicConfig(level=level, format="acp[%(levelname)s] %(message)s", force=True)
+    # Unlike ``basicConfig`` (a no-op once the root logger has handlers),
+    # ``configure`` always applies the level, so the TEROK_ACP_DEBUG knob
+    # takes effect even if an import already touched the root logger.
+    from terok_util import configure
+
+    configure(identifier="terok-executor-acp", level=level, fmt="acp[%(levelname)s] %(message)s")
     return serve_acp(cname, Path(sock_str))
 
 

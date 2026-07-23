@@ -1011,13 +1011,14 @@ BUILD_COMMAND = CommandDef(
 
 def _handle_acp(*, container_name: str, socket_path: str) -> None:
     """Run the per-container ACP host-proxy daemon until the container exits."""
-    import logging
     import sys
     from pathlib import Path
 
+    from terok_util import configure
+
     from .acp.daemon import serve_acp
 
-    logging.basicConfig(level=logging.INFO, format="acp[%(levelname)s] %(message)s")
+    configure(identifier="terok-executor-acp", fmt="acp[%(levelname)s] %(message)s")
     sys.exit(serve_acp(container_name, Path(socket_path)))
 
 
