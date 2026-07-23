@@ -82,10 +82,16 @@ class TestDenyToVaultHosts:
         )
         assert roster.deny_to_vault_hosts() == frozenset()
 
-    def test_exposed_provider_skipped(self) -> None:
-        """An exposed provider (real cred in-container) must reach its host directly."""
+    def test_bare_provider_name_does_not_skip(self) -> None:
+        """The exposed set is keyed by roster-entry (agent) name, not provider name.
+
+        A provider name with no matching agent maps to nothing, so its host stays
+        denied — only an exposed *agent* frees the provider it binds.
+        """
         roster = AgentRoster(_providers={"a": Provider(name="a", upstream="https://api.a.com")})
-        assert roster.deny_to_vault_hosts(exposed_providers=frozenset({"a"})) == frozenset()
+        assert roster.deny_to_vault_hosts(
+            exposed_credential_providers=frozenset({"a"})
+        ) == frozenset({"api.a.com"})
 
     def test_multiple_providers_union_all_relayed_hosts(self) -> None:
         """The deny set is the union of every non-skipped provider's relayed hosts."""
@@ -155,12 +161,20 @@ class TestRealRosterProjection:
         assert GITLAB_APEX not in deny
         assert SONARCLOUD_APEX not in deny
 
-    def test_exposing_anthropic_frees_only_its_hosts(self) -> None:
-        """Exposing anthropic frees its hosts (subscription mode) but not others'."""
-        deny = load_roster().deny_to_vault_hosts(exposed_providers=frozenset({"anthropic"}))
+    def test_exposing_claude_frees_anthropic_hosts(self) -> None:
+        """Exposing the ``claude`` agent (subscription mode) frees the provider it
+        binds (anthropic), mapped via provider_binding — not other providers."""
+        deny = load_roster().deny_to_vault_hosts(exposed_credential_providers=frozenset({"claude"}))
         assert ANTHROPIC_API not in deny
         assert ANTHROPIC_REFRESH not in deny
         assert OPENAI_API in deny
+
+    def test_exposing_codex_frees_openai_hosts(self) -> None:
+        """The mapping works for codex → openai too (a second real binding)."""
+        deny = load_roster().deny_to_vault_hosts(exposed_credential_providers=frozenset({"codex"}))
+        assert OPENAI_API not in deny
+        assert OPENAI_REFRESH not in deny
+        assert ANTHROPIC_API in deny
 
 
 class TestRawProviderEgress:

@@ -283,7 +283,7 @@ class AgentRoster:
         )
 
     def deny_to_vault_hosts(
-        self, *, exposed_providers: frozenset[str] = frozenset()
+        self, *, exposed_credential_providers: frozenset[str] = frozenset()
     ) -> frozenset[str]:
         """Hosts to deny directly at the egress firewall (shield ``security_deny``, t20).
 
@@ -296,23 +296,42 @@ class AgentRoster:
           the API rides an apex that also serves ``git push`` / docs, so a
           host-level deny would kill legitimate traffic; credential containment
           carries the weight instead.
-        - **``exposed_providers``**: terok's experimental ``expose_oauth_token``
-          mode hands the agent its *real* credential in-container (vault
-          bypassed), so it must reach the endpoint directly.
+        - the providers bound by **``exposed_credential_providers``** — roster-entry
+          (agent/tool) names in terok's experimental ``expose_oauth_token`` mode,
+          where the agent holds its *real* credential in-container (vault bypassed)
+          and so must reach the endpoint directly.  Each entry is mapped to the
+          provider it binds (``provider_binding.default``).
 
-        A pure function of the roster and *exposed_providers*, mirroring
+        A pure function of the roster and *exposed_credential_providers*, mirroring
         [`generate_routes_json`][terok_executor.roster.loader.AgentRoster.generate_routes_json]:
         the vault routes every provider, so every relayed host is denied.
         """
+        exposed = self._exposed_provider_names(exposed_credential_providers)
         hosts: set[str] = set()
         for name, provider in self._providers.items():
-            if provider.shared_domain or name in exposed_providers:
+            if provider.shared_domain or name in exposed:
                 continue
             hosts |= provider.relayed_hosts()
         return frozenset(hosts)
 
+    def _exposed_provider_names(self, exposed_entries: frozenset[str]) -> frozenset[str]:
+        """Map exposed roster-entry (agent/tool) names to the providers they bind.
+
+        The exposed set is keyed by roster entry (``claude``, ``codex``), but a
+        deny targets a *provider* (``anthropic``, ``openai``).  Resolve each entry
+        through its ``provider_binding.default``; entries with no binding (harnesses)
+        contribute nothing.
+        """
+        names: set[str] = set()
+        for entry in exposed_entries:
+            agent = self._agents.get(entry)
+            binding = agent.provider_binding if agent else None
+            if binding and binding.default:
+                names.add(binding.default)
+        return frozenset(names)
+
     def compose_egress(
-        self, *, exposed_providers: frozenset[str] = frozenset()
+        self, *, exposed_credential_providers: frozenset[str] = frozenset()
     ) -> EgressProjection:
         """Project the roster into the shield's egress tiers.
 
@@ -321,11 +340,20 @@ class AgentRoster:
         [`egress_allow`][terok_executor.roster.types.Provider.egress_allow]
         (t30) into one [`EgressProjection`][terok_executor.roster.types.EgressProjection];
         both tuples are sorted and de-duplicated for a deterministic bundle.
+
+        *exposed_credential_providers* — roster-entry (agent/tool) names whose real
+        credential is exposed in-container; the providers they bind are left
+        reachable (see
+        [`deny_to_vault_hosts`][terok_executor.roster.loader.AgentRoster.deny_to_vault_hosts]).
         """
         provider_allow = {host for p in self._providers.values() for host in p.egress_allow}
         return EgressProjection(
             deny_to_vault=tuple(
-                sorted(self.deny_to_vault_hosts(exposed_providers=exposed_providers))
+                sorted(
+                    self.deny_to_vault_hosts(
+                        exposed_credential_providers=exposed_credential_providers
+                    )
+                )
             ),
             provider_allow=tuple(sorted(provider_allow)),
         )
