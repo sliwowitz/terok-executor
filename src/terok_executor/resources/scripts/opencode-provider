@@ -19,7 +19,6 @@ and reads TEROK_OC_{NAME}_* environment variables for configuration.
 import argparse
 import json
 import os
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -435,49 +434,17 @@ def main() -> int:
         merged = _merge_provider_config(existing_config or {}, update, config)
         _write_opencode_config(config, merged)
 
-    # Launch OpenCode
+    # Launch OpenCode.  Git identity is the caller's job — the generated
+    # ``blablador()`` / ``kisski()`` shell wrappers (and the ``*-acp`` env
+    # scripts on the ACP path) apply the task's authorship before this launcher
+    # runs, so it stays a pure config-translate-and-exec step, matching
+    # ``pi-provider`` and ``terok-native-provider``.
     cmd = ["opencode"] + opencode_args
     env = {**os.environ, "OPENCODE_CONFIG": str(_opencode_config_path(config))}
-
-    # Pinned-alias commands (e.g. ``blablador``) symlink straight to this
-    # launcher, bypassing the generated shell wrapper that applies the task's
-    # git authorship — so re-apply it here.  The wrapper-driven ``--provider``
-    # path (invoked as ``opencode-provider``) has already set the identity.
-    if os.path.basename(sys.argv[0]) != "opencode-provider":
-        return _launch_with_git_identity(config["name"], cmd, env)
-
     try:
         return subprocess.call(cmd, env=env)
     except FileNotFoundError:
         raise SystemExit("opencode not found. Rebuild the L1 CLI image to install it.")
-
-
-_GIT_IDENTITY_HELPER = "/usr/local/share/terok/terok-env-git-identity.sh"
-"""Shell helper defining ``_terok_apply_git_identity`` — the single source of the
-container's git author/committer policy (staged by the L1 Dockerfile)."""
-
-
-def _launch_with_git_identity(provider_name: str, cmd: list[str], env: dict[str, str]) -> int:
-    """Run *cmd* after applying the task's git authorship for *provider_name*.
-
-    Sources the shared shell helper so a pinned-alias launch commits under the
-    same author/committer the generated wrappers would have set — the provider
-    name doubles as the agent display name (``blablador`` → ``Blablador``),
-    matching the ACP wrapper.  Falls back to a plain launch when the helper is
-    absent (standalone images).
-    """
-    if not os.path.exists(_GIT_IDENTITY_HELPER):
-        return subprocess.call(cmd, env=env)
-    agent_name = provider_name[:1].upper() + provider_name[1:]
-    agent_email = f"noreply@{provider_name}.localhost"
-    shim = (
-        f". {shlex.quote(_GIT_IDENTITY_HELPER)} && "
-        '_terok_apply_git_identity "$1" "$2" && shift 2 && exec "$@"'
-    )
-    try:
-        return subprocess.call(["bash", "-c", shim, "bash", agent_name, agent_email, *cmd], env=env)
-    except FileNotFoundError:
-        raise SystemExit("bash not found; cannot apply git identity for the pinned alias.")
 
 
 if __name__ == "__main__":

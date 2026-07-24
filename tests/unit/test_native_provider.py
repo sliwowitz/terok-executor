@@ -5,10 +5,9 @@
 
 Covers the native-provider launcher (``terok-native-provider``) — the per-agent
 override *deliveries* (codex ``-c`` flags, vibe ``VIBE_PROVIDERS`` env), endpoint
-resolution, and argument parsing — plus the pinned-alias git-identity
-restoration in the ``opencode-provider`` launcher.  Both scripts are loaded by
-path because they ship into task containers rather than being exposed as Python
-modules.
+resolution, and argument parsing — plus the ``opencode-provider`` launcher's
+provider resolution.  Both scripts are loaded by path because they ship into
+task containers rather than being exposed as Python modules.
 """
 
 from __future__ import annotations
@@ -238,35 +237,6 @@ class TestEmit:
             np._emit(["bogus"])
 
 
-class TestPinnedAliasGitIdentity:
-    """``opencode-provider`` restores git authorship for symlinked pinned aliases."""
-
-    def test_applies_identity_via_shell_helper(
-        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When the helper is present, the launch runs through it with the alias identity."""
-        calls: list[list[str]] = []
-        monkeypatch.setattr(ocp.os.path, "exists", lambda _p: True)
-        monkeypatch.setattr(ocp.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
-        ocp._launch_with_git_identity("blablador", ["opencode", "run"], {})
-        cmd = calls[0]
-        # Provider name doubles as the git display name (blablador → Blablador).
-        assert cmd[0] == "bash"
-        assert "Blablador" in cmd
-        assert "noreply@blablador.localhost" in cmd
-        assert cmd[-2:] == ["opencode", "run"]
-
-    def test_falls_back_to_plain_launch_without_helper(
-        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Without the helper (standalone image), the binary launches directly."""
-        calls: list[list[str]] = []
-        monkeypatch.setattr(ocp.os.path, "exists", lambda _p: False)
-        monkeypatch.setattr(ocp.subprocess, "call", lambda cmd, env=None: calls.append(cmd) or 0)
-        ocp._launch_with_git_identity("blablador", ["opencode", "run"], {})
-        assert calls[0] == ["opencode", "run"]
-
-
 class TestOpencodeProviderSelection:
     """``opencode-provider --provider X`` must resolve X, not the argv[0] name.
 
@@ -294,6 +264,31 @@ class TestOpencodeProviderSelection:
         # Reaching the launch at all means resolution didn't raise on the argv[0]
         # name; the config it picked is blablador's, not "opencode-provider".
         assert "blablador" in launched["env"]["OPENCODE_CONFIG"]
+
+    def test_launch_is_plain_even_for_a_pinned_alias(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The launcher never applies git identity itself — that is the caller's job.
+
+        Invoked as the bare ``blablador`` symlink (``argv[0]=blablador``), it must
+        still exec ``opencode`` directly, with no ``bash`` identity shim wrapped
+        around it, so it stays consistent with ``pi-provider`` /
+        ``terok-native-provider``.  The generated ``blablador()`` wrapper and the
+        ``*-acp`` env scripts own authorship on the paths terok actually drives.
+        """
+        monkeypatch.setattr(ocp.sys, "argv", ["blablador"])
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
+        monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
+        monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
+        launched: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp.subprocess, "call", lambda cmd, env=None: launched.update(cmd=cmd) or 0
+        )
+        assert ocp.main() == 0
+        assert launched["cmd"][0] == "opencode"
+        assert "bash" not in launched["cmd"]
 
 
 class TestPiProvider:
