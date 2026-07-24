@@ -463,6 +463,8 @@ class AgentRunner:
         allow_debugger: bool = False,
         per_container: PerContainerResources | None = None,
         egress: EgressProjection | None = None,
+        project_allow: tuple[str, ...] = (),
+        override: tuple[str, ...] = (),
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
 
@@ -556,6 +558,12 @@ class AgentRunner:
                 [`ContainerEnvResult.egress`][terok_executor.container.env.ContainerEnvResult.egress].
                 ``None`` (default) writes empty tiers — shield still
                 enforces its own profile-based allowlists.
+            project_allow: Orchestrator-authored hosts for shield's t40
+                project-allow tier (git remote + custom domains), passed
+                straight through to the run spec.  Empty by default.
+            override: Orchestrator-authored hosts for shield's t10 break-glass
+                override tier (single host/IP each), above the security-deny.
+                Empty by default.
 
         Returns:
             The container name (same as *name*).
@@ -692,6 +700,8 @@ class AgentRunner:
             loopback_ports=loopback_ports,
             security_deny=egress.deny_to_vault,
             provider_allow=egress.provider_allow,
+            project_allow=project_allow,
+            override=override,
         )
 
         try:

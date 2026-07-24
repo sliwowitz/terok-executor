@@ -585,6 +585,26 @@ class TestLaunchPrepared:
         assert spec.sealed is True
         assert spec.extra_args == ("-p", "127.0.0.1:8080:8080")
 
+    def test_authored_tiers_reach_runspec(self, tmp_path: Path) -> None:
+        """project_allow / override map to the RunSpec t40 / t10 fields."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="terok-l1-cli:test",
+            command=["bash"],
+            name="terok-x",
+            task_dir=tmp_path,
+            project_allow=("github.com",),
+            override=("api.foo.com",),
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.project_allow == ("github.com",)
+        assert spec.override == ("api.foo.com",)
+
     def test_annotations_propagate_to_runspec(self, tmp_path: Path) -> None:
         """``annotations`` kwarg lands on RunSpec.annotations (typed channel
         the sandbox validates) — distinct from the freeform *extra_args*."""
