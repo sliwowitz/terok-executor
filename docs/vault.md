@@ -60,10 +60,7 @@ Each routed provider gets its own phantom token, minted at container
 launch:
 
 ```python
-tokens = {
-    name: db.create_token(scope, task_id, credential_set, name)
-    for name in routed_providers
-}
+tokens = {name: db.create_token(scope, task_id, credential_set, name) for name in routed_providers}
 ```
 
 The token broker resolves the route from the token's `provider` field, not from
