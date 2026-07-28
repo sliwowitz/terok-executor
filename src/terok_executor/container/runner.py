@@ -66,6 +66,9 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+_NO_EGRESS = EgressProjection()
+"""The empty projection: a launch with no roster-derived egress policy."""
+
 
 @dataclass(frozen=True)
 class WorkspaceProvision:
@@ -462,7 +465,7 @@ class AgentRunner:
         dossier_path: Path | str | None = None,
         allow_debugger: bool = False,
         per_container: PerContainerResources | None = None,
-        egress: EgressProjection | None = None,
+        egress: EgressProjection = _NO_EGRESS,
         project_allow: tuple[str, ...] = (),
         override: tuple[str, ...] = (),
     ) -> str:
@@ -678,7 +681,6 @@ class AgentRunner:
             if p is not None
         )
 
-        egress = egress or EgressProjection()
         spec = RunSpec(
             container_name=name,
             image=image,

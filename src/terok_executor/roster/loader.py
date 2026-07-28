@@ -346,15 +346,10 @@ class AgentRoster:
         reachable (see
         [`deny_to_vault_hosts`][terok_executor.roster.loader.AgentRoster.deny_to_vault_hosts]).
         """
+        deny = self.deny_to_vault_hosts(exposed_credential_providers=exposed_credential_providers)
         provider_allow = {host for p in self._providers.values() for host in p.egress_allow}
         return EgressProjection(
-            deny_to_vault=tuple(
-                sorted(
-                    self.deny_to_vault_hosts(
-                        exposed_credential_providers=exposed_credential_providers
-                    )
-                )
-            ),
+            deny_to_vault=tuple(sorted(deny)),
             provider_allow=tuple(sorted(provider_allow)),
         )
 
