@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a17.dev7+g7ec82992f"
-source = { git = "https://github.com/terok-ai/terok-sandbox.git?rev=refs%2Fpull%2F493%2Fhead#7ec82992f258491e9850a89704e774f7f3d72dba" }
+version = "0.5.0a17.dev9+gb2d2ae0d6"
+source = { git = "https://github.com/terok-ai/terok-sandbox.git?rev=refs%2Fpull%2F493%2Fhead#b2d2ae0d6f3ab154616be897d53f3d91f9d6d829" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2331,8 +2331,8 @@ dependencies = [
 
 [[package]]
 name = "terok-shield"
-version = "0.8.0a7.dev13+g53fc22682"
-source = { git = "https://github.com/terok-ai/terok-shield.git?rev=refs%2Fpull%2F406%2Fhead#53fc2268222b28ceb49cb4b8c74dbec87bb3fb7c" }
+version = "0.8.0a7.dev16+ga42e103f5"
+source = { git = "https://github.com/terok-ai/terok-shield.git?rev=refs%2Fpull%2F406%2Fhead#a42e103f5631504a79660b1d6323056ba9d31cd9" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
