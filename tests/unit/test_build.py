@@ -24,6 +24,7 @@ from terok_executor.container.build import (
     l0_image_tag,
     l1_image_tag,
     l1_sidecar_image_tag,
+    package_repo_hosts,
     prepare_build_context,
     render_l0,
     render_l1,
@@ -1470,6 +1471,24 @@ class TestKnownFamily:
         # A bad explicit ``family:`` is a config error, not an unknown image.
         with pytest.raises(BuildError, match="must be 'deb' or 'rpm'"):
             known_family("ubuntu:24.04", override="alpine")
+
+
+class TestPackageRepoHosts:
+    """The image layer's egress contribution: distro repo hosts by family."""
+
+    def test_families_map_to_their_repo_hosts(self) -> None:
+        assert "mirrors.fedoraproject.org" in package_repo_hosts("rpm")
+        assert "archive.ubuntu.com" in package_repo_hosts("deb")
+        assert "archive.ubuntu.com" not in package_repo_hosts("rpm")
+
+    def test_unknown_family_gets_generous_union(self) -> None:
+        """None (unrecognized base image) yields every family's hosts, deduplicated."""
+        union = package_repo_hosts(None)
+        assert set(package_repo_hosts("rpm")) | set(package_repo_hosts("deb")) == set(union)
+        assert len(union) == len(set(union))
+
+    def test_unlisted_family_string_yields_empty(self) -> None:
+        assert package_repo_hosts("apk") == ()
 
 
 class TestRenderFamilyAware:
