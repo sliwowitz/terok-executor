@@ -371,6 +371,20 @@ class RawProviderAuth(StrictModel):
         return self
 
 
+class RawEgress(StrictModel):
+    """``egress:`` — extra runtime destinations a provider legitimately reaches.
+
+    ``allow`` hosts feed the shield's ``provider_allow`` tier (t30) — traffic
+    the agent makes *directly* at runtime, additional to the vault-relayed API
+    host (e.g. telemetry or a model-listing endpoint).  Build-time fetches do
+    **not** belong here: image build runs before the shield attaches.
+    """
+
+    allow: list[str] = Field(
+        default_factory=list, description="Hosts allowed directly at egress (t30)"
+    )
+
+
 class RawProvider(StrictModel):
     """Full schema for one ``resources/providers/*.yaml`` file.
 
@@ -384,6 +398,9 @@ class RawProvider(StrictModel):
     path_upstreams: dict[str, str] = Field(default_factory=dict)
     oauth_refresh: RawOAuthRefresh | None = None
     shared_domain: bool = False
+    egress: RawEgress | None = Field(
+        default=None, description="Extra runtime egress hosts allowed at t30"
+    )
     serves: dict[str, str] = Field(
         default_factory=dict,
         description="Wire protocol → container-facing base path (LLM providers only)",
@@ -413,6 +430,7 @@ class RawProvider(StrictModel):
             path_upstreams=dict(self.path_upstreams),
             oauth_refresh=refresh,
             shared_domain=self.shared_domain,
+            egress_allow=tuple(self.egress.allow) if self.egress else (),
             serves=dict(self.serves),
             opencode_config=self.opencode.to_dataclass() if self.opencode else None,
             install_spec=self.install.to_dataclass() if self.install else None,
@@ -576,6 +594,7 @@ __all__ = [
     "RawAuthKey",
     "RawAutoApprove",
     "RawCapabilities",
+    "RawEgress",
     "RawGitIdentity",
     "RawHeadless",
     "RawHelp",

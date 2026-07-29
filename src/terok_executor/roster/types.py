@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal, get_args
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -309,6 +310,16 @@ class Provider:
     contract.
     """
 
+    egress_allow: tuple[str, ...] = ()
+    """Extra hosts this provider's runtime legitimately reaches *directly*.
+
+    Projected into the shield's ``provider_allow`` tier (t30) — distinct from
+    the vault-relayed API host in ``upstream``: these are *additional* runtime
+    destinations (telemetry, a model-listing endpoint, …) the agent reaches
+    without vault mediation.  Build-time fetches do **not** belong here: image
+    build is unshielded.  Empty for most providers.
+    """
+
     opencode_config: OpenCodeProviderConfig | None = None
     """OpenCode wrapper config when a harness drives this provider (Blablador,
     KISSKI, OpenRouter).  ``None`` for native LLM providers and tool providers,
@@ -358,3 +369,38 @@ class Provider:
         if mode is None:
             raise ValueError(f"Provider {self.name!r} declares no auth mode")
         return mode.header, mode.prefix, dict(mode.extra_headers)
+
+    def relayed_hosts(self) -> frozenset[str]:
+        """Every host the vault relays to for this provider.
+
+        The union of the ``upstream`` host, every ``path_upstreams`` override
+        host, and the OAuth-refresh ``token_url`` host when present — exactly
+        the hosts the agent must reach *only* through the loopback vault, and
+        thus the raw material for the shield's ``security_deny`` tier.  Values
+        that carry no parseable host are dropped.
+        """
+        urls = [self.upstream, *self.path_upstreams.values()]
+        if self.oauth_refresh and (token_url := self.oauth_refresh.get("token_url")):
+            urls.append(token_url)
+        return frozenset(host for url in urls if (host := urlsplit(url).hostname))
+
+
+@dataclass(frozen=True)
+class EgressProjection:
+    """Roster-derived egress policy for a task's shield bundle.
+
+    Produced by [`AgentRoster.compose_egress`][terok_executor.roster.loader.AgentRoster.compose_egress]
+    and handed (via the sandbox) to the shield's tier writer: ``deny_to_vault``
+    seeds the ``security_deny`` tier (t20), ``provider_allow`` the
+    ``provider_allow`` tier (t30).  Both tuples are sorted and de-duplicated so
+    the projection is deterministic across runs.
+    """
+
+    deny_to_vault: tuple[str, ...] = ()
+    """Relayed provider endpoints the agent may reach *only* through the vault,
+    denied directly at the egress firewall (shared-domain and exposed-credential
+    providers excluded)."""
+
+    provider_allow: tuple[str, ...] = ()
+    """Extra runtime-egress hosts the providers legitimately need
+    (``egress.allow`` in the roster), allowed at the egress firewall."""

@@ -15,26 +15,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .loader import (
         AgentRoster as AgentRoster,
+        EgressProjection as EgressProjection,
         MountDef as MountDef,
         SidecarSpec as SidecarSpec,
         VaultRoute as VaultRoute,
         load_roster as load_roster,
     )
 
-#: Names resolvable through this package.  Only ``AgentRoster`` is part
-#: of the stable public surface (re-exported as
-#: ``terok_executor.AgentRoster``); the rest stay importable here for
+#: Names resolvable through this package.  ``AgentRoster`` and its egress
+#: projection result ``EgressProjection`` are the stable public surface
+#: (re-exported as ``terok_executor.*``); the rest stay importable here for
 #: internal callers but are absent from ``__all__`` — reach for them via
 #: [`.loader`][terok_executor.roster.loader] when you need them.
 _LAZY: dict[str, str] = {
     "AgentRoster": ".loader",
+    "EgressProjection": ".loader",
     "MountDef": ".loader",
     "SidecarSpec": ".loader",
     "VaultRoute": ".loader",
     "load_roster": ".loader",
 }
 
-__all__ = ["AgentRoster"]
+__all__ = ["AgentRoster", "EgressProjection"]
 
 
 def __getattr__(name: str) -> object:

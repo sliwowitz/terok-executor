@@ -192,6 +192,20 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.gpus == "all"
 
+    def test_egress_projection_reaches_runspec(self, tmp_path: Path) -> None:
+        """The roster egress projection flows through assembly into RunSpec tiers."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test", follow=False)
+
+        spec = sandbox.run.call_args[0][0]
+        # Dedicated provider API hosts are denied direct (the vault relays them);
+        # shared-domain apexes are not.
+        assert "api.anthropic.com" in spec.security_deny
+        assert "gitlab.com" not in spec.security_deny
+
     def test_gpu_vendor_string_reaches_runspec(self, tmp_path: Path) -> None:
         """A comma-separated vendor string normalizes to a vendor tuple."""
         sandbox = _mock_sandbox()
@@ -570,6 +584,26 @@ class TestLaunchPrepared:
         assert spec.unrestricted is False
         assert spec.sealed is True
         assert spec.extra_args == ("-p", "127.0.0.1:8080:8080")
+
+    def test_authored_tiers_reach_runspec(self, tmp_path: Path) -> None:
+        """project_allow / override map to the RunSpec t40 / t10 fields."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+
+        runner.launch_prepared(
+            env={},
+            volumes=[],
+            image="terok-l1-cli:test",
+            command=["bash"],
+            name="terok-x",
+            task_dir=tmp_path,
+            project_allow=("github.com",),
+            override=("api.foo.com",),
+        )
+
+        spec = sandbox.run.call_args[0][0]
+        assert spec.project_allow == ("github.com",)
+        assert spec.override == ("api.foo.com",)
 
     def test_annotations_propagate_to_runspec(self, tmp_path: Path) -> None:
         """``annotations`` kwarg lands on RunSpec.annotations (typed channel

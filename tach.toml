@@ -161,6 +161,7 @@ depends_on = [
     "terok_executor.credentials.vault_config",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
+    "terok_executor.roster.types",
     "terok_executor.vault_addr",
 ]
 
@@ -179,6 +180,7 @@ depends_on = [
     "terok_executor.paths",
     "terok_executor.provider.agents",
     "terok_executor.provider.instructions", "terok_executor.roster",
+    "terok_executor.roster.types",
 ]
 
 # ── credentials/ — authentication + vault ────────────────

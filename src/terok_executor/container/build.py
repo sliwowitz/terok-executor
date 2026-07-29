@@ -412,6 +412,51 @@ def known_family(base_image: str, override: str | None = None) -> str | None:
     return None
 
 
+#: Package-repository hosts per package family — the egress a task needs so
+#: in-container ``dnf``/``apt`` installs keep working under a shield-up
+#: posture.  Anchored on the officially tested bases (fedora, ubuntu,
+#: quay.io/podman, NVIDIA HPC) plus the common ``family:``-override distros
+#: (Rocky/Alma).  Hostname allowlists cannot cover community mirror pools;
+#: the fedoraproject/rockylinux/almalinux entries include the metalink and
+#: primary-download hosts, and on the dnsmasq DNS tier any *.fedoraproject.org
+#: subdomain is admitted by suffix match.
+_PACKAGE_REPO_HOSTS: dict[str, tuple[str, ...]] = {
+    "rpm": (
+        "mirrors.fedoraproject.org",
+        "dl.fedoraproject.org",
+        "download.fedoraproject.org",
+        "registry.fedoraproject.org",
+        "mirrors.rockylinux.org",
+        "dl.rockylinux.org",
+        "mirrors.almalinux.org",
+        "repo.almalinux.org",
+        "cdn-ubi.redhat.com",
+        "developer.download.nvidia.com",
+    ),
+    "deb": (
+        "archive.ubuntu.com",
+        "security.ubuntu.com",
+        "ports.ubuntu.com",
+        "deb.debian.org",
+        "security.debian.org",
+        "developer.download.nvidia.com",
+    ),
+}
+
+
+def package_repo_hosts(family: str | None) -> tuple[str, ...]:
+    """OS package-repository hosts for a package *family* (``deb``/``rpm``).
+
+    The image layer's contribution to a task's egress allowlist: the distro
+    repo endpoints in-container ``dnf``/``apt`` need at runtime.  ``None``
+    (unrecognized base image) returns the union of every family — generous
+    by design, since the caller cannot know which repos the image uses.
+    """
+    if family is None:
+        return tuple(dict.fromkeys(h for hosts in _PACKAGE_REPO_HOSTS.values() for h in hosts))
+    return _PACKAGE_REPO_HOSTS.get(family, ())
+
+
 def detect_family(base_image: str, override: str | None = None) -> str:
     """Resolve the package family for *base_image*, raising for unknown images.
 

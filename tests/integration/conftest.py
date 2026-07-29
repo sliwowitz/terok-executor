@@ -173,7 +173,10 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
 
     The vault DB is a real SQLCipher file opened with a throwaway passphrase
     (the operator's own passphrase chain is never consulted, and their vault
-    is never opened).  ``SandboxConfig`` is patched only where the env
+    is never opened).  The passphrase rides the ``passphrase_command`` tier —
+    sandbox removed the plaintext config tier in terok-sandbox#461 — with the
+    keyring tier switched off so nothing above it can reach the operator's
+    Secret Service.  ``SandboxConfig`` is patched only where the env
     assembler constructs one implicitly — see the module docstring.
     """
     env = ExecutorEnv(
@@ -181,7 +184,8 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
             state_dir=tmp_path / "state",
             vault_dir=tmp_path / "vault",
             config_dir=tmp_path / "config",
-            credentials_passphrase=INTEGRATION_VAULT_PASSPHRASE,
+            credentials_use_keyring=False,
+            credentials_passphrase_command=f"printf %s {INTEGRATION_VAULT_PASSPHRASE}",
         ),
         mounts_dir=tmp_path / "mounts",
         task_dir=tmp_path / "task",

@@ -28,6 +28,7 @@ from typing import IO, TYPE_CHECKING, cast
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
 from terok_executor.paths import container_state_dir
+from terok_executor.roster.types import EgressProjection
 
 from .build import BuildError, ImageBuilder
 
@@ -64,6 +65,9 @@ if TYPE_CHECKING:
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
+
+_NO_EGRESS = EgressProjection()
+"""The empty projection: a launch with no roster-derived egress policy."""
 
 
 @dataclass(frozen=True)
@@ -461,6 +465,9 @@ class AgentRunner:
         dossier_path: Path | str | None = None,
         allow_debugger: bool = False,
         per_container: PerContainerResources | None = None,
+        egress: EgressProjection = _NO_EGRESS,
+        project_allow: tuple[str, ...] = (),
+        override: tuple[str, ...] = (),
     ) -> str:
         """Launch a container from a caller-prepared env, volumes, image, and command.
 
@@ -549,6 +556,17 @@ class AgentRunner:
                 binding on identical ports.  Default ``None`` allocates
                 internally (the standalone path, and external callers
                 that assemble env without per-container routing).
+            egress: Roster egress projection for shield's generated t20 /
+                t30 tiers, from
+                [`ContainerEnvResult.egress`][terok_executor.container.env.ContainerEnvResult.egress].
+                ``None`` (default) writes empty tiers — shield still
+                enforces its own profile-based allowlists.
+            project_allow: Orchestrator-authored hosts for shield's t40
+                project-allow tier (git remote + custom domains), passed
+                straight through to the run spec.  Empty by default.
+            override: Orchestrator-authored hosts for shield's t10 break-glass
+                override tier (single host/IP each), above the security-deny.
+                Empty by default.
 
         Returns:
             The container name (same as *name*).
@@ -682,6 +700,10 @@ class AgentRunner:
             annotations=spec_annotations,
             runtime=runtime,
             loopback_ports=loopback_ports,
+            security_deny=egress.deny_to_vault,
+            provider_allow=egress.provider_allow,
+            project_allow=project_allow,
+            override=override,
         )
 
         try:
@@ -965,6 +987,9 @@ class AgentRunner:
                 volumes.append(
                     VolumeSpec(provision.host_dir, "/workspace", sharing=Sharing.PRIVATE)
                 )
+            # Sidecar tools carry the real API key directly (no vault relay), so
+            # their provider host must stay reachable — no generated deny tier.
+            egress = EgressProjection()
         else:
             # Agent modes: full env assembly via canonical builder
             agent_config_dir = self._prepare_agent_config(
@@ -1009,6 +1034,7 @@ class AgentRunner:
                 per_container=per_container,
             )
             env = dict(result.env)
+            egress = result.egress
             if provision.gate_token is not None:
                 # The launch path wires this into the supervisor sidecar.
                 env["TEROK_GATE_TOKEN"] = provision.gate_token
@@ -1065,6 +1091,7 @@ class AgentRunner:
             dossier_path=dossier_path,
             allow_debugger=allow_debugger,
             per_container=per_container,
+            egress=egress,
         )
 
         # Follow output if requested

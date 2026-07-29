@@ -9,7 +9,7 @@
 # the symlink in ``pi-env.sh`` — Pi only discovers ``*.ts``, not ``.mjs``)
 # points each materialized provider's ``baseUrl`` at the vault so Pi talks to
 # it instead of going to ``api.anthropic.com`` / ``api.openai.com`` direct.
-roster_version: 2
+roster_version: 3
 
 kind: harness
 label: Pi
