@@ -54,6 +54,9 @@ CONTAINER_AGENTS_MANIFEST_PATH = CONTAINER_TEROK_DIR / "agents.json"
 CONTAINER_CLAUDE_MEMORY_OVERRIDE = "/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
 """Literal shell path used in generated Claude wrapper memory override assertions."""
 
+CONTAINER_BIN_DIR = "/usr/local/bin"
+"""Container directory the roster's install snippets symlink pinned aliases into."""
+
 WORKSPACE_ROOT = Path("/workspace")
 """Canonical workspace root referenced in bundled instructions assertions."""
 
