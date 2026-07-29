@@ -200,5 +200,6 @@ class TestRawProviderEgress:
 
     def test_egress_strict_keys_reject_typo(self) -> None:
         """A typo inside ``egress`` fails fast (strict keys), not silently ignored."""
+        raw = self._raw({"egress": {"allwo": ["telemetry.x.com"]}})
         with pytest.raises(ValidationError):
-            RawProvider.model_validate(self._raw({"egress": {"allwo": ["telemetry.x.com"]}}))
+            RawProvider.model_validate(raw)
