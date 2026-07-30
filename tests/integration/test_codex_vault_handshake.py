@@ -14,12 +14,18 @@ What this gates on (at the trap):
 - **codex reached the vault at all** — a sudden client-side refusal of the phantom, or a
   base-url/config regression, shows up as *no capture*;
 - **the phantom swapped to the real key** — proves phantom-health + the auth *mechanism*
-  (codex sends `Authorization: Bearer <token>` in api_key mode) + end-to-end connectivity.
+  (codex sends `Authorization: Bearer <token>` in api_key mode) + end-to-end connectivity;
+- **the transport** — codex v0.146 is WS-first, so a `ws` upgrade to `/v1/responses`
+  must reach the trap (the leg terok's vault WS fix targets); a fallback to plain HTTP
+  would mean the WS path regressed;
+- **the client identity** — codex tags itself `originator: codex_exec`; a change flags a
+  codex protocol/identity drift worth knowing about.
 
-Reported (not yet gated): the transport (codex v0.146 is WS-first — `wss://{base}/responses`
-via a background prewarm — the leg terok's vault WS fix targets) and the `originator`
-identity header are emitted as a warning so v2 can harden them from real captures. The
-first matrix run confirmed the two gates pass; the originator canary was mis-calibrated.
+The transport + identity gates are calibrated from the first matrix run (codex v0.146
+`exec`): every capture was `ws /v1/responses` with `originator='codex_exec'` across all
+ten distro slots. (Note: the codex-rs *static* default is `codex_cli_rs`; the `exec`
+path overrides it to `codex_exec` — which is why an early guess against `codex_cli_rs`
+failed.) v2 will additionally capture a WS *frame* to assert the sentinel prompt survives.
 
 Scope (v1, per design): **api_key mode only** — that's what a current-shape phantom
 (`terok-p-<hex>`) supports (oauth mode JWT-decodes the token and hits a hardcoded
@@ -52,7 +58,6 @@ import os
 import threading
 import time
 import uuid
-import warnings
 from pathlib import Path
 
 import pytest
@@ -295,16 +300,14 @@ def test_real_codex_phantom_swaps_and_reaches_the_vault(
     assert any(c["auth"] == f"Bearer {REAL_SECRET}" for c in vault.captures), (
         f"phantom did not swap to the real key at the trap; captures={vault.captures}"
     )
-    # Transport + identity are reported, not yet gated: the first matrix run showed the
-    # core passes but the originator canary needs calibrating against what codex actually
-    # sends. Surface it as a warning (visible in the matrix warnings summary) so v2 can
-    # harden the WebSocket + originator canaries from real data rather than a guess.
-    warnings.warn(
-        "codex vault canary — "
-        + "; ".join(
-            f"{c['kind']} {c['path']} originator={c['originator']!r} "
-            f"ua={c['user_agent']!r} version={c['version']!r}"
-            for c in vault.captures
-        ),
-        stacklevel=2,
+    # Transport + identity gates, calibrated from the first matrix run (codex v0.146
+    # exec, all ten slots): codex goes WS-first to /v1/responses and tags itself
+    # `codex_exec`. A regression here means codex changed its transport or client
+    # identity — exactly what this canary exists to catch.
+    assert any(c["kind"] == "ws" and c["path"] == "/v1/responses" for c in vault.captures), (
+        "expected a WebSocket upgrade to /v1/responses (codex v0.146 is WS-first); a plain "
+        f"HTTP fallback would mean the WS path regressed. captures={vault.captures}"
+    )
+    assert any(c["originator"] == "codex_exec" for c in vault.captures), (
+        f"codex originator is no longer 'codex_exec' — client identity drift; captures={vault.captures}"
     )
