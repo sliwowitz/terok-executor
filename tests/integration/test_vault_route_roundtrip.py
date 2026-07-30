@@ -137,7 +137,10 @@ def test_generated_phantom_round_trips_to_the_real_key(
     monkeypatch.setattr(
         SandboxConfig,
         "resolve_passphrase_with_source",
-        lambda _self: (INTEGRATION_VAULT_PASSPHRASE, "integration"),
+        lambda _self, **_kw: (
+            INTEGRATION_VAULT_PASSPHRASE,
+            "integration",
+        ),  # **_kw tolerates credentials_db/prompt_on_tty
     )
 
     seen_auth = asyncio.run(

@@ -248,7 +248,10 @@ def test_generated_base_url_reaches_the_vault_via_the_socat_bridge(
     monkeypatch.setattr(
         SandboxConfig,
         "resolve_passphrase_with_source",
-        lambda _self: (INTEGRATION_VAULT_PASSPHRASE, "integration"),
+        lambda _self, **_kw: (
+            INTEGRATION_VAULT_PASSPHRASE,
+            "integration",
+        ),  # **_kw tolerates credentials_db/prompt_on_tty
     )
     host_socket = tmp_path / "vault.sock"
     with _ThreadedVault(

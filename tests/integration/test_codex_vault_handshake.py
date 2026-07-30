@@ -252,7 +252,10 @@ def test_real_codex_phantom_swaps_and_reaches_the_vault(
     monkeypatch.setattr(
         SandboxConfig,
         "resolve_passphrase_with_source",
-        lambda _self: (INTEGRATION_VAULT_PASSPHRASE, "integration"),
+        lambda _self, **_kw: (
+            INTEGRATION_VAULT_PASSPHRASE,
+            "integration",
+        ),  # **_kw tolerates credentials_db/prompt_on_tty
     )
     host_socket = tmp_path / "vault.sock"
     name = unique_container_name("codex-handshake")
