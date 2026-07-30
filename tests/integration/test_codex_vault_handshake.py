@@ -99,13 +99,16 @@ class _TrappingVault:
         self._loop = None
         self._thread: threading.Thread | None = None
         self._runners: list[web.AppRunner] = []
+        self._startup_error: BaseException | None = None
 
     def __enter__(self) -> _TrappingVault:
         ready = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(ready,), daemon=True)
         self._thread.start()
         if not ready.wait(15):
-            raise RuntimeError("vault/trap did not come up on the background loop")
+            raise RuntimeError("vault/trap did not signal ready within 15s")
+        if self._startup_error is not None:
+            raise RuntimeError("vault/trap startup failed") from self._startup_error
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -119,7 +122,14 @@ class _TrappingVault:
 
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._start())
+        try:
+            self._loop.run_until_complete(self._start())
+        except Exception as exc:  # noqa: BLE001 — surfaced to __enter__, not lost as a timeout
+            self._startup_error = exc
+            self._loop.run_until_complete(self._cleanup())
+            self._loop.close()
+            ready.set()
+            return
         ready.set()
         try:
             self._loop.run_forever()
@@ -153,6 +163,7 @@ class _TrappingVault:
         trap_app.router.add_route("*", "/{tail:.*}", _trap)
         trap_runner = web.AppRunner(trap_app)
         await trap_runner.setup()
+        self._runners.append(trap_runner)  # track as started so a later failure still cleans up
         trap_site = web.TCPSite(trap_runner, host="127.0.0.1", port=0)
         await trap_site.start()
         trap_port = trap_site._server.sockets[0].getsockname()[1]  # type: ignore[attr-defined]
@@ -170,10 +181,10 @@ class _TrappingVault:
 
         broker_runner = web.AppRunner(_build_app(str(self._db_path), str(self._routes_path)))
         await broker_runner.setup()
+        self._runners.append(broker_runner)
         broker_site = web.UnixSite(broker_runner, path=str(self._socket_path))
         await broker_site.start()
         os.chmod(self._socket_path, 0o666)  # noqa: S103 — per-test tmp socket, container peer UID
-        self._runners = [broker_runner, trap_runner]
 
     async def _cleanup(self) -> None:
         for runner in self._runners:

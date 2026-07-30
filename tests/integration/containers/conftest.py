@@ -121,22 +121,24 @@ def shell_test_image(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     stage_scripts(build_dir / "scripts")
     stage_tmux_config(build_dir / "tmux")
 
-    # Build L0 from the real template.
-    _podman_build(build_dir / "L0.Dockerfile", ITEST_L0_IMAGE, build_dir)
+    # Build + yield inside try/finally so a failure of the *second* build still removes
+    # the first image — otherwise a partially-built L0 leaks tagged across CI attempts.
+    # ``podman rmi -f`` on a never-built tag is a harmless no-op.
+    try:
+        _podman_build(build_dir / "L0.Dockerfile", ITEST_L0_IMAGE, build_dir)
 
-    # Write and build the shell-init layer.
-    shell_df = build_dir / "Shell.Dockerfile"
-    shell_df.write_text(_SHELL_INIT_DOCKERFILE)
-    _podman_build(
-        shell_df,
-        ITEST_SHELL_IMAGE,
-        build_dir,
-        build_args={"BASE": ITEST_L0_IMAGE},
-        timeout=120,
-    )
+        # Write and build the shell-init layer.
+        shell_df = build_dir / "Shell.Dockerfile"
+        shell_df.write_text(_SHELL_INIT_DOCKERFILE)
+        _podman_build(
+            shell_df,
+            ITEST_SHELL_IMAGE,
+            build_dir,
+            build_args={"BASE": ITEST_L0_IMAGE},
+            timeout=120,
+        )
 
-    yield ITEST_SHELL_IMAGE
-
-    # Cleanup: remove both images (ignore errors if already removed).
-    for tag in (ITEST_SHELL_IMAGE, ITEST_L0_IMAGE):
-        subprocess.run(["podman", "rmi", "-f", tag], capture_output=True, timeout=30)
+        yield ITEST_SHELL_IMAGE
+    finally:
+        for tag in (ITEST_SHELL_IMAGE, ITEST_L0_IMAGE):
+            subprocess.run(["podman", "rmi", "-f", tag], capture_output=True, timeout=30)
