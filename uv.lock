@@ -2300,8 +2300,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a21.dev458+g3ca0025aa"
-source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=feat%2Flandlock-write-confinement#3ca0025aa3c3814a9d071f6547970e63ed07aea2" }
+version = "0.5.0a21.dev459+g513b81de7"
+source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=feat%2Flandlock-write-confinement#513b81de7c53e73d86241d9a48a8a467cbc0952b" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
