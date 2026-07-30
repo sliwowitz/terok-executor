@@ -1107,7 +1107,7 @@ SETUP_COMMAND = CommandDef(
             default=None,
             help=(
                 "Force credentials-DB passphrase storage to a specific tier"
-                " (systemd-creds | keyring | session-file); required"
+                " (systemd-creds | keyring | kernel-keyring); required"
                 " on a non-TTY host without systemd-creds"
             ),
         ),
