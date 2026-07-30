@@ -15,6 +15,7 @@ from terok_executor.doctor import (
     _make_ssh_bridge_check,
     _make_vault_bridge_check,
 )
+from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
 
 TOKEN_BROKER_PORT = 18731
@@ -72,7 +73,7 @@ class TestVaultBridgeCheck:
     def test_socket_mode_probes_mounted_vault_socket(self) -> None:
         check = _make_vault_bridge_check(socket_mode=True)
         probe = " ".join(check.probe_cmd)
-        assert "/run/terok/vault.sock" in probe
+        assert CONTAINER_VAULT_SOCKET in probe
         assert "vault-loopback.pid" in probe
 
     def test_tcp_mode_probes_local_bridge_socket(self) -> None:

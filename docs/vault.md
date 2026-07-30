@@ -101,8 +101,8 @@ The config-patch mechanism writes the vault socket path into
 `~/.config/gh/config.yml` after `terok-executor auth gh` — the
 `{vault_socket}` template token, resolved per transport mode:
 
-- **socket mode**: `/run/terok/vault.sock` — the supervisor's vault
-  socket, bind-mounted into the container.
+- **socket mode**: `/run/terok/vault/vault.sock` — the supervisor's vault
+  socket, exposed through the read-only runtime-tree mount.
 - **TCP mode**: `/tmp/terok-vault.sock` — a socat bridge started by
   terok-sandbox's `ensure-bridges.sh`, forwarding to
   `host.containers.internal:${TEROK_TOKEN_BROKER_PORT}`.
@@ -197,8 +197,9 @@ block and have no agent YAML at all).
   for this because it's a routing concern, not a credential concern.
 
 - **socat bridges**: terok-sandbox's `ensure-bridges.sh` runs in-container.
-  In socket mode the broker socket is bind-mounted at
-  `/run/terok/vault.sock` and the bridge fronts it as TCP on
+  In socket mode the broker socket is exposed at
+  `/run/terok/vault/vault.sock` through the read-only runtime-tree mount,
+  and the bridge fronts it as TCP on
   `localhost:9419` for HTTP-only clients.  In TCP mode the bridge is
   reversed: it presents `/tmp/terok-vault.sock` for socket-only clients
   and forwards `localhost:9419` to the per-container host port.
