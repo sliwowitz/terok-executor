@@ -37,7 +37,10 @@ lives at ``terok.lib.integrations.*``).
 
 from terok_sandbox import (  # noqa: F401 — re-exported public API
     CODEX_SHARED_OAUTH_MARKER,
+    CONTAINER_GATE_SOCKET,
     CONTAINER_RUNTIME_DIR,
+    CONTAINER_SSH_SIGNER_SOCKET,
+    CONTAINER_VAULT_SOCKET,
     PHANTOM_CREDENTIALS_MARKER,
     READY_MARKER,
     ConfigScope,
@@ -92,7 +95,10 @@ from terok_sandbox.doctor import CheckVerdict, DoctorCheck  # noqa: F401 — re-
 __all__ = [
     "CODEX_SHARED_OAUTH_MARKER",
     "COMMANDS",
+    "CONTAINER_GATE_SOCKET",
     "CONTAINER_RUNTIME_DIR",
+    "CONTAINER_SSH_SIGNER_SOCKET",
+    "CONTAINER_VAULT_SOCKET",
     "PHANTOM_CREDENTIALS_MARKER",
     "READY_MARKER",
     "CheckVerdict",

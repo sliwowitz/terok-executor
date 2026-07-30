@@ -23,9 +23,9 @@ every layer imports the same value.
 
 from __future__ import annotations
 
-from terok_executor.integrations.sandbox import CONTAINER_RUNTIME_DIR
+from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET as _CONTAINER_VAULT_SOCKET
 
-CONTAINER_VAULT_SOCKET = f"{CONTAINER_RUNTIME_DIR}/vault.sock"
+CONTAINER_VAULT_SOCKET = _CONTAINER_VAULT_SOCKET
 """Host vault socket as seen inside the container (socket mode only)."""
 
 LOOPBACK_BRIDGE_SOCKET = "/tmp/terok-vault.sock"  # nosec B108 — container-only path

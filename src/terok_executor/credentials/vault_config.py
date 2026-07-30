@@ -267,9 +267,9 @@ def resolve_vault_location(token_broker_port: int | None = None) -> VaultLocatio
     — the bridge runs in both transports and forwards to the
     transport-specific target (host unix socket or per-container host
     TCP port).  *token_broker_port* picks the socket-facade shape for
-    socket-only clients: ``/run/terok/vault.sock`` in socket mode (the
-    bind-mounted host socket), ``/tmp/terok-vault.sock`` in TCP mode
-    (in-container socat unix→host-TCP).
+    socket-only clients: ``/run/terok/vault/vault.sock`` in socket mode
+    (exposed through the read-only runtime-tree mount),
+    ``/tmp/terok-vault.sock`` in TCP mode (in-container socat unix→host-TCP).
     """
     from terok_executor.vault_addr import (
         CONTAINER_VAULT_SOCKET,

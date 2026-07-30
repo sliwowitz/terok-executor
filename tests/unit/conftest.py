@@ -38,9 +38,8 @@ TEST_VAULT_PASSPHRASE = "unit-test-passphrase"  # nosec: B105 — fixture, not a
 
 
 # Terok-specific env vars that override path resolution.  The autouse
-# isolation fixture unsets each so resolution falls back through the
-# tmp-rooted ``HOME`` / ``XDG_*`` chain — never to the operator's real
-# state.
+# isolation fixture clears them before applying its own isolated values;
+# most paths then fall through the tmp-rooted ``HOME`` / ``XDG_*`` chain.
 _TEROK_PATH_OVERRIDE_ENV_VARS = (
     "TEROK_CONFIG_DIR",
     "TEROK_STATE_DIR",
@@ -84,6 +83,11 @@ def _isolate_user_paths(
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(fake_home / "run"))
     for var in _TEROK_PATH_OVERRIDE_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+    # pytest's nested tmp path plus the normal XDG namespace can exceed
+    # Linux's AF_UNIX pathname limit once the per-service lanes are added.
+    # Keep the runtime root short but still isolated beneath this test's
+    # fake home.
+    monkeypatch.setenv("TEROK_SANDBOX_RUNTIME_DIR", str(fake_home / "r"))
     # ``terok_executor.cli`` mutates ``os.environ["TEROK_CONFIG_FILE"]``
     # for ``--config`` / ``--raw`` directly (not via monkeypatch), so an
     # earlier in-process ``_run_cli`` would leak across tests.
