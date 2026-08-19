@@ -30,13 +30,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from terok_executor._util import detect_host_timezone
-from terok_executor.integrations.sandbox import Sharing, VolumeSpec
+from terok_executor.integrations.sandbox import (
+    CONTAINER_SSH_SIGNER_SOCKET,
+    CONTAINER_VAULT_SOCKET,
+    Sharing,
+    VolumeSpec,
+)
 from terok_executor.roster.types import EgressProjection
 
-_CONTAINER_RUNTIME_DIR = "/run/terok"
-"""Container-side mount point — must match [`terok_sandbox.CONTAINER_RUNTIME_DIR`][terok_sandbox.CONTAINER_RUNTIME_DIR]."""
-
-CONTAINER_PROTOCOL = 1
+CONTAINER_PROTOCOL = 2
 """Version of the host↔container env/script contract.
 
 Emitted to every container as ``TEROK_CONTAINER_PROTOCOL``.  In-container
@@ -646,7 +648,7 @@ def _inject_vault_tokens(
         # + ad-hoc callers that don't pass one.  In production the runner
         # always provides ``per_container`` so concurrent containers get
         # distinct ports.
-        port = (
+        allocated_port = (
             per_container.token_broker_port if per_container is not None else cfg.token_broker_port
         )
     except Exception:
@@ -658,6 +660,7 @@ def _inject_vault_tokens(
         db.close()
 
     use_socket = vault_transport == "socket"
+    port = None if use_socket else allocated_port
     # Resolve the single container-side vault address used by every
     # socket/URL injection below.  Socket mode points at the mounted host
     # socket + a loopback HTTP bridge; TCP mode points at the broker's TCP
@@ -707,7 +710,9 @@ def _inject_vault_tokens(
             env["GITLAB_API_HOST"] = host_tcp if host_tcp else f"localhost:{LOOPBACK_VAULT_PORT}"
 
     if routed:
-        if port:
+        if use_socket:
+            env["TEROK_VAULT_SOCKET"] = CONTAINER_VAULT_SOCKET
+        elif port:
             env["TEROK_TOKEN_BROKER_PORT"] = str(port)
         # The in-container loopback bridge runs in both transports
         # (socat unix→vault.sock or socat tcp→host:broker), so the URL
@@ -718,7 +723,7 @@ def _inject_vault_tokens(
     if ssh_token:
         env["TEROK_SSH_SIGNER_TOKEN"] = ssh_token
         if use_socket:
-            env["TEROK_SSH_SIGNER_SOCKET"] = f"{_CONTAINER_RUNTIME_DIR}/ssh-agent.sock"
+            env["TEROK_SSH_SIGNER_SOCKET"] = CONTAINER_SSH_SIGNER_SOCKET
         else:
             # Per-container port (production); fallback to cfg (tests).
             # See ``port`` resolution above for the same shape.

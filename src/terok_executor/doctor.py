@@ -123,7 +123,7 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
     (for socket-only clients).
     """
     if socket_mode:
-        label = "Vault loopback bridge (TCP → /run/terok/vault.sock)"
+        label = f"Vault loopback bridge (TCP → {CONTAINER_VAULT_SOCKET})"
         probe = (
             f"test -S {CONTAINER_VAULT_SOCKET}"
             f" && kill -0 $(cat {_VAULT_LOOPBACK_PIDFILE} 2>/dev/null) 2>/dev/null"

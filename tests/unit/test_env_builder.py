@@ -20,6 +20,10 @@ from terok_executor.container.env import (
     _shared_config_mounts,
     assemble_container_env,
 )
+from terok_executor.integrations.sandbox import (
+    CONTAINER_SSH_SIGNER_SOCKET,
+    CONTAINER_VAULT_SOCKET,
+)
 from terok_executor.roster import AgentRoster
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
@@ -157,6 +161,7 @@ class TestBaseEnv:
         from terok_executor.container.env import CONTAINER_PROTOCOL
 
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
+        assert CONTAINER_PROTOCOL == 2
         assert result.env["TEROK_CONTAINER_PROTOCOL"] == str(CONTAINER_PROTOCOL)
 
 
@@ -551,13 +556,15 @@ class TestVaultTokenInjection:
         assert "ANTHROPIC_API_KEY" not in result.env
 
     def test_vault_socket_transport_injects_socket_env(self, workspace, envs_dir, roster, tmp_path):
-        """Socket transport points socket_env at the mounted host vault socket."""
-        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=None)
+        """Socket transport ignores a stale configured TCP broker port."""
+        cfg = dataclasses.replace(_make_vault_db(tmp_path), token_broker_port=18731)
         spec = _spec(workspace, envs_dir, credential_scope="proj", vault_transport="socket")
         with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
-        assert result.env["ANTHROPIC_UNIX_SOCKET"] == "/run/terok/vault.sock"
+        assert result.env["ANTHROPIC_UNIX_SOCKET"] == CONTAINER_VAULT_SOCKET
+        assert result.env["TEROK_VAULT_SOCKET"] == CONTAINER_VAULT_SOCKET
+        assert "TEROK_TOKEN_BROKER_PORT" not in result.env
 
     def test_vault_direct_transport_points_socket_at_local_bridge(
         self, workspace, envs_dir, roster, tmp_path
@@ -569,6 +576,7 @@ class TestVaultTokenInjection:
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert result.env["ANTHROPIC_UNIX_SOCKET"] == "/tmp/terok-vault.sock"
+        assert "TEROK_VAULT_SOCKET" not in result.env
 
     def test_vault_socket_transport_omits_tcp_broker_env_when_port_none(
         self, workspace, envs_dir, roster, tmp_path
@@ -590,7 +598,8 @@ class TestVaultTokenInjection:
         # GITLAB_API_HOST is now always set for glab — but never with "None".
         assert not any("None" in v for v in result.env.values())
         # Socket transport uses the mounted host socket directly.
-        assert result.env.get("ANTHROPIC_UNIX_SOCKET") == "/run/terok/vault.sock"
+        assert result.env.get("ANTHROPIC_UNIX_SOCKET") == CONTAINER_VAULT_SOCKET
+        assert result.env.get("TEROK_VAULT_SOCKET") == CONTAINER_VAULT_SOCKET
         # The in-container loopback port is advertised so ensure-bridges.sh
         # stands up its TCP→UNIX bridge.
         assert result.env.get("TEROK_VAULT_LOOPBACK_PORT") == "9419"
@@ -665,7 +674,7 @@ class TestVaultTokenInjection:
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
         assert "TEROK_SSH_SIGNER_TOKEN" in result.env
-        assert result.env["TEROK_SSH_SIGNER_SOCKET"] == "/run/terok/ssh-agent.sock"
+        assert result.env["TEROK_SSH_SIGNER_SOCKET"] == CONTAINER_SSH_SIGNER_SOCKET
         assert "TEROK_SSH_SIGNER_PORT" not in result.env
 
     def test_vault_no_ssh_keys_omits_token(self, workspace, envs_dir, roster, tmp_path):

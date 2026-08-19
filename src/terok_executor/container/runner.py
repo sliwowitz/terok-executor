@@ -576,6 +576,8 @@ class AgentRunner:
                 NVIDIA CDI.
         """
         from terok_executor.integrations.sandbox import (
+            CONTAINER_GATE_SOCKET,
+            CONTAINER_RUNTIME_DIR,
             GpuConfigError,
             RunSpec,
             Sharing,
@@ -605,36 +607,55 @@ class AgentRunner:
         if per_container is None:
             per_container = allocate_per_container_resources(cfg, name)
 
-        # Bind-mount the per-container socket dir at /run/terok/.  The
-        # supervisor's later-bound vault.sock + ssh-agent.sock surface
-        # inside the container via this single mount (instead of two
-        # singleton file-mounts that two containers would collide on).
         env = dict(env)
         volumes = list(volumes)
-        volumes.append(
-            VolumeSpec(
-                per_container.container_runtime_dir,
-                "/run/terok",
-                sharing=Sharing.SHARED,
-                live=True,
+        gate_active = "TEROK_GATE_TOKEN" in env
+        if cfg.services_mode == "socket":
+            # The read-only runtime-tree mount exposes later-bound service
+            # sockets while preventing the agent from replacing socket inodes
+            # or gate runtime files.  TCP mode needs no runtime-tree access.
+            volumes.append(
+                VolumeSpec(
+                    per_container.container_runtime_dir,
+                    CONTAINER_RUNTIME_DIR,
+                    sharing=Sharing.SHARED,
+                    read_only=True,
+                    live=True,
+                )
             )
-        )
+
         # TCP-mode env vars carry the per-container port, not the
         # host-singleton ``cfg.token_broker_port`` — the launch flow
         # routes through the per-container ports only.
         if cfg.services_mode == "tcp":
+            env.pop("TEROK_VAULT_SOCKET", None)
+            env.pop("TEROK_SSH_SIGNER_SOCKET", None)
+            env.pop("TEROK_GATE_SOCKET", None)
             if per_container.token_broker_port is not None:
                 env["TEROK_TOKEN_BROKER_PORT"] = str(per_container.token_broker_port)
+            else:
+                env.pop("TEROK_TOKEN_BROKER_PORT", None)
             if per_container.ssh_signer_port is not None:
                 env["TEROK_SSH_SIGNER_PORT"] = str(per_container.ssh_signer_port)
-            if per_container.gate_port is not None:
+            else:
+                env.pop("TEROK_SSH_SIGNER_PORT", None)
+            if gate_active and per_container.gate_port is not None:
                 env["TEROK_GATE_PORT"] = str(per_container.gate_port)
+            else:
+                env.pop("TEROK_GATE_PORT", None)
+        else:
+            env.pop("TEROK_TOKEN_BROKER_PORT", None)
+            env.pop("TEROK_SSH_SIGNER_PORT", None)
+            env.pop("TEROK_GATE_PORT", None)
+            if gate_active:
+                env["TEROK_GATE_SOCKET"] = CONTAINER_GATE_SOCKET
+            else:
+                env.pop("TEROK_GATE_SOCKET", None)
 
-        # The gate is wired when the prepared env carries a gate token
-        # (set by ``_setup_gate`` / the orchestrator).  When active, the
-        # supervisor needs the mirror base path, the token, and — in TCP
-        # mode — the port to serve the gate in-process.
-        gate_active = "TEROK_GATE_TOKEN" in env
+        # The gate is wired only when the prepared env carries a token
+        # (set by ``_setup_gate`` / the orchestrator).  Its sidecar fields
+        # below follow the same predicate as the mutually exclusive
+        # socket/port bridge variables above.
 
         # Write the per-container supervisor sidecar before podman run.
         # The terok-sandbox OCI hook installed by ``terok-sandbox setup``
@@ -674,7 +695,7 @@ class AgentRunner:
         loopback_ports = tuple(
             p
             for p in (
-                per_container.gate_port,
+                per_container.gate_port if gate_active else None,
                 per_container.token_broker_port,
                 per_container.ssh_signer_port,
             )
@@ -1011,6 +1032,9 @@ class AgentRunner:
                 "agent_config_dir": agent_config_dir,
                 "envs_dir": mounts_base,
                 "timezone": timezone,
+                "vault_transport": (
+                    "socket" if self.sandbox.config.services_mode == "socket" else "direct"
+                ),
             }
             if human_name:
                 spec_kwargs["human_name"] = human_name

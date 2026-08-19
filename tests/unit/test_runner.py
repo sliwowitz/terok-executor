@@ -12,6 +12,10 @@ from unittest.mock import Mock, patch
 import pytest
 
 from terok_executor.container.runner import AgentRunner, _generate_task_id, _resolve_repo
+from terok_executor.integrations.sandbox import (
+    CONTAINER_GATE_SOCKET,
+    CONTAINER_RUNTIME_DIR,
+)
 
 
 class TestResolveRepo:
@@ -863,6 +867,7 @@ class TestLaunchPrepared:
         assert kwargs["gate_base_path"] == str(cfg.gate_base_path)
         # gate_port mirrors the per-container allocation (None in socket mode).
         assert "gate_port" in kwargs
+        assert sandbox.run.call_args[0][0].env["TEROK_GATE_SOCKET"] == CONTAINER_GATE_SOCKET
 
     def test_gate_fields_absent_without_token(self, tmp_path: Path) -> None:
         """No gate token in the env → no gate config in the sidecar."""
@@ -883,6 +888,7 @@ class TestLaunchPrepared:
         assert kwargs["gate_token"] is None
         assert kwargs["gate_base_path"] is None
         assert kwargs["gate_port"] is None
+        assert "TEROK_GATE_SOCKET" not in sandbox.run.call_args[0][0].env
 
 
 class TestLaunchPreparedSupervisorWiring:
@@ -929,7 +935,11 @@ class TestLaunchPreparedSupervisorWiring:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
-            env={},
+            env={
+                "TEROK_TOKEN_BROKER_PORT": "1",
+                "TEROK_SSH_SIGNER_PORT": "2",
+                "TEROK_GATE_PORT": "3",
+            },
             volumes=[],
             image="img",
             command=[],
@@ -973,7 +983,10 @@ class TestLaunchPreparedSupervisorWiring:
             return_value=fixed,
         ):
             runner.launch_prepared(
-                env={},
+                env={
+                    "TEROK_GATE_TOKEN": "terok-g-fixed",
+                    "TEROK_GATE_SOCKET": CONTAINER_GATE_SOCKET,
+                },
                 volumes=[],
                 image="img",
                 command=[],
@@ -985,9 +998,51 @@ class TestLaunchPreparedSupervisorWiring:
         assert spec.env["TEROK_TOKEN_BROKER_PORT"] == "51001"
         assert spec.env["TEROK_SSH_SIGNER_PORT"] == "51002"
         assert spec.env["TEROK_GATE_PORT"] == "51003"
+        assert "TEROK_GATE_SOCKET" not in spec.env
+        assert all(v.container_path != CONTAINER_RUNTIME_DIR for v in spec.volumes)
         # loopback_ports is the (gate, broker, ssh) listeners, all present in TCP mode.
         assert set(spec.loopback_ports) == {51001, 51002, 51003}
         assert len(spec.loopback_ports) == 3
+
+    def test_tcp_mode_omits_inactive_gate_transport(self, tmp_path: Path) -> None:
+        """TCP mode exposes neither gate transport without a gate token."""
+        from terok_sandbox import PerContainerResources, SandboxConfig
+
+        sandbox = _mock_sandbox()
+        sandbox.config = SandboxConfig(
+            state_dir=tmp_path / "state",
+            vault_dir=tmp_path / "credentials",
+            services_mode="tcp",
+        )
+        runner = AgentRunner(sandbox=sandbox)
+        fixed = PerContainerResources(
+            container_runtime_dir=Path("/run/terok/sandbox/run/c"),
+            token_broker_port=51101,
+            ssh_signer_port=51102,
+            gate_port=51103,
+        )
+
+        with patch(
+            "terok_executor.integrations.sandbox.allocate_per_container_resources",
+            return_value=fixed,
+        ):
+            runner.launch_prepared(
+                env={
+                    "TEROK_GATE_PORT": "3",
+                    "TEROK_GATE_SOCKET": CONTAINER_GATE_SOCKET,
+                },
+                volumes=[],
+                image="img",
+                command=[],
+                name="c",
+                task_dir=tmp_path,
+            )
+
+        spec = sandbox.run.call_args[0][0]
+        assert "TEROK_GATE_PORT" not in spec.env
+        assert "TEROK_GATE_SOCKET" not in spec.env
+        assert set(spec.loopback_ports) == {51101, 51102}
+        assert all(v.container_path != CONTAINER_RUNTIME_DIR for v in spec.volumes)
 
     def test_run_threads_one_per_container_through_env_and_launch(self, tmp_path: Path) -> None:
         """``_run`` allocates per-container resources ONCE and threads the same
@@ -1025,6 +1080,7 @@ class TestLaunchPreparedSupervisorWiring:
 
         def _spy_assemble(spec, roster, **kwargs):  # type: ignore[no-untyped-def]
             seen["per_container"] = kwargs.get("per_container")
+            seen["vault_transport"] = spec.vault_transport
             return real_assemble(spec, roster, **kwargs)
 
         with (
@@ -1042,12 +1098,35 @@ class TestLaunchPreparedSupervisorWiring:
         alloc.assert_called_once()
         # Env assembly saw the SAME instance the supervisor binds.
         assert seen["per_container"] is fixed
+        assert seen["vault_transport"] == "direct"
         spec = sandbox.run.call_args[0][0]
-        assert set(spec.loopback_ports) == {52001, 52002, 52003}
+        # No repository means no gate mirror, so only the broker and signer
+        # listeners belong in the allow-list.
+        assert set(spec.loopback_ports) == {52001, 52002}
 
-    def test_runtime_dir_mount_added(self, tmp_path: Path) -> None:
-        """A ``/run/terok`` bind-mount is always appended so the supervisor's
-        later-bound sockets surface inside the container via one mount."""
+    def test_run_derives_socket_vault_transport_from_sandbox(self, tmp_path: Path) -> None:
+        """Standalone socket mode selects socket transport for env assembly."""
+        import terok_executor.container.env as env_mod
+
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+        seen: dict[str, str] = {}
+        real_assemble = env_mod.assemble_container_env
+
+        def _spy_assemble(spec, roster, **kwargs):  # type: ignore[no-untyped-def]
+            seen["vault_transport"] = spec.vault_transport
+            return real_assemble(spec, roster, **kwargs)
+
+        with (
+            patch.object(env_mod, "assemble_container_env", _spy_assemble),
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+        ):
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="x", follow=False)
+
+        assert seen["vault_transport"] == "socket"
+
+    def test_socket_mode_adds_read_only_runtime_dir_mount(self, tmp_path: Path) -> None:
+        """Socket mode exposes the supervisor runtime tree read-only."""
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
@@ -1061,8 +1140,9 @@ class TestLaunchPreparedSupervisorWiring:
         )
 
         spec = sandbox.run.call_args[0][0]
-        mount = next(v for v in spec.volumes if v.container_path == "/run/terok")
+        mount = next(v for v in spec.volumes if v.container_path == CONTAINER_RUNTIME_DIR)
         assert mount is not None
+        assert mount.read_only is True
 
 
 class TestWaitForExit:
