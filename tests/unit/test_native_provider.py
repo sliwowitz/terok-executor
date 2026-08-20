@@ -31,7 +31,11 @@ import terok_executor.resources.scripts as _scripts_pkg
 _LOOPBACK = "http://localhost:9419"
 _OPENAI_RESPONSES_BASE = f"{_LOOPBACK}/v1"
 _OPENAI_CHAT_BASE = f"{_LOOPBACK}/api/v1"
+_BLABLADOR_MODEL = "alias-huge"
 _ROSSENDORF_MODEL = "deepseek-v4-flash"
+
+_PROVIDER_ENV_NAMES = frozenset({"TEROK_PROVIDER", "TEROK_PI_PROVIDER"})
+_PROVIDER_ENV_PREFIXES = ("TEROK_OC_", "TEROK_PROVIDER_")
 
 
 def _run_pi_extension(env: dict[str, str]) -> dict:
@@ -99,6 +103,14 @@ def ocp() -> ModuleType:
 def pp() -> ModuleType:
     """The loaded pi-provider launcher module."""
     return _load_script("pi-provider", "terok_pi_provider")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep staged-script tests independent of the enclosing Terok task."""
+    for name in tuple(os.environ):
+        if name in _PROVIDER_ENV_NAMES or name.startswith(_PROVIDER_ENV_PREFIXES):
+            monkeypatch.delenv(name)
 
 
 def _c_settings(args: list[str]) -> dict[str, str]:
@@ -289,6 +301,7 @@ class TestOpencodeProviderSelection:
         monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "blablador"])
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
@@ -315,6 +328,7 @@ class TestOpencodeProviderSelection:
         monkeypatch.setattr(ocp.sys, "argv", ["blablador"])
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
@@ -584,6 +598,7 @@ class TestOpencodeModelFetchFeedback:
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_DISPLAY_NAME", "Helmholtz Blablador")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
