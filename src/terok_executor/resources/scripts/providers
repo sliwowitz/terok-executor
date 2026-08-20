@@ -94,7 +94,7 @@ def main(argv: list[str]) -> int:
 
 
 def _read_manifest(path: Path) -> dict | None:
-    """Return a renderable readiness manifest, or ``None`` when it needs repair."""
+    """Load a renderable readiness manifest, or flag it for automatic repair."""
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -111,11 +111,27 @@ def _read_manifest(path: Path) -> dict | None:
         for pair in pairs
     ):
         return None
+    protocols = manifest.get("protocols", [])
+    if not isinstance(protocols, list):
+        return None
+    if any(
+        not isinstance(row, dict)
+        or not isinstance(row.get("protocol"), str)
+        or not _is_string_list(row.get("candidates"))
+        or not _is_string_list(row.get("authenticated"))
+        for row in protocols
+    ):
+        return None
     return manifest
 
 
+def _is_string_list(value: object) -> bool:
+    """Recognize a JSON array containing only strings."""
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def _regenerate_manifest() -> str:
-    """Run the L1 readiness generator and return a diagnostic when it reports one."""
+    """Regenerate readiness state with the L1 helper and return its diagnostic."""
     try:
         result = subprocess.run(  # nosec B603, B607 - fixed L1 command, no shell
             ["terok-agents"],

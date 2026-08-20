@@ -101,6 +101,7 @@ RUN set -eux; \
       sed -i '/^echo ">> init complete"$/i terok-agents || true' \
         /usr/local/bin/init-ssh-and-repo.sh; \
     fi; \
+    grep -qE '^[[:space:]]*terok-agents( |$)' /usr/local/bin/init-ssh-and-repo.sh; \
     chmod +x /usr/local/share/terok/terok-env-git-identity.sh \
              /usr/local/share/terok/terok-acp-env.sh \
              /usr/local/share/terok/terok-trust-workspace.py \

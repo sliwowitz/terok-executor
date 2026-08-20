@@ -53,6 +53,11 @@ def _provider_prefix(name: str) -> str:
     return f"TEROK_PROVIDER_{name.upper()}_"
 
 
+def _positive_integer(value: object) -> int | None:
+    """Normalize a positive, non-boolean integer token limit."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
     """Resolve provider configuration from environment variables or fallbacks.
 
@@ -131,8 +136,7 @@ def _declared_models(name: str) -> dict[str, dict[str, Any]]:
         if isinstance(name_value, str) and name_value:
             model["name"] = name_value
         for key in ("context_limit", "output_limit"):
-            value = metadata.get(key)
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            if (value := _positive_integer(metadata.get(key))) is not None:
                 model[key] = value
         models[model_id] = model
     return models
@@ -220,19 +224,11 @@ def _fetch_models(base_url: str, api_key: str) -> dict[str, dict[str, Any]] | No
                 name = item.get("name")
                 if isinstance(name, str) and name:
                     metadata["name"] = name
-                context_limit = item.get("context_window")
-                if (
-                    isinstance(context_limit, int)
-                    and not isinstance(context_limit, bool)
-                    and context_limit > 0
-                ):
+                context_limit = _positive_integer(item.get("context_window"))
+                if context_limit is not None:
                     metadata["context_limit"] = context_limit
-                output_limit = item.get("max_tokens")
-                if (
-                    isinstance(output_limit, int)
-                    and not isinstance(output_limit, bool)
-                    and output_limit > 0
-                ):
+                output_limit = _positive_integer(item.get("max_tokens"))
+                if output_limit is not None:
                     metadata["output_limit"] = output_limit
                 models[model_id] = metadata
 
@@ -366,10 +362,10 @@ def _get_configured_models(
                 metadata["name"] = raw["name"]
             limit = raw.get("limit")
             if isinstance(limit, dict):
-                if isinstance(limit.get("context"), int):
-                    metadata["context_limit"] = limit["context"]
-                if isinstance(limit.get("output"), int):
-                    metadata["output_limit"] = limit["output"]
+                if (context := _positive_integer(limit.get("context"))) is not None:
+                    metadata["context_limit"] = context
+                if (output := _positive_integer(limit.get("output"))) is not None:
+                    metadata["output_limit"] = output
             generic[model_id] = metadata
         return generic
     except (AttributeError, TypeError):

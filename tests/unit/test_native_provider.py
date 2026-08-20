@@ -407,6 +407,29 @@ class TestProviderModelMetadata:
             }
         }
 
+    def test_opencode_rejects_invalid_cached_limits(self, ocp: ModuleType) -> None:
+        """Cached limits obey the same positive, non-boolean contract as live metadata."""
+        config = {"name": "rossendorf"}
+        existing = {
+            "provider": {
+                "rossendorf": {
+                    "models": {
+                        "valid": {"limit": {"context": 120_000, "output": 8_192}},
+                        "boolean": {"limit": {"context": True, "output": False}},
+                        "nonpositive": {"limit": {"context": 0, "output": -1}},
+                        "noninteger": {"limit": {"context": 120_000.0, "output": "8192"}},
+                    }
+                }
+            }
+        }
+
+        assert ocp._get_configured_models(config, existing) == {
+            "valid": {"context_limit": 120_000, "output_limit": 8_192},
+            "boolean": {},
+            "nonpositive": {},
+            "noninteger": {},
+        }
+
     def test_pi_skips_discovery_and_preserves_declared_context(self) -> None:
         """Pi receives Rossendorf's 120k context and defaults only its unknown output."""
         result = _run_pi_extension(

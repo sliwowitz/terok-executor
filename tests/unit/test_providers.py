@@ -202,6 +202,28 @@ class TestSchemaStrictness:
 class TestUserProviderFiles:
     """Canonical and compatibility provider YAML layers produce usable endpoints."""
 
+    @pytest.mark.parametrize("stem", ["my-provider", "my_provider", "Rossendorf"])
+    def test_provider_filename_stem_must_form_a_portable_env_handle(
+        self, tmp_path: Path, stem: str
+    ) -> None:
+        """Unsupported provider names fail before generating unusable runtime variables."""
+        canonical = tmp_path / "providers"
+        canonical.mkdir()
+        (canonical / f"{stem}.yaml").write_text(
+            f"upstream: {EXAMPLE_PROVIDER_UPSTREAM}\nauth:\n  api_key: {{}}\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch(
+                "terok_executor.roster.loader._legacy_user_providers_dir",
+                return_value=tmp_path / "legacy",
+            ),
+            patch("terok_executor.roster.loader.providers_config_dir", return_value=canonical),
+            pytest.raises(ValueError, match=r"filename stem must match '\[a-z0-9\]\+'"),
+        ):
+            load_roster()
+
     def test_canonical_minimal_provider_is_harness_ready(self, tmp_path: Path) -> None:
         canonical = tmp_path / "providers"
         canonical.mkdir()

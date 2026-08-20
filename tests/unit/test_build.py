@@ -593,6 +593,7 @@ class TestTemplateRendering:
         """An agent refresh adds the checkpoint without replacing or rebuilding L0."""
         content = render_l1("terok-l0:test", family="deb")
         assert "grep -qE" in content
+        assert content.count("grep -qE") == 2
         assert "terok-agents( |$)" in content
         assert "sed -i" in content
         assert "terok-agents || true" in content

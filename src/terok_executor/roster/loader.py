@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.resources
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field, replace
@@ -54,6 +55,8 @@ _USER_AGENTS_DIR_NAME = "agents"
 _USER_PROVIDERS_DIR_NAME = "providers"
 _YAML_SUFFIX = ".yaml"
 _CONTAINER_HOME = "/home/dev"
+# Keep provider IDs aligned with ``pi-provider``'s alphanumeric env-handle parser.
+_PROVIDER_NAME_PATTERN = re.compile(r"[a-z0-9]+")
 
 ROSTER_VERSION = 3
 """Schema version of the agent-roster YAML format.
@@ -768,6 +771,12 @@ def _load_providers() -> dict[str, Provider]:
 
     providers: dict[str, Provider] = {}
     for name, data in sorted(raw.items()):
+        if _PROVIDER_NAME_PATTERN.fullmatch(name) is None:
+            raise ValueError(
+                f"Provider {name!r}: invalid provider name; the YAML filename stem must "
+                "match '[a-z0-9]+' (lowercase ASCII letters and digits only) so it can "
+                "be recovered by every runtime selector from its environment handle."
+            )
         try:
             spec = RawProvider.model_validate(data)
         except ValidationError as exc:

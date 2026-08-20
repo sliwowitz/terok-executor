@@ -127,7 +127,9 @@ separately in `resources/providers/`, with user overrides in
 ## Custom providers
 
 A provider is a runtime LLM endpoint, not an installable agent.  Its filename
-becomes the provider name.  For example, this provider is selected as
+stem becomes the provider name and must match `[a-z0-9]+` (lowercase ASCII
+letters and digits only), because every runtime selector recovers the name
+from its environment handle.  For example, this provider is selected as
 `rossendorf`:
 
 ```yaml title="~/.config/terok/providers/rossendorf.yaml"

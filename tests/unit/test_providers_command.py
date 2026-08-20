@@ -201,7 +201,41 @@ class TestLockedProviders:
 class TestManifestRecovery:
     """The command repairs stale L0 startup state from its current L1 generator."""
 
-    @pytest.mark.parametrize("initial", [None, "{broken json"])
+    @pytest.mark.parametrize(
+        "protocols",
+        [
+            {},
+            [None],
+            [{"protocol": 1, "candidates": [], "authenticated": []}],
+            [{"protocol": "openai-chat", "candidates": "openai", "authenticated": []}],
+            [{"protocol": "openai-chat", "candidates": [1], "authenticated": []}],
+            [{"protocol": "openai-chat", "candidates": [], "authenticated": "openai"}],
+            [{"protocol": "openai-chat", "candidates": [], "authenticated": [1]}],
+        ],
+    )
+    def test_malformed_protocols_view_needs_repair(
+        self, command: ModuleType, tmp_path: Path, protocols: object
+    ) -> None:
+        """Malformed protocol rows cannot leak garbage into the locked-provider view."""
+        manifest_path = tmp_path / "agents.json"
+        manifest_path.write_text(
+            json.dumps({"version": 2, "pairs": [], "protocols": protocols}),
+            encoding="utf-8",
+        )
+
+        assert command._read_manifest(manifest_path) is None
+
+    @pytest.mark.parametrize(
+        "initial",
+        [
+            pytest.param(None, id="missing"),
+            pytest.param("{broken json", id="invalid-json"),
+            pytest.param(
+                json.dumps({"pairs": [], "protocols": [{"authenticated": True}]}),
+                id="invalid-protocol-row",
+            ),
+        ],
+    )
     def test_missing_or_malformed_manifest_is_regenerated(
         self,
         command: ModuleType,
