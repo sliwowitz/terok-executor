@@ -167,7 +167,7 @@ class KrunHost:
           right default under crun (AI agents that refuse uid 0); under
           krun the session uid comes from which ``ssh user@…`` the
           operator picks.
-        - ``--dns 169.254.1.1`` — kept for shield-bypass; under
+        - ``--dns 169.254.1.1`` — kept for unshielded runs; under
           shield-up the bind-mounted resolv.conf overrides this anyway.
 
         Doesn't include ``--runtime krun`` itself or krun's microVM-sizing

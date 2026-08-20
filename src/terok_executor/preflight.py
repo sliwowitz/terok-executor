@@ -102,7 +102,7 @@ class Preflight:
 
         self._offer_ssh_key()
         self._offer_credentials()
-        self._note_shield_bypass()
+        self._note_shield_disabled()
 
         if all_ready and self.interactive:
             self._provider_hints()
@@ -198,12 +198,12 @@ class Preflight:
                 f"      Without credentials, {self.provider} will prompt for login on first turn."
             )
 
-    def _note_shield_bypass(self) -> None:
-        """Surface the bypass override when set — regular shield state is in sandbox-services."""
+    def _note_shield_disabled(self) -> None:
+        """Surface the kill-switch override when set — regular shield state is in sandbox-services."""
         from terok_executor.integrations.sandbox import check_environment
 
-        if check_environment().health == "bypass":
-            print("\n  Note: shield is in bypass mode — containers have unrestricted network")
+        if check_environment().health == "disabled":
+            print("\n  Note: shield is disabled — containers have unrestricted network")
 
     # ── Prerequisite probes ────────────────────────────────────────
 
@@ -269,11 +269,11 @@ class Preflight:
         # One SandboxConfig read keeps the probe from rebuilding it from
         # layered YAML on every call.
         cfg = SandboxConfig()
-        # "bypass" means the hooks are installed but the operator opted
-        # out — that's a ready environment (the bypass itself is surfaced
-        # as a warning by ``_note_shield_bypass``), so only a genuinely
-        # missing/broken environment fails the check.
-        if check_environment(cfg).health not in ("ok", "bypass"):
+        # "disabled" means the hooks are installed but the operator opted
+        # out — that's a ready environment (the kill-switch itself is
+        # surfaced as a warning by ``_note_shield_disabled``), so only a
+        # genuinely missing/broken environment fails the check.
+        if check_environment(cfg).health not in ("ok", "disabled"):
             return CheckResult("sandbox services", False, "missing: shield hooks")
         return CheckResult("sandbox services", True, "shield ready")
 

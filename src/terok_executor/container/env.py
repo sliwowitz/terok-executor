@@ -226,7 +226,7 @@ class ContainerEnvResult:
     """Assembled container environment ready for RunSpec construction.
 
     Not a ``RunSpec`` — omits launch-time concerns (container name, image,
-    command, GPU, shield bypass).  Callers add those and construct ``RunSpec``.
+    command, GPU, shield kill-switch).  Callers add those and construct ``RunSpec``.
     """
 
     env: dict[str, str]

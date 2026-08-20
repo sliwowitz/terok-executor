@@ -115,12 +115,12 @@ def test_sandbox_services_lists_missing(mock_env: MagicMock) -> None:
 
 
 @patch("terok_executor.integrations.sandbox.check_environment")
-def test_sandbox_services_bypass_is_ready(mock_env: MagicMock) -> None:
-    """``bypass`` health is a *ready* environment — the hooks are installed,
-    the operator merely opted out of egress filtering.  The bypass itself is
-    surfaced elsewhere as a warning, so the readiness verdict must pass rather
-    than report a missing service."""
-    mock_env.return_value = MagicMock(health="bypass")
+def test_sandbox_services_disabled_is_ready(mock_env: MagicMock) -> None:
+    """``disabled`` health is a *ready* environment — the hooks are installed,
+    the operator merely opted out of egress filtering.  The kill-switch itself
+    is surfaced elsewhere as a warning, so the readiness verdict must pass
+    rather than report a missing service."""
+    mock_env.return_value = MagicMock(health="disabled")
     r = _pf().check_sandbox_services()
     assert r.ok is True
     assert "shield" in r.message
