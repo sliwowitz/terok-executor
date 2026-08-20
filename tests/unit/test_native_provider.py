@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -29,6 +31,40 @@ import terok_executor.resources.scripts as _scripts_pkg
 _LOOPBACK = "http://localhost:9419"
 _OPENAI_RESPONSES_BASE = f"{_LOOPBACK}/v1"
 _OPENAI_CHAT_BASE = f"{_LOOPBACK}/api/v1"
+_ROSSENDORF_MODEL = "deepseek-v4-flash"
+
+
+def _run_pi_extension(env: dict[str, str]) -> dict:
+    """Execute the staged Pi extension under Node and return its registrations."""
+    extension = Path(_scripts_pkg.__file__).parent / "pi-vault-routes.ts"
+    source = f"""
+        import registerProviders from {json.dumps(extension.as_uri())};
+        const registrations = [];
+        let fetchCalls = 0;
+        globalThis.fetch = async () => {{
+            fetchCalls += 1;
+            return {{ ok: true, json: async () => ({{ data: [] }}) }};
+        }};
+        await registerProviders({{
+            registerProvider: (name, config) => registrations.push({{ name, config }}),
+        }});
+        process.stdout.write(JSON.stringify({{ registrations, fetchCalls }}));
+    """
+    try:
+        completed = subprocess.run(  # noqa: S603
+            ["node", "--experimental-strip-types", "--input-type=module", "-e", source],  # noqa: S607
+            check=True,
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"], "NODE_NO_WARNINGS": "1"} | env,
+        )
+    except FileNotFoundError:
+        pytest.skip("Node is unavailable for the staged Pi extension test")
+    except subprocess.CalledProcessError as exc:
+        if "experimental-strip-types" in exc.stderr and "bad option" in exc.stderr:
+            pytest.skip("Node 22+ is required to execute the staged TypeScript directly")
+        raise
+    return json.loads(completed.stdout)
 
 
 def _load_script(filename: str, module_name: str) -> ModuleType:
@@ -289,6 +325,119 @@ class TestOpencodeProviderSelection:
         assert ocp.main() == 0
         assert launched["cmd"][0] == "opencode"
         assert "bash" not in launched["cmd"]
+
+
+class TestProviderModelMetadata:
+    """Provider-neutral model declarations project into each harness schema."""
+
+    def test_opencode_skips_discovery_for_declared_context_only_model(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Rossendorf declaration avoids its absent ``/models`` endpoint.
+
+        OpenCode cannot represent a context-only ``limit`` object, so it keeps
+        the declared model and name while omitting the incomplete limit pair.
+        """
+        monkeypatch.setattr(
+            ocp.sys,
+            "argv",
+            ["opencode-provider", "--provider", "rossendorf"],
+        )
+        monkeypatch.setenv("TEROK_PROVIDER_ROSSENDORF_BASE_OPENAI_CHAT", _OPENAI_CHAT_BASE)
+        monkeypatch.setenv("TEROK_PROVIDER_ROSSENDORF_TOKEN", "tok")
+        monkeypatch.setenv("TEROK_PROVIDER_ROSSENDORF_LABEL", "Rossendorf")
+        monkeypatch.setenv("TEROK_PROVIDER_ROSSENDORF_DEFAULT_MODEL", _ROSSENDORF_MODEL)
+        monkeypatch.setenv(
+            "TEROK_PROVIDER_ROSSENDORF_MODELS",
+            json.dumps(
+                {
+                    _ROSSENDORF_MODEL: {
+                        "name": "Rossendorf DeepSeek-V4-Flash",
+                        "context_limit": 120_000,
+                    }
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            ocp,
+            "_fetch_models",
+            lambda *_args: pytest.fail("declared models must suppress network discovery"),
+        )
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: None)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        provider = written["content"]["provider"]["rossendorf"]
+        assert provider["name"] == "Rossendorf"
+        assert provider["models"] == {_ROSSENDORF_MODEL: {"name": "Rossendorf DeepSeek-V4-Flash"}}
+
+    def test_opencode_emits_complete_official_limit_pair(self, ocp: ModuleType) -> None:
+        """Known context and output limits map to OpenCode's required pair."""
+        models = {
+            _ROSSENDORF_MODEL: {
+                "name": "Rossendorf DeepSeek-V4-Flash",
+                "context_limit": 120_000,
+                "output_limit": 8_192,
+            }
+        }
+        assert ocp._opencode_models(models) == {
+            _ROSSENDORF_MODEL: {
+                "name": "Rossendorf DeepSeek-V4-Flash",
+                "limit": {"context": 120_000, "output": 8_192},
+            }
+        }
+
+    def test_pi_skips_discovery_and_preserves_declared_context(self) -> None:
+        """Pi receives Rossendorf's 120k context and defaults only its unknown output."""
+        result = _run_pi_extension(
+            {
+                "TEROK_PROVIDER_ROSSENDORF_BASE_OPENAI_CHAT": _OPENAI_CHAT_BASE,
+                "TEROK_PROVIDER_ROSSENDORF_TOKEN": "tok",
+                "TEROK_PROVIDER_ROSSENDORF_DEFAULT_MODEL": _ROSSENDORF_MODEL,
+                "TEROK_PROVIDER_ROSSENDORF_MODELS": json.dumps(
+                    {
+                        _ROSSENDORF_MODEL: {
+                            "name": "Rossendorf DeepSeek-V4-Flash",
+                            "context_limit": 120_000,
+                        }
+                    }
+                ),
+            }
+        )
+
+        assert result["fetchCalls"] == 0
+        assert result["registrations"] == [
+            {
+                "name": "rossendorf",
+                "config": {
+                    "baseUrl": _OPENAI_CHAT_BASE,
+                    "api": "openai-completions",
+                    "apiKey": "$TEROK_PROVIDER_ROSSENDORF_TOKEN",
+                    "models": [
+                        {
+                            "id": _ROSSENDORF_MODEL,
+                            "name": "Rossendorf DeepSeek-V4-Flash",
+                            "reasoning": False,
+                            "input": ["text"],
+                            "cost": {
+                                "input": 0,
+                                "output": 0,
+                                "cacheRead": 0,
+                                "cacheWrite": 0,
+                            },
+                            "contextWindow": 120_000,
+                            "maxTokens": 4_096,
+                        }
+                    ],
+                },
+            }
+        ]
 
 
 class TestPiProvider:

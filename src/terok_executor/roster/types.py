@@ -264,6 +264,20 @@ class ProviderAuth:
 
 
 @dataclass(frozen=True)
+class ProviderModel:
+    """Provider-neutral metadata for one model served by an LLM endpoint."""
+
+    name: str
+    """Human-readable model name, falling back to its provider model ID."""
+
+    context_limit: int | None = None
+    """Maximum context window in tokens, when declared by the provider."""
+
+    output_limit: int | None = None
+    """Maximum generated output in tokens, when declared by the provider."""
+
+
+@dataclass(frozen=True)
 class Provider:
     """A vault-routed upstream — an LLM endpoint or a tool API.
 
@@ -281,6 +295,15 @@ class Provider:
 
     upstream: str
     """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
+
+    label: str = ""
+    """Human-readable provider name, falling back to the roster entry name."""
+
+    default_model: str | None = None
+    """Model ID a harness should prefer when the operator does not choose one."""
+
+    models: dict[str, ProviderModel] = field(default_factory=dict)
+    """Static model metadata keyed by provider model ID."""
 
     api_key_auth: ProviderAuth | None = None
     """Wire auth used when an API key is the stored credential, if supported."""

@@ -122,7 +122,68 @@ See the bundled definitions in `resources/agents/` for the schema:
 binary, headless flags, provider binding, auth modes, and git
 identity.  Endpoint definitions (upstream URL, wire auth) live
 separately in `resources/providers/`, with user overrides in
-`~/.config/terok/agent/providers/`.
+`~/.config/terok/providers/`.
+
+## Custom providers
+
+A provider is a runtime LLM endpoint, not an installable agent.  Its filename
+becomes the provider name.  For example, this provider is selected as
+`rossendorf`:
+
+```yaml title="~/.config/terok/providers/rossendorf.yaml"
+label: Rossendorf
+upstream: https://chat.fz-rossendorf.de
+
+auth:
+  api_key: {}
+
+serves:
+  openai-chat: /api/v1
+
+default_model: deepseek-v4-flash
+models:
+  deepseek-v4-flash:
+    name: Rossendorf DeepSeek-V4-Flash
+    limit:
+      context: 120000
+```
+
+`auth.api_key: {}` uses the normal `Authorization: Bearer <key>` wire
+authentication.  Set `header` or `prefix` only when an endpoint differs.  For
+compatibility with older provider files, once a header is written explicitly,
+an omitted prefix means no prefix; write `prefix: "Bearer "` too when needed.
+`serves` maps each supported wire protocol to its API base path.
+
+A non-empty `models` map is authoritative, so the harness does not query an
+endpoint's optional `/models` API.  `default_model` chooses the preferred
+entry; model `name` and both limits are optional.  Pi projects `context` and
+`output` independently.  OpenCode's schema requires both values together, so
+Terok emits its `limit` block only when both are known; with the example above,
+OpenCode still registers the model but omits its incomplete limit.
+
+Authenticate on the host, then start a new task:
+
+```bash
+terok-executor auth rossendorf
+
+# Inside a task whose image includes the harness:
+opencode --provider rossendorf
+pi --provider rossendorf
+```
+
+Successful authentication republishes the vault routes automatically, and
+task launch reconciles them again.  No manual `vault routes` command is needed.
+Adding or changing a provider definition also needs no image rebuild: put
+`opencode` and/or `pi` in `image.agents`, **not** `rossendorf`; the endpoint is
+selected at runtime.  A new task is still needed to receive the updated
+provider environment.
+
+The old `~/.config/terok/agent/providers/` directory remains supported, as do
+provider files with the full legacy `opencode:` block.  It is loaded before the
+canonical directory, whose same-named files therefore take precedence.  New
+definitions should use the provider-neutral form above.  See the generated
+[Provider YAML reference](roster-reference.md#provider-yaml) and
+[provider JSON Schema](schemas/provider.schema.json) for all fields.
 
 ## Git identity
 

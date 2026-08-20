@@ -1,15 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generate roster-reference and routes-schema pages from the Pydantic models.
+"""Generate roster-reference and JSON schemas from the Pydantic models.
 
 Runs during ``mkdocs build`` via the mkdocs-gen-files plugin.  Introspects
 [`RawAgentYaml`][terok_executor.roster.schema.RawAgentYaml] (the agent YAML
-input contract) and [`VaultRouteEntry`][terok_executor.roster.schema.VaultRouteEntry]
-(the generated ``routes.json`` output contract) to produce:
+input contract), [`RawProvider`][terok_executor.roster.schema.RawProvider]
+(the provider YAML input contract), and
+[`VaultRouteEntry`][terok_executor.roster.schema.VaultRouteEntry] (the generated
+``routes.json`` output contract) to produce:
 
-- A markdown roster-reference page with field tables and an annotated YAML example
+- A markdown roster-reference page with field tables and an annotated agent example
 - ``schemas/agent.schema.json`` for editor autocompletion of agent YAMLs
+- ``schemas/provider.schema.json`` for editor autocompletion of provider YAMLs
 - ``schemas/routes.schema.json`` for sandbox-side validation of the generated routes file
 
 Every ``Field(description=...)`` in those models is the **single source of truth**.
@@ -28,15 +31,15 @@ from mkdocs_terok.config_reference import (
 )
 from pydantic import TypeAdapter
 
-from terok_executor.roster.schema import RawAgentYaml, VaultRouteEntry
+from terok_executor.roster.schema import RawAgentYaml, RawProvider, VaultRouteEntry
 
 _MD_RULE = "---\n\n"
 
 
 def _generate() -> str:
-    """Build the full roster-reference.md content."""
+    """Build the full ``roster-reference.md`` content."""
     buf = io.StringIO()
-    buf.write("# Agent Roster Reference\n\n")
+    buf.write("# Agent and Provider Roster Reference\n\n")
     buf.write(
         "This page is **auto-generated** from the Pydantic schema in "
         "[`roster.schema`][terok_executor.roster.schema].  Every field listed "
@@ -46,6 +49,7 @@ def _generate() -> str:
     buf.write(
         "**JSON Schema files** (for editor autocompletion and validation):\n\n"
         "[:material-download: agent.schema.json](schemas/agent.schema.json){: .md-button }\n"
+        "[:material-download: provider.schema.json](schemas/provider.schema.json){: .md-button }\n"
         "[:material-download: routes.schema.json](schemas/routes.schema.json){: .md-button }\n\n"
     )
 
@@ -67,6 +71,21 @@ def _generate() -> str:
     buf.write('```yaml title="claude.yaml"\n')
     buf.write(render_yaml_example(RawAgentYaml))
     buf.write("```\n\n")
+
+    buf.write(_MD_RULE)
+    buf.write("## Provider YAML\n\n")
+    buf.write(
+        "Each bundled endpoint under ``resources/providers/*.yaml`` and each user "
+        "definition under ``~/.config/terok/providers/*.yaml`` is parsed into "
+        "[`RawProvider`][terok_executor.roster.schema.RawProvider].  The compatibility "
+        "directory ``~/.config/terok/agent/providers/*.yaml`` is loaded first, so a "
+        "canonical file with the same stem takes precedence.  The file stem supplies "
+        "the provider name.\n\n"
+        "For the shortest practical custom-provider example, including model "
+        "declarations that avoid network discovery, see "
+        "[Custom providers](agents.md#custom-providers).\n\n"
+    )
+    buf.write(render_model_tables(RawProvider))
 
     buf.write(_MD_RULE)
     buf.write("## Generated routes.json\n\n")
@@ -91,6 +110,9 @@ with mkdocs_gen_files.open("roster-reference.md", "w") as f:
 
 with mkdocs_gen_files.open("schemas/agent.schema.json", "w") as f:
     f.write(render_json_schema(RawAgentYaml, title="terok-executor agent YAML"))
+
+with mkdocs_gen_files.open("schemas/provider.schema.json", "w") as f:
+    f.write(render_json_schema(RawProvider, title="terok-executor provider YAML"))
 
 with mkdocs_gen_files.open("schemas/routes.schema.json", "w") as f:
     schema = _routes_adapter.json_schema()

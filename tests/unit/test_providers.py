@@ -12,13 +12,24 @@ contract honest — and keeps the sandbox vault untouched.
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
+from terok_executor import providers_config_dir
 from terok_executor.credentials.auth import credential_provider
 from terok_executor.roster.loader import _provider_route_entry, load_roster
 from terok_executor.roster.schema import RawProvider
 from terok_executor.roster.types import Provider, ProviderAuth
+from tests.constants import (
+    CANONICAL_PROVIDER_UPSTREAM,
+    CONTAINER_HOME,
+    EXAMPLE_PROVIDER_UPSTREAM,
+    LEGACY_PROVIDER_UPSTREAM,
+    ROSSENDORF_UPSTREAM,
+)
 
 # Agent name → the clean provider name its vault block maps to (identity for
 # names that don't rename: coderabbit, openrouter, blablador, kisski).
@@ -92,7 +103,7 @@ class TestWireAuth:
     def test_same_header_dual_mode_is_not_dynamic(self) -> None:
         provider = Provider(
             name="x",
-            upstream="https://example.test",
+            upstream=EXAMPLE_PROVIDER_UPSTREAM,
             oauth_auth=ProviderAuth(header="Authorization", prefix="Bearer "),
             api_key_auth=ProviderAuth(header="Authorization", prefix="Bearer "),
         )
@@ -100,14 +111,14 @@ class TestWireAuth:
 
     def test_no_auth_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="no auth mode"):
-            Provider(name="x", upstream="https://example.test").wire_auth()
+            Provider(name="x", upstream=EXAMPLE_PROVIDER_UPSTREAM).wire_auth()
 
     def test_same_header_differing_prefix_raises(self) -> None:
         # Same header but disagreeing prefixes can't both be serialised into the
         # single routes.json auth_prefix — must fail loud, not pick one silently.
         provider = Provider(
             name="x",
-            upstream="https://example.test",
+            upstream=EXAMPLE_PROVIDER_UPSTREAM,
             oauth_auth=ProviderAuth(header="Authorization", prefix="Bearer "),
             api_key_auth=ProviderAuth(header="Authorization", prefix="token "),
         )
@@ -122,7 +133,7 @@ class TestSchemaStrictness:
         with pytest.raises(ValidationError):
             RawProvider.model_validate(
                 {
-                    "upstream": "https://example.test",
+                    "upstream": EXAMPLE_PROVIDER_UPSTREAM,
                     "auth": {"api_key": {"header": "Authorization"}},
                     "oops": 1,
                 }
@@ -130,11 +141,177 @@ class TestSchemaStrictness:
 
     def test_auth_requires_a_mode(self) -> None:
         with pytest.raises(ValidationError):
-            RawProvider.model_validate({"upstream": "https://example.test", "auth": {}})
+            RawProvider.model_validate({"upstream": EXAMPLE_PROVIDER_UPSTREAM, "auth": {}})
 
     def test_missing_upstream_rejected(self) -> None:
         with pytest.raises(ValidationError):
             RawProvider.model_validate({"auth": {"api_key": {"header": "Authorization"}}})
+
+    def test_api_key_wire_defaults(self) -> None:
+        provider = RawProvider.model_validate(
+            {"upstream": EXAMPLE_PROVIDER_UPSTREAM, "auth": {"api_key": {}}}
+        ).to_dataclass(name="example")
+
+        assert provider.wire_auth() == ("Authorization", "Bearer ", {})
+
+    @pytest.mark.parametrize("header", ["PRIVATE-TOKEN", "Authorization"])
+    def test_explicit_header_preserves_legacy_empty_prefix(self, header: str) -> None:
+        provider = RawProvider.model_validate(
+            {
+                "upstream": EXAMPLE_PROVIDER_UPSTREAM,
+                "auth": {"api_key": {"header": header}},
+            }
+        ).to_dataclass(name="example")
+
+        assert provider.wire_auth() == (header, "", {})
+
+    @pytest.mark.parametrize("field", ["context", "output"])
+    def test_model_limits_must_be_positive(self, field: str) -> None:
+        with pytest.raises(ValidationError, match=field):
+            RawProvider.model_validate(
+                {
+                    "upstream": EXAMPLE_PROVIDER_UPSTREAM,
+                    "auth": {"api_key": {}},
+                    "models": {"model-x": {"limit": {field: 0}}},
+                }
+            )
+
+    def test_partial_model_limits_are_independent(self) -> None:
+        provider = RawProvider.model_validate(
+            {
+                "upstream": EXAMPLE_PROVIDER_UPSTREAM,
+                "auth": {"api_key": {}},
+                "models": {
+                    "context-model": {"limit": {"context": 120_000}},
+                    "output-model": {
+                        "name": "Output Model",
+                        "limit": {"output": 8_192},
+                    },
+                },
+            }
+        ).to_dataclass(name="example")
+
+        assert provider.models["context-model"].name == "context-model"
+        assert provider.models["context-model"].context_limit == 120_000
+        assert provider.models["context-model"].output_limit is None
+        assert provider.models["output-model"].name == "Output Model"
+        assert provider.models["output-model"].context_limit is None
+        assert provider.models["output-model"].output_limit == 8_192
+
+
+class TestUserProviderFiles:
+    """Canonical and compatibility provider YAML layers produce usable endpoints."""
+
+    def test_canonical_minimal_provider_is_harness_ready(self, tmp_path: Path) -> None:
+        canonical = tmp_path / "providers"
+        canonical.mkdir()
+        (canonical / "rossendorf.yaml").write_text(
+            "label: Rossendorf\n"
+            f"upstream: {ROSSENDORF_UPSTREAM}\n"
+            "auth:\n  api_key: {}\n"
+            "serves:\n  openai-chat: /api/v1\n"
+            "default_model: deepseek-v4-flash\n"
+            "models:\n"
+            "  deepseek-v4-flash:\n"
+            "    name: Rossendorf DeepSeek-V4-Flash\n"
+            "    limit:\n      context: 120000\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch(
+                "terok_executor.roster.loader._legacy_user_providers_dir",
+                return_value=tmp_path / "legacy",
+            ),
+            patch("terok_executor.roster.loader.providers_config_dir", return_value=canonical),
+        ):
+            roster = load_roster()
+
+        provider = roster.providers["rossendorf"]
+        assert provider.label == "Rossendorf"
+        assert provider.default_model == "deepseek-v4-flash"
+        assert provider.models["deepseek-v4-flash"].context_limit == 120_000
+        assert provider.opencode_config is None
+        assert roster.vault_routes["rossendorf"].token_env == {"_default": "ROSSENDORF_API_KEY"}
+        assert roster.auth_providers["rossendorf"].container_mount == str(
+            CONTAINER_HOME / ".rossendorf"
+        )
+        assert "rossendorf" in roster.all_names
+        assert any(m.provider == "rossendorf" for m in roster.mounts)
+        with pytest.raises(ValueError, match="Provider endpoints.*--provider"):
+            roster.resolve_selection(("rossendorf",))
+
+    def test_legacy_opencode_provider_remains_compatible(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        (legacy / "rossendorf.yaml").write_text(
+            f"upstream: {ROSSENDORF_UPSTREAM}\n"
+            "auth:\n"
+            "  api_key:\n"
+            "    header: Authorization\n"
+            '    prefix: "Bearer "\n'
+            "serves:\n  openai-chat: /api/v1\n"
+            "opencode:\n"
+            "  display_name: Rossendorf Legacy\n"
+            f"  base_url: {ROSSENDORF_UPSTREAM}/api/v1\n"
+            "  preferred_model: deepseek-v4-flash\n"
+            "  fallback_model: deepseek-v4-flash\n"
+            "  env_var_prefix: RSD\n"
+            "  config_dir: .rossendorf-legacy\n"
+            f"  auth_key_url: {ROSSENDORF_UPSTREAM}/\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch(
+                "terok_executor.roster.loader._legacy_user_providers_dir",
+                return_value=legacy,
+            ),
+            patch(
+                "terok_executor.roster.loader.providers_config_dir",
+                return_value=tmp_path / "canonical",
+            ),
+        ):
+            roster = load_roster()
+
+        provider = roster.providers["rossendorf"]
+        assert provider.label == "Rossendorf Legacy"
+        assert provider.default_model == "deepseek-v4-flash"
+        assert provider.opencode_config is not None
+        assert roster.vault_routes["rossendorf"].token_env == {"_default": "RSD_API_KEY"}
+        assert roster.auth_providers["rossendorf"].container_mount.endswith("/.rossendorf-legacy")
+
+    def test_canonical_layer_overrides_legacy_layer(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "legacy"
+        canonical = tmp_path / "canonical"
+        legacy.mkdir()
+        canonical.mkdir()
+        (legacy / "local.yaml").write_text(
+            "label: Legacy\n"
+            f"upstream: {LEGACY_PROVIDER_UPSTREAM}\n"
+            "auth:\n  api_key: {}\n"
+            "serves:\n  openai-chat: /v1\n",
+            encoding="utf-8",
+        )
+        (canonical / "local.yaml").write_text(
+            f"label: Canonical\nupstream: {CANONICAL_PROVIDER_UPSTREAM}\n",
+            encoding="utf-8",
+        )
+
+        with (
+            patch("terok_executor.roster.loader._legacy_user_providers_dir", return_value=legacy),
+            patch("terok_executor.roster.loader.providers_config_dir", return_value=canonical),
+        ):
+            provider = load_roster().providers["local"]
+
+        assert provider.label == "Canonical"
+        assert provider.upstream == CANONICAL_PROVIDER_UPSTREAM
+
+    def test_public_accessor_points_below_terok_config_root(self) -> None:
+        path = providers_config_dir()
+
+        assert path.name == "providers"
+        assert path.parent.name == "terok"
 
 
 class TestCredentialProviderResolution:

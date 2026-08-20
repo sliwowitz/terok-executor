@@ -83,7 +83,10 @@ COPY help.d/ /usr/local/share/terok/help.d/
 COPY agent-protocols.json {{ agent_protocols_path }}
 COPY provider-protocols.json {{ provider_protocols_path }}
 
-# Always-on terok scripts (env helpers, banner, updaters).
+# Always-on terok scripts (env helpers, banner, updaters).  The readiness
+# checkpoint belongs to L1 because its generator is installed here.  Amend a
+# stale L0 init in place instead of overlaying the whole script across layer
+# versions; current L0 scripts already contain the same call.
 RUN set -eux; \
     cp /tmp/terok-scripts/terok-env-git-identity.sh /usr/local/share/terok/; \
     cp /tmp/terok-scripts/terok-acp-env.sh /usr/local/share/terok/; \
@@ -94,6 +97,10 @@ RUN set -eux; \
     cp /tmp/terok-scripts/providers /usr/local/bin/providers; \
     cp /tmp/terok-scripts/allthethings.sh /usr/local/bin/allthethings.sh; \
     cp /tmp/terok-scripts/update-all-the-things /usr/local/bin/update-all-the-things; \
+    if ! grep -qE '^[[:space:]]*terok-agents( |$)' /usr/local/bin/init-ssh-and-repo.sh; then \
+      sed -i '/^echo ">> init complete"$/i terok-agents || true' \
+        /usr/local/bin/init-ssh-and-repo.sh; \
+    fi; \
     chmod +x /usr/local/share/terok/terok-env-git-identity.sh \
              /usr/local/share/terok/terok-acp-env.sh \
              /usr/local/share/terok/terok-trust-workspace.py \
@@ -133,4 +140,5 @@ USER dev
 LABEL {{ agents_label }}="{{ installed_agents_csv }}"
 
 WORKDIR /workspace
-# No CMD: reuse init-ssh-and-repo.sh from base image
+# No CMD: reuse the init command inherited from L0, amended above with the
+# L1-owned readiness checkpoint when necessary.

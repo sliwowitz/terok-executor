@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -195,3 +196,60 @@ class TestLockedProviders:
         out, _ = _run(command, monkeypatch, tmp_path, capsys, manifest, "--all")
         assert "Ready agent" in out
         assert "locked" not in out.lower()
+
+
+class TestManifestRecovery:
+    """The command repairs stale L0 startup state from its current L1 generator."""
+
+    @pytest.mark.parametrize("initial", [None, "{broken json"])
+    def test_missing_or_malformed_manifest_is_regenerated(
+        self,
+        command: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        initial: str | None,
+    ) -> None:
+        """A missing or malformed checkpoint is regenerated and immediately reread."""
+        manifest_path = tmp_path / "agents.json"
+        if initial is not None:
+            manifest_path.write_text(initial, encoding="utf-8")
+        monkeypatch.setattr(command, "MANIFEST", manifest_path)
+        calls: list[list[str]] = []
+
+        def regenerate(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            manifest_path.write_text(json.dumps(ANTHROPIC_ONLY_MANIFEST), encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(command.subprocess, "run", regenerate)
+
+        assert command.main(["providers"]) == 0
+        captured = capsys.readouterr()
+        assert calls == [["terok-agents"]]
+        assert "Ready agent" in captured.out
+        assert captured.err == ""
+
+    def test_failed_regeneration_reports_current_remedies(
+        self,
+        command: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A failed repair names the generator and L1 refresh, not task location."""
+        manifest_path = tmp_path / "agents.json"
+        monkeypatch.setattr(command, "MANIFEST", manifest_path)
+
+        def unavailable(*_: object, **__: object) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("terok-agents")
+
+        monkeypatch.setattr(command.subprocess, "run", unavailable)
+
+        assert command.main(["providers"]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "after automatic regeneration" in captured.err
+        assert "Could not run terok-agents" in captured.err
+        assert "refresh the project's agent image from the host" in captured.err
+        assert "run inside a terok task" not in captured.err

@@ -151,6 +151,9 @@ class AuthKeyConfig:
 AUTH_PROVIDERS: dict[str, AuthProvider] = {}
 """All known auth providers (agents + tools), keyed by name.  Loaded from ``resources/agents/*.yaml``."""
 
+_vault_route_refresher: Callable[[], Path] | None = None
+"""Composition-root callback that publishes the active roster's vault routes."""
+
 
 # ── Public API ──
 
@@ -436,6 +439,9 @@ def store_api_key(
     This is the non-interactive fast path for automated workflows and CI.
     The key is stored as ``{"type": "api_key", "key": "<value>"}`` under the
     resolved provider name (see [`credential_provider`][terok_executor.credentials.auth.credential_provider]).
+    The current provider roster is then published to ``routes.json`` before
+    success is reported, so a newly authenticated custom provider is usable by
+    the next task without a separate ``terok vault routes`` command.
     """
     from terok_executor.integrations.sandbox import SandboxConfig
 
@@ -444,12 +450,40 @@ def store_api_key(
     db = cfg.open_credential_db(prompt_on_tty=True)
     try:
         db.store_credential(credential_set, cred_provider, {"type": "api_key", "key": api_key})
-        print(f"API key stored for {cred_provider} (set: {credential_set})")
     finally:
         db.close()
+    _refresh_vault_routes()
+    print(f"API key stored for {cred_provider} (set: {credential_set})")
 
 
 # ── Private helpers ──
+
+
+def _set_vault_route_refresher(refresher: Callable[[], Path]) -> None:
+    """Bind post-auth route publication to the process-wide roster."""
+    global _vault_route_refresher
+    _vault_route_refresher = refresher
+
+
+def _refresh_vault_routes() -> None:
+    """Publish current provider routes after credentials become durable.
+
+    Route publication intentionally follows credential storage.  If it fails,
+    the credential remains safely stored and this exception reaches the caller
+    before any success message.  Rolling back would risk deleting a previously
+    valid credential; rerunning auth or ``terok vault routes`` is idempotent.
+
+    The package composition root injects the roster-bound operation because the
+    roster owns [`AuthProvider`][terok_executor.credentials.auth.AuthProvider]
+    definitions and therefore already depends on this module.
+    """
+    if _vault_route_refresher is None:
+        raise RuntimeError(
+            "Vault route refresh is not configured; use authentication through "
+            "the terok_executor public API so its roster is bootstrapped."
+        )
+
+    _vault_route_refresher()
 
 
 def _prompt_api_key(info: AuthProvider) -> str:
@@ -762,12 +796,7 @@ def _capture_credentials(
     # background refresher rotate a token nobody brokers back to the mount.
     exposed_directly = expose_token and post_capture is not None
 
-    if exposed_directly:
-        _out.print(
-            f"\n[green]Credentials for {provider_name} "
-            "bypassing vault DB (exposed directly)[/green]"
-        )
-    else:
+    if not exposed_directly:
         try:
             from terok_executor.integrations.sandbox import SandboxConfig
 
@@ -777,10 +806,6 @@ def _capture_credentials(
                 # Store under the resolved provider name (claude → anthropic);
                 # the mount writer above stays keyed by the agent's auth dir.
                 db.store_credential(credential_set, credential_provider(provider_name), cred_data)
-                _out.print(
-                    f"\n[green]Credentials captured for {provider_name} "
-                    f"(set: {credential_set})[/green]"
-                )
             finally:
                 db.close()
         except Exception as exc:
@@ -820,6 +845,17 @@ def _capture_credentials(
                 f"[yellow]Warning: could not apply post_capture_state for "
                 f"{provider_name}: {exc}[/yellow]"
             )
+
+    _refresh_vault_routes()
+    if exposed_directly:
+        _out.print(
+            f"\n[green]Credentials for {provider_name} "
+            "bypassing vault DB (exposed directly)[/green]"
+        )
+    else:
+        _out.print(
+            f"\n[green]Credentials captured for {provider_name} (set: {credential_set})[/green]"
+        )
 
 
 def _claude_oauth_mount_writer(

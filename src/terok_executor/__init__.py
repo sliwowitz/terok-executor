@@ -114,6 +114,7 @@ if TYPE_CHECKING:
     from .roster import (
         AgentRoster as AgentRoster,
         EgressProjection as EgressProjection,
+        providers_config_dir as providers_config_dir,
     )
     from .sandbox import ensure_sandbox_ready as ensure_sandbox_ready
     from .storage import (
@@ -175,6 +176,7 @@ _LAZY: dict[str, str] = {
     # Roster (agent catalog + config resolution)
     "AgentRoster": ".roster",
     "EgressProjection": ".roster",
+    "providers_config_dir": ".roster",
     # Command registries
     "COMMANDS": "._tree",
     "AGENT_COMMANDS": ".commands:COMMANDS",
@@ -189,12 +191,16 @@ _LAZY: dict[str, str] = {
     "ensure_krun_host_keypair": ".krun",
 }
 
-#: The three ACP names that must resolve *without* triggering the roster
-#: bootstrap: they read a Unix socket / the credential DB, never the
-#: agent registry, so keeping them off the bootstrap path preserves a
-#: cheap host-side ``acp list`` and an ``acp``-free import.
+#: Names that must resolve *without* triggering the roster bootstrap: the ACP
+#: queries read a Unix socket / credential DB, while the config-path accessor
+#: only applies XDG resolution.  None needs the agent registry.
 _BOOTSTRAP_FREE = frozenset(
-    {"ACPEndpointStatus", "acp_socket_is_live", "list_authenticated_agents"}
+    {
+        "ACPEndpointStatus",
+        "acp_socket_is_live",
+        "list_authenticated_agents",
+        "providers_config_dir",
+    }
 )
 
 __all__ = ["__version__", *_LAZY]
@@ -206,19 +212,19 @@ def _bootstrap_roster() -> None:
     """Populate the module-level agent dicts from the YAML roster.
 
     ``AGENTS`` / ``AUTH_PROVIDERS`` / ``OPENCODE_PROVIDERS`` are declared
-    empty in their defining modules and filled here, once, from the
-    shared roster.  The empty-then-fill dance is what breaks the
-    ``roster → auth/providers → roster`` import cycle: the leaf modules
-    stay dependency-free and the root package (the one layer allowed to
-    depend on the roster) does the wiring.
+    empty in their defining modules and filled here, once, from the shared
+    roster.  Post-auth route publication binds here for the same reason.  This
+    composition root breaks the ``roster → auth/providers → roster`` import
+    cycle while the leaf modules stay dependency-free.
     """
     global AGENT_NAMES  # noqa: PLW0603 — tuple requires rebind
 
     import terok_executor.provider.providers as _reg
-    from terok_executor.credentials.auth import AUTH_PROVIDERS
+    from terok_executor.credentials.auth import AUTH_PROVIDERS, _set_vault_route_refresher
     from terok_executor.roster import AgentRoster
 
     roster = AgentRoster.shared()
+    _set_vault_route_refresher(roster.ensure_vault_routes)
     _reg.AGENTS.update(roster.agents)
     AUTH_PROVIDERS.update(roster.auth_providers)
     AGENT_NAMES = _reg.AGENT_NAMES = roster.agent_names

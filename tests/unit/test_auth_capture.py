@@ -19,9 +19,11 @@ from terok_executor.credentials.auth import (
     _capture_credentials,
     _claude_oauth_mount_writer,
     _codex_oauth_mount_writer,
+    _refresh_vault_routes,
     _write_claude_credentials_file,
     store_api_key,
 )
+from tests.constants import ROSSENDORF_UPSTREAM
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
@@ -67,6 +69,51 @@ class TestCaptureCredentials:
         db.close()
         assert stored is not None
         assert stored["access_token"] == "sk-test-123"
+
+    def test_oauth_capture_refreshes_vault_routes(self, tmp_path: Path) -> None:
+        """A durable OAuth credential publishes the current provider roster."""
+        cred = {"claudeAiOauth": {"accessToken": "sk-test-123"}}
+        (tmp_path / ".credentials.json").write_text(json.dumps(cred))
+        db_path = tmp_path / "proxy" / "credentials.db"
+
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch("terok_executor.credentials.auth._refresh_vault_routes") as refresh_routes,
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials("claude", tmp_path, "default")
+
+        refresh_routes.assert_called_once_with()
+
+    def test_route_failure_does_not_report_oauth_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Route publication errors propagate after storage and before success output."""
+        cred = {"claudeAiOauth": {"accessToken": "sk-test-123"}}
+        (tmp_path / ".credentials.json").write_text(json.dumps(cred))
+        db_path = tmp_path / "proxy" / "credentials.db"
+
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch(
+                "terok_executor.credentials.auth._refresh_vault_routes",
+                side_effect=OSError("route write failed"),
+            ),
+            pytest.raises(OSError, match="route write failed"),
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials("claude", tmp_path, "default")
+
+        assert "Credentials captured" not in capsys.readouterr().out
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        try:
+            assert db.load_credential("default", "anthropic") is not None
+        finally:
+            db.close()
 
     def test_captures_json_api_key(self, tmp_path: Path) -> None:
         """API key extraction works for JSON-based providers."""
@@ -731,7 +778,10 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch("terok_executor.credentials.auth._refresh_vault_routes") as refresh_routes,
+        ):
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -740,10 +790,36 @@ class TestCaptureWithExposeToken:
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=True
             )
 
+        refresh_routes.assert_called_once_with()
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "claude")
         db.close()
         assert stored is None
+
+
+class TestRouteRefreshComposition:
+    """Bind authentication to route publication without a roster import cycle."""
+
+    def test_bootstrap_registers_shared_roster(self) -> None:
+        """The package composition root injects the shared roster operation."""
+        from terok_executor import _bootstrap_roster
+        from terok_executor.roster import AgentRoster
+
+        roster = AgentRoster.shared()
+        with patch(
+            "terok_executor.credentials.auth._set_vault_route_refresher"
+        ) as register_refresh:
+            _bootstrap_roster()
+
+        register_refresh.assert_called_once_with(roster.ensure_vault_routes)
+
+    def test_missing_bootstrap_fails_clearly(self) -> None:
+        """Direct submodule use cannot silently skip route publication."""
+        with (
+            patch("terok_executor.credentials.auth._vault_route_refresher", None),
+            pytest.raises(RuntimeError, match="roster is bootstrapped"),
+        ):
+            _refresh_vault_routes()
 
 
 class TestStoreApiKey:
@@ -778,6 +854,81 @@ class TestStoreApiKey:
         stored = db.load_credential("work", "anthropic")  # claude → anthropic
         db.close()
         assert stored["key"] == "sk-ant-key"
+
+    def test_custom_provider_refreshes_routes(self, tmp_path: Path) -> None:
+        """Authenticating a user provider immediately publishes its vault route."""
+        from terok_executor.roster import load_roster
+
+        providers_dir = tmp_path / "providers"
+        providers_dir.mkdir()
+        (providers_dir / "rossendorf.yaml").write_text(
+            f"upstream: {ROSSENDORF_UPSTREAM}\n"
+            "auth:\n  api_key: {}\n"
+            "serves:\n  openai-chat: /api/v1\n",
+            encoding="utf-8",
+        )
+        db_path = tmp_path / "vault" / "credentials.db"
+        routes_path = tmp_path / "vault" / "routes.json"
+        cfg = SimpleNamespace(
+            routes_path=routes_path,
+            open_credential_db=lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            ),
+        )
+
+        with (
+            patch(
+                "terok_executor.roster.loader._legacy_user_providers_dir",
+                return_value=tmp_path / "legacy-providers",
+            ),
+            patch(
+                "terok_executor.roster.loader.providers_config_dir",
+                return_value=providers_dir,
+            ),
+        ):
+            roster = load_roster()
+
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
+            patch("terok_executor.roster.loader.SandboxConfig", return_value=cfg),
+            patch(
+                "terok_executor.credentials.auth._vault_route_refresher",
+                roster.ensure_vault_routes,
+            ),
+        ):
+            store_api_key("rossendorf", "sk-test-key")
+
+        routes = json.loads(routes_path.read_text(encoding="utf-8"))
+        assert routes["rossendorf"] == {
+            "upstream": ROSSENDORF_UPSTREAM,
+            "auth_header": "Authorization",
+            "auth_prefix": "Bearer ",
+        }
+
+    def test_route_failure_does_not_report_api_key_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A stored key survives route failure without a false success message."""
+        db_path = tmp_path / "proxy" / "credentials.db"
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch(
+                "terok_executor.credentials.auth._refresh_vault_routes",
+                side_effect=OSError("route write failed"),
+            ),
+            pytest.raises(OSError, match="route write failed"),
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            store_api_key("vibe", "sk-test-key")
+
+        assert "API key stored" not in capsys.readouterr().out
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        try:
+            assert db.load_credential("default", "mistral") is not None
+        finally:
+            db.close()
 
 
 class TestAuthenticateImageLaziness:

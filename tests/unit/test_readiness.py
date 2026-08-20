@@ -307,6 +307,23 @@ class TestProtocolRollup:
         assert chat["candidates"]  # non-empty
         assert chat["authenticated"] == []
 
+    def test_live_custom_provider_augments_stale_baked_universe(
+        self, generator: ModuleType
+    ) -> None:
+        """A provider added on the host appears without rebuilding the agent image."""
+        env = {
+            **AUTHED_ENV,
+            "TEROK_PROVIDER_ROSSENDORF_TOKEN": "terok-p-custom",
+            "TEROK_PROVIDER_ROSSENDORF_BASE_OPENAI_CHAT": f"{_LOOPBACK}/api/v1",
+        }
+
+        manifest = generator.build_manifest(set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, env)
+
+        chat = self._row(manifest, "openai-chat")
+        assert "rossendorf" in chat["candidates"]
+        assert "rossendorf" in chat["authenticated"]
+        assert _pair(manifest, "vibe", "rossendorf")["ready"] is True
+
     def test_render_marks_authed_magenta_and_rest_dim(self, generator: ModuleType) -> None:
         manifest = generator.build_manifest(
             set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PositiveInt, model_validator
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
 from terok_executor.provider.providers import Agent, Launcher, ProviderBinding
@@ -47,6 +47,7 @@ from .types import (
     OpenCodeProviderConfig,
     Provider,
     ProviderAuth,
+    ProviderModel,
     SidecarSpec,
 )
 
@@ -338,11 +339,44 @@ class VaultRouteEntry(StrictModel):
 class RawProviderAuthMode(StrictModel):
     """One ``auth.api_key`` / ``auth.oauth`` sub-block — the wire attachment for a mode."""
 
-    header: str = Field(description="HTTP header carrying the credential (e.g. ``Authorization``)")
-    prefix: str = Field(default="", description='Token prefix (e.g. ``"Bearer "``)')
+    header: str = Field(
+        default="",
+        description=(
+            "HTTP header carrying the credential. An entirely empty mode defaults to "
+            "``Authorization``; otherwise this field is required"
+        ),
+    )
+    prefix: str = Field(
+        default="",
+        description=(
+            "Token prefix. An entirely empty mode defaults to ``Bearer ``; when only "
+            "``header`` is declared, the legacy empty prefix is preserved"
+        ),
+    )
     extra_headers: dict[str, str] = Field(
         default_factory=dict, description="Headers added only for this mode"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_bearer_shorthand(cls, value: object) -> object:
+        """Treat an empty mode as the conventional Authorization/Bearer pair.
+
+        A partially specified block keeps the old schema semantics: its header
+        must be explicit and an omitted prefix stays empty.  That distinction
+        makes ``api_key: {}`` ergonomic without changing existing custom
+        providers such as ``header: PRIVATE-TOKEN``.
+        """
+        if isinstance(value, dict) and not value:
+            return {"header": "Authorization", "prefix": "Bearer "}
+        return value
+
+    @model_validator(mode="after")
+    def _require_header(self) -> RawProviderAuthMode:
+        """Reject partially specified modes that omit the legacy-required header."""
+        if not self.header:
+            raise ValueError("provider auth header is required unless the mode is empty")
+        return self
 
     def to_dataclass(self) -> ProviderAuth:
         """Project to a runtime [`ProviderAuth`][terok_executor.roster.types.ProviderAuth]."""
@@ -385,6 +419,28 @@ class RawEgress(StrictModel):
     )
 
 
+class RawProviderModelLimit(StrictModel):
+    """``models.<id>.limit:`` — optional provider-neutral token limits."""
+
+    context: PositiveInt | None = Field(default=None, description="Maximum context-window tokens")
+    output: PositiveInt | None = Field(default=None, description="Maximum generated output tokens")
+
+
+class RawProviderModel(StrictModel):
+    """``models.<id>:`` — display metadata and limits for one served model."""
+
+    name: str | None = Field(default=None, description="Human-readable model name")
+    limit: RawProviderModelLimit = Field(default_factory=RawProviderModelLimit)
+
+    def to_dataclass(self, *, model_id: str) -> ProviderModel:
+        """Project to [`ProviderModel`][terok_executor.roster.types.ProviderModel]."""
+        return ProviderModel(
+            name=self.name or model_id,
+            context_limit=self.limit.context,
+            output_limit=self.limit.output,
+        )
+
+
 class RawProvider(StrictModel):
     """Full schema for one ``resources/providers/*.yaml`` file.
 
@@ -393,6 +449,7 @@ class RawProvider(StrictModel):
     (``upstreams:``, ``oath:``) the same way the agent schema does.
     """
 
+    label: str | None = Field(default=None, description="Human-readable provider name")
     upstream: str = Field(description="Upstream API base URL")
     auth: RawProviderAuth
     path_upstreams: dict[str, str] = Field(default_factory=dict)
@@ -404,6 +461,12 @@ class RawProvider(StrictModel):
     serves: dict[str, str] = Field(
         default_factory=dict,
         description="Wire protocol → container-facing base path (LLM providers only)",
+    )
+    default_model: str | None = Field(
+        default=None, description="Model ID a harness should select by default"
+    )
+    models: dict[str, RawProviderModel] = Field(
+        default_factory=dict, description="Provider-neutral model metadata keyed by model ID"
     )
     opencode: RawOpenCode | None = Field(
         default=None,
@@ -425,6 +488,13 @@ class RawProvider(StrictModel):
         return Provider(
             name=name,
             upstream=self.upstream,
+            label=self.label or (self.opencode.display_name if self.opencode else name),
+            default_model=self.default_model
+            or (self.opencode.preferred_model if self.opencode else None),
+            models={
+                model_id: model.to_dataclass(model_id=model_id)
+                for model_id, model in self.models.items()
+            },
             api_key_auth=self.auth.api_key.to_dataclass() if self.auth.api_key else None,
             oauth_auth=self.auth.oauth.to_dataclass() if self.auth.oauth else None,
             path_upstreams=dict(self.path_upstreams),
@@ -607,6 +677,8 @@ __all__ = [
     "RawProviderAuth",
     "RawProviderAuthMode",
     "RawProviderBinding",
+    "RawProviderModel",
+    "RawProviderModelLimit",
     "RawSession",
     "RawSidecar",
     "RawWrapper",

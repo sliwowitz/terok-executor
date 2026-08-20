@@ -415,7 +415,7 @@ def _handle_auth(
 
 
 def _handle_agents_list(*, show_all: bool = False) -> None:
-    """List registered agents."""
+    """List registered agents, plus other roster entries when requested."""
     import sys
 
     from .roster import AgentRoster
@@ -439,8 +439,11 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
         provider = roster.providers.get(name)
         if name in raw:
             kind = raw[name].get("kind", "native")
-        elif provider is not None and provider.opencode_config is not None:
-            # A harness-driven provider (Blablador, …) — no agent YAML of its own.
+        elif provider is not None and provider.install_spec is None:
+            # A provider-only roster entry combines with a harness; unlike the
+            # curated aliases below, it is not itself installable.
+            kind = "endpoint"
+        elif provider is not None:
             kind = "harness"
         else:
             kind = "native"
@@ -920,10 +923,10 @@ RUN_TOOL_COMMAND = CommandDef(
 
 AUTH_COMMAND = CommandDef(
     name="auth",
-    help="Authenticate an agent",
+    help="Authenticate an agent, tool, or LLM endpoint",
     handler=_handle_auth,
     args=(
-        ArgDef(name="agent", help="Agent or tool name (claude, codex, gh, ...)"),
+        ArgDef(name="agent", help="Agent, tool, or endpoint name (claude, gh, openrouter, ...)"),
         ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
         ArgDef(
             name="--device-auth",
@@ -946,14 +949,14 @@ AGENTS_COMMAND = CommandDef(
     children=(
         CommandDef(
             name="list",
-            help="List registered agents (use --all to include tools like gh, glab)",
+            help="List agents (use --all to include tools and LLM endpoints)",
             handler=_handle_agents_list,
             args=(
                 ArgDef(
                     name="--all",
                     action="store_true",
                     dest="show_all",
-                    help="Include tools (gh, glab)",
+                    help="Include tools and LLM endpoints",
                 ),
             ),
         ),
