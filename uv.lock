@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a23.dev462+ge87fdb9a1"
-source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=feat%2Fposture-vocabulary#e87fdb9a141e7474f8b8f8721fc9dc057f01fc9a" }
+version = "0.5.0a23.dev463+g52f28b45f"
+source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=feat%2Fposture-vocabulary#52f28b45f346ecd0f6e745fa80a28674486b2c6e" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
