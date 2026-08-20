@@ -2276,7 +2276,7 @@ requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "rich", specifier = "~=15.0" },
     { name = "ruamel-yaml", specifier = "==0.19.1" },
-    { name = "terok-sandbox", git = "https://github.com/sliwowitz/terok-sandbox.git?rev=fix%2Fvault-tier-freeze" },
+    { name = "terok-sandbox", url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a23/terok_sandbox-0.5.0a23-py3-none-any.whl" },
     { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a5/terok_util-0.3.1a5-py3-none-any.whl" },
     { name = "tomli-w", specifier = "~=1.2" },
 ]
@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a23.dev468+g0570ad069"
-source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=fix%2Fvault-tier-freeze#0570ad069091e3087b179436c64466922fe0efc3" }
+version = "0.5.0a23"
+source = { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a23/terok_sandbox-0.5.0a23-py3-none-any.whl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2328,15 +2328,45 @@ dependencies = [
     { name = "terok-shield" },
     { name = "terok-util" },
 ]
+wheels = [
+    { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a23/terok_sandbox-0.5.0a23-py3-none-any.whl", hash = "sha256:e85f8565c35ab441bd508fac2e523b78d6bfc4ad1ba9424208547e1cd5ff16ab" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = "~=3.14.1" },
+    { name = "cryptography", specifier = ">=49,<51" },
+    { name = "jinja2", specifier = "~=3.1" },
+    { name = "keyring", specifier = "~=25.7" },
+    { name = "packaging", specifier = "~=26.2" },
+    { name = "platformdirs", specifier = "~=4.10" },
+    { name = "prompt-toolkit", specifier = "~=3.0" },
+    { name = "pydantic", specifier = "~=2.13" },
+    { name = "ruamel-yaml", specifier = "==0.19.1" },
+    { name = "sqlcipher3", specifier = "==0.6.2" },
+    { name = "terok-clearance", url = "https://github.com/terok-ai/terok-clearance/releases/download/v0.8.0a8/terok_clearance-0.8.0a8-py3-none-any.whl" },
+    { name = "terok-shield", url = "https://github.com/terok-ai/terok-shield/releases/download/v0.8.0a10/terok_shield-0.8.0a10-py3-none-any.whl" },
+    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a5/terok_util-0.3.1a5-py3-none-any.whl" },
+]
 
 [[package]]
 name = "terok-shield"
-version = "0.8.0a10.dev363+g15d583fc0"
-source = { git = "https://github.com/sliwowitz/terok-shield.git?rev=fix%2Fnflog-reader-leak#15d583fc03787ced733bf30bd2974df2982f804c" }
+version = "0.8.0a10"
+source = { url = "https://github.com/terok-ai/terok-shield/releases/download/v0.8.0a10/terok_shield-0.8.0a10-py3-none-any.whl" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "terok-util" },
+]
+wheels = [
+    { url = "https://github.com/terok-ai/terok-shield/releases/download/v0.8.0a10/terok_shield-0.8.0a10-py3-none-any.whl", hash = "sha256:a589e80024e1e4336348eb19561a827c8f010825363075630a0f007bc22c7421" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = "~=2.13" },
+    { name = "pyyaml", specifier = "~=6.0" },
+    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a5/terok_util-0.3.1a5-py3-none-any.whl" },
 ]
 
 [[package]]
