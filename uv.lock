@@ -2311,8 +2311,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a23.dev465+gf117ecf13"
-source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=fix%2Fvault-tier-freeze#f117ecf13d15afe9af194b259c4fb0bb69b0767d" }
+version = "0.5.0a23.dev466+ge7371d745"
+source = { git = "https://github.com/sliwowitz/terok-sandbox.git?rev=fix%2Fvault-tier-freeze#e7371d74577d00af937295075069a5e1e46ed296" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2331,8 +2331,8 @@ dependencies = [
 
 [[package]]
 name = "terok-shield"
-version = "0.8.0a10.dev362+gc91078ffc"
-source = { git = "https://github.com/sliwowitz/terok-shield.git?rev=fix%2Fnflog-reader-leak#c91078ffcfee10adf4c24a93c2c895ebdf4351ab" }
+version = "0.8.0a10.dev363+g15d583fc0"
+source = { git = "https://github.com/sliwowitz/terok-shield.git?rev=fix%2Fnflog-reader-leak#15d583fc03787ced733bf30bd2974df2982f804c" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
