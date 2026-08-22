@@ -26,6 +26,12 @@ import pytest
 ITEST_L0_IMAGE = "terok-itest-l0:latest"
 ITEST_SHELL_IMAGE = "terok-itest-shell:latest"
 
+# Generous per-build ceiling.  Image builds run in nested rootless podman
+# inside the matrix VMs; a slow runner (a krun microVM, or just a loaded
+# crun host) installing the L0 package set can take several minutes.  Sized
+# so only a genuinely hung build trips it, not a slow-but-progressing one.
+_BUILD_TIMEOUT_S = 900
+
 # Shell-init Dockerfile — mirrors the L1 wiring steps that previously broke.
 _SHELL_INIT_DOCKERFILE = textwrap.dedent("""\
     ARG BASE
@@ -69,7 +75,7 @@ def _podman_build(
     context: Path,
     *,
     build_args: dict[str, str] | None = None,
-    timeout: int = 300,
+    timeout: int = _BUILD_TIMEOUT_S,
 ) -> None:
     """Run ``podman build`` with clear error reporting."""
     ba_flags: list[str] = []
@@ -135,7 +141,6 @@ def shell_test_image(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             ITEST_SHELL_IMAGE,
             build_dir,
             build_args={"BASE": ITEST_L0_IMAGE},
-            timeout=120,
         )
 
         yield ITEST_SHELL_IMAGE

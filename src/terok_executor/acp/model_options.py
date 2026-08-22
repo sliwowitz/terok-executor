@@ -31,6 +31,8 @@ that callers across the proxy share.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from acp import NewSessionResponse
 from acp.schema import (
     SessionConfigOptionBoolean,
@@ -39,7 +41,7 @@ from acp.schema import (
     SessionConfigSelectOption,
 )
 
-MODEL_OPTION_CATEGORY = "model"
+MODEL_OPTION_CATEGORY: Literal["model"] = "model"
 """ACP semantic category for the model selector configOption.
 
 Used as both the ``category`` and the ``id`` field of the

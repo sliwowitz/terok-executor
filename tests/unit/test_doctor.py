@@ -8,6 +8,7 @@ from __future__ import annotations
 from terok_sandbox.doctor import DoctorCheck
 
 from terok_executor.doctor import (
+    _BRIDGE_ABSENT_MARKER,
     _PHANTOM_TOKEN_RE,
     _make_base_url_checks,
     _make_credential_file_checks,
@@ -43,6 +44,18 @@ class TestSSHBridgeCheck:
     def test_category_is_bridge(self) -> None:
         check = _make_ssh_bridge_check()
         assert check.category == "bridge"
+
+    def test_ok_when_bridge_intentionally_absent(self) -> None:
+        # No signer token → bridge never starts; the guard emits the marker.
+        check = _make_ssh_bridge_check()
+        verdict = check.evaluate(0, f"{_BRIDGE_ABSENT_MARKER}\n", "")
+        assert verdict.severity == "ok"
+        assert "no signer token" in verdict.detail
+
+    def test_probe_guards_on_pidfile(self) -> None:
+        check = _make_ssh_bridge_check()
+        probe = " ".join(check.probe_cmd)
+        assert "[ -f " in probe and "ssh-agent.pid" in probe
 
 
 class TestVaultBridgeCheck:
@@ -89,6 +102,25 @@ class TestVaultBridgeCheck:
     def test_category_is_bridge(self) -> None:
         check = _make_vault_bridge_check(socket_mode=True)
         assert check.category == "bridge"
+
+    def test_socket_mode_ok_when_no_routed_provider(self) -> None:
+        # A task with nothing vault-routed never starts the loopback bridge;
+        # the guard reports an expected absence, not a dead bridge.
+        check = _make_vault_bridge_check(socket_mode=True)
+        verdict = check.evaluate(0, f"{_BRIDGE_ABSENT_MARKER}\n", "")
+        assert verdict.severity == "ok"
+        assert "no vault-routed provider" in verdict.detail
+
+    def test_tcp_mode_ok_when_no_routed_provider(self) -> None:
+        check = _make_vault_bridge_check(socket_mode=False)
+        verdict = check.evaluate(0, f"{_BRIDGE_ABSENT_MARKER}\n", "")
+        assert verdict.severity == "ok"
+
+    def test_both_modes_guard_on_their_pidfile(self) -> None:
+        for socket_mode, pidfile in ((True, "vault-loopback.pid"), (False, "vault-socket.pid")):
+            check = _make_vault_bridge_check(socket_mode=socket_mode)
+            probe = " ".join(check.probe_cmd)
+            assert "[ -f " in probe and pidfile in probe
 
 
 class TestCredentialFileChecks:

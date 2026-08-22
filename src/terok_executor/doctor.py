@@ -45,6 +45,13 @@ _SSH_AGENT_SOCKET = "/tmp/ssh-agent.sock"  # nosec B108
 _VAULT_LOOPBACK_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-loopback.pid"
 _VAULT_SOCKET_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-socket.pid"
 
+# ``ensure-bridges.sh`` writes a bridge's PID file only inside the branch that
+# actually starts it, so a missing PID file means the bridge is *intentionally*
+# absent (its start condition was not met), not dead.  The guarded probe prints
+# this marker on that path; ``_bridge_eval`` reads it back and reports the
+# bridge as an expected absence instead of a failure.
+_BRIDGE_ABSENT_MARKER = "terok-bridge-not-expected"
+
 # Matches phantom tokens: "terok-p-" prefix + 32 hex chars
 _PHANTOM_TOKEN_RE = re.compile(r"^terok-p-[0-9a-fA-F]{32}$")
 
@@ -86,29 +93,62 @@ def _build_agent_doctor_checks(
 # ── Check factories (in assembly order) ─────────────────────────────────
 
 
-def _make_ssh_bridge_check() -> DoctorCheck:
-    """Check that the SSH signer socat bridge is alive inside the container."""
+def _guarded_probe(pidfile: str, liveness: str) -> list[str]:
+    """Wrap a *liveness* test so a missing *pidfile* reads as an expected absence.
+
+    ``ensure-bridges.sh`` writes a bridge's PID file only inside the branch
+    that starts it, so the PID file is the shell's own record of "I started
+    this bridge".  A task with no vault-routed provider never starts the
+    vault bridge, and a task with no signer token never starts the SSH
+    bridge — neither writes its PID file.  A bare liveness probe would read
+    that legitimate absence as a dead bridge.  When *pidfile* is missing the
+    guard prints [`_BRIDGE_ABSENT_MARKER`][terok_executor.doctor._BRIDGE_ABSENT_MARKER]
+    and exits clean; otherwise it runs *liveness*.
+    """
+    return [
+        "bash",
+        "-c",
+        f'[ -f "{pidfile}" ] || {{ echo {_BRIDGE_ABSENT_MARKER}; exit 0; }}; {liveness}',
+    ]
+
+
+def _bridge_eval(
+    *, alive_detail: str, dead_detail: str, absent_detail: str
+) -> Callable[[int, str, str], CheckVerdict]:
+    """Build the evaluator shared by the guarded bridge probes.
+
+    The absence marker wins over the return code: a guard that short-
+    circuited exits ``0`` too, so the marker is the only way to tell an
+    expected absence (*absent_detail*, ``ok``) from a live bridge
+    (*alive_detail*, ``ok``) or a dead one (*dead_detail*, ``error``).
+    """
 
     def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:
-        """Evaluate bridge liveness probe."""
+        """Evaluate a guarded bridge liveness probe."""
+        if _BRIDGE_ABSENT_MARKER in stdout:
+            return CheckVerdict("ok", absent_detail)
         if rc == 0:
-            return CheckVerdict("ok", "SSH agent bridge alive (PID + socket)")
-        return CheckVerdict(
-            "error",
-            "SSH agent bridge dead — socat process or socket missing",
-            fixable=True,
-        )
+            return CheckVerdict("ok", alive_detail)
+        return CheckVerdict("error", dead_detail, fixable=True)
 
+    return _eval
+
+
+def _make_ssh_bridge_check() -> DoctorCheck:
+    """Check that the SSH signer socat bridge is alive — when the task has a signer."""
     return DoctorCheck(
         category="bridge",
         label="SSH agent bridge (socat)",
-        probe_cmd=[
-            "bash",
-            "-c",
+        probe_cmd=_guarded_probe(
+            _SSH_AGENT_PIDFILE,
             f"kill -0 $(cat {_SSH_AGENT_PIDFILE} 2>/dev/null) 2>/dev/null"
             f" && test -S {_SSH_AGENT_SOCKET}",
-        ],
-        evaluate=_eval,
+        ),
+        evaluate=_bridge_eval(
+            alive_detail="SSH agent bridge alive (PID + socket)",
+            dead_detail="SSH agent bridge dead — socat process or socket missing",
+            absent_detail="SSH agent bridge not started — no signer token for this task",
+        ),
         fix_cmd=["bash", "-lc", "source ensure-bridges.sh"],
         fix_description="Re-source ensure-bridges.sh to restart the socat bridge.",
     )
@@ -124,30 +164,28 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
     """
     if socket_mode:
         label = f"Vault loopback bridge (TCP → {CONTAINER_VAULT_SOCKET})"
-        probe = (
-            f"test -S {CONTAINER_VAULT_SOCKET}"
-            f" && kill -0 $(cat {_VAULT_LOOPBACK_PIDFILE} 2>/dev/null) 2>/dev/null"
+        pidfile = _VAULT_LOOPBACK_PIDFILE
+        liveness = (
+            f"test -S {CONTAINER_VAULT_SOCKET} && kill -0 $(cat {pidfile} 2>/dev/null) 2>/dev/null"
         )
         dead_detail = "Vault loopback bridge dead — HTTP clients cannot reach the mounted socket"
     else:
         label = "Vault socket bridge (/tmp/terok-vault.sock → broker TCP)"
-        probe = (
-            f"kill -0 $(cat {_VAULT_SOCKET_PIDFILE} 2>/dev/null) 2>/dev/null"
-            f" && test -S {LOOPBACK_BRIDGE_SOCKET}"
+        pidfile = _VAULT_SOCKET_PIDFILE
+        liveness = (
+            f"kill -0 $(cat {pidfile} 2>/dev/null) 2>/dev/null && test -S {LOOPBACK_BRIDGE_SOCKET}"
         )
         dead_detail = "Vault socket bridge dead — socat process or socket missing"
-
-    def _eval(rc: int, stdout: str, stderr: str) -> CheckVerdict:
-        """Evaluate bridge liveness probe."""
-        if rc == 0:
-            return CheckVerdict("ok", f"{label} alive")
-        return CheckVerdict("error", dead_detail, fixable=True)
 
     return DoctorCheck(
         category="bridge",
         label=label,
-        probe_cmd=["bash", "-c", probe],
-        evaluate=_eval,
+        probe_cmd=_guarded_probe(pidfile, liveness),
+        evaluate=_bridge_eval(
+            alive_detail=f"{label} alive",
+            dead_detail=dead_detail,
+            absent_detail=f"{label} not started — no vault-routed provider for this task",
+        ),
         fix_cmd=["bash", "-lc", "source ensure-bridges.sh"],
         fix_description="Re-source ensure-bridges.sh to restart the socat bridge.",
     )
