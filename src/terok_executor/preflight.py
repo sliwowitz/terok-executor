@@ -43,6 +43,11 @@ class CheckResult:
     message: str
 
 
+#: Readiness message for the shield kill-switch — the hooks are installed,
+#: the operator opted out, and every container gets an unrestricted network.
+SHIELD_DISABLED_MESSAGE = "shield disabled by operator (containers have unrestricted network)"
+
+
 @dataclass(frozen=True)
 class Preflight:
     """Holds the parameters that thread through every prerequisite check.
@@ -102,7 +107,7 @@ class Preflight:
 
         self._offer_ssh_key()
         self._offer_credentials()
-        self._note_shield_bypass()
+        self._note_shield_disabled()
 
         if all_ready and self.interactive:
             self._provider_hints()
@@ -198,12 +203,12 @@ class Preflight:
                 f"      Without credentials, {self.provider} will prompt for login on first turn."
             )
 
-    def _note_shield_bypass(self) -> None:
-        """Surface the bypass override when set — regular shield state is in sandbox-services."""
+    def _note_shield_disabled(self) -> None:
+        """Surface the kill-switch override when set — regular shield state is in sandbox-services."""
         from terok_executor.integrations.sandbox import check_environment
 
-        if check_environment().health == "bypass":
-            print("\n  Note: shield is in bypass mode — containers have unrestricted network")
+        if check_environment().health == "disabled":
+            print("\n  Note: shield is disabled — containers have unrestricted network")
 
     # ── Prerequisite probes ────────────────────────────────────────
 
@@ -268,12 +273,14 @@ class Preflight:
 
         # One SandboxConfig read keeps the probe from rebuilding it from
         # layered YAML on every call.
-        cfg = SandboxConfig()
-        # "bypass" means the hooks are installed but the operator opted
-        # out — that's a ready environment (the bypass itself is surfaced
-        # as a warning by ``_note_shield_bypass``), so only a genuinely
-        # missing/broken environment fails the check.
-        if check_environment(cfg).health not in ("ok", "bypass"):
+        health = check_environment(SandboxConfig()).health
+        # "disabled" means the hooks are installed but the operator opted
+        # out — a ready environment, named as such so ``setup --check``
+        # shows the unrestricted network; only a genuinely missing/broken
+        # environment fails the check.
+        if health == "disabled":
+            return CheckResult("sandbox services", True, SHIELD_DISABLED_MESSAGE)
+        if health != "ok":
             return CheckResult("sandbox services", False, "missing: shield hooks")
         return CheckResult("sandbox services", True, "shield ready")
 
@@ -338,6 +345,8 @@ class Preflight:
         ec = check_environment()
         if ec.health == "ok":
             return CheckResult("shield", True, "active")
+        if ec.health == "disabled":
+            return CheckResult("shield", True, SHIELD_DISABLED_MESSAGE)
         return CheckResult("shield", False, "not installed (containers have unrestricted network)")
 
     # ── Interactive remediation ────────────────────────────────────

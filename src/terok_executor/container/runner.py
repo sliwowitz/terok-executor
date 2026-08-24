@@ -565,8 +565,8 @@ class AgentRunner:
                 project-allow tier (git remote + custom domains), passed
                 straight through to the run spec.  Empty by default.
             override: Orchestrator-authored hosts for shield's t10 break-glass
-                override tier (single host/IP each), above the security-deny.
-                Empty by default.
+                override tier (a host, IP, or CIDR each — shield logs a range
+                as a warning), above the security-deny.  Empty by default.
 
         Returns:
             The container name (same as *name*).
