@@ -2272,7 +2272,7 @@ requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "rich", specifier = "~=15.0" },
     { name = "ruamel-yaml", specifier = "==0.19.1" },
-    { name = "terok-sandbox", url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a25/terok_sandbox-0.5.0a25-py3-none-any.whl" },
+    { name = "terok-sandbox", url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a26/terok_sandbox-0.5.0a26-py3-none-any.whl" },
     { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.3.1a6/terok_util-0.3.1a6-py3-none-any.whl" },
     { name = "tomli-w", specifier = "~=1.2" },
 ]
@@ -2307,8 +2307,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a25"
-source = { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a25/terok_sandbox-0.5.0a25-py3-none-any.whl" }
+version = "0.5.0a26"
+source = { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a26/terok_sandbox-0.5.0a26-py3-none-any.whl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2325,7 +2325,7 @@ dependencies = [
     { name = "terok-util" },
 ]
 wheels = [
-    { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a25/terok_sandbox-0.5.0a25-py3-none-any.whl", hash = "sha256:6afc0de3415a5da21dc20f34f807a485fa814dbf64f1fe6d7d3d2d3f554b28cd" },
+    { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.0a26/terok_sandbox-0.5.0a26-py3-none-any.whl", hash = "sha256:adf3c4fd1768ba47c6baca1b0a7bf3866a9814e88f9de13c7df9466237df736b" },
 ]
 
 [package.metadata]
