@@ -46,6 +46,9 @@ except PackageNotFoundError:
     pass  # editable install or running from source without metadata
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     # Names for type-checkers and IDEs only — never imported at runtime,
     # where ``__getattr__`` below resolves each on first use.  The
     # ``X as X`` redundant-alias form marks each as a deliberate
@@ -81,8 +84,10 @@ if TYPE_CHECKING:
     from .credentials.auth import (
         AUTH_PROVIDERS as AUTH_PROVIDERS,
         Authenticator as Authenticator,
+        AuthProvider as _AuthProvider,
         AuthSession as AuthSession,
         credential_provider as credential_provider,
+        load_auth_providers as load_auth_providers,
         prepare_oauth_session as prepare_oauth_session,
         store_api_key as store_api_key,
     )
@@ -114,6 +119,7 @@ if TYPE_CHECKING:
     from .roster import (
         AgentRoster as AgentRoster,
         EgressProjection as EgressProjection,
+        providers_config_dir as providers_config_dir,
     )
     from .sandbox import ensure_sandbox_ready as ensure_sandbox_ready
     from .storage import (
@@ -147,6 +153,7 @@ _LAZY: dict[str, str] = {
     "Authenticator": ".credentials.auth",
     "AuthSession": ".credentials.auth",
     "credential_provider": ".credentials.auth",
+    "load_auth_providers": ".credentials.auth",
     "prepare_oauth_session": ".credentials.auth",
     "store_api_key": ".credentials.auth",
     # Vault credential scanning
@@ -175,6 +182,7 @@ _LAZY: dict[str, str] = {
     # Roster (agent catalog + config resolution)
     "AgentRoster": ".roster",
     "EgressProjection": ".roster",
+    "providers_config_dir": ".roster",
     # Command registries
     "COMMANDS": "._tree",
     "AGENT_COMMANDS": ".commands:COMMANDS",
@@ -189,12 +197,16 @@ _LAZY: dict[str, str] = {
     "ensure_krun_host_keypair": ".krun",
 }
 
-#: The three ACP names that must resolve *without* triggering the roster
-#: bootstrap: they read a Unix socket / the credential DB, never the
-#: agent registry, so keeping them off the bootstrap path preserves a
-#: cheap host-side ``acp list`` and an ``acp``-free import.
+#: Names that must resolve *without* triggering the roster bootstrap: the ACP
+#: queries read a Unix socket / credential DB, while the config-path accessor
+#: only applies XDG resolution.  None needs the agent registry.
 _BOOTSTRAP_FREE = frozenset(
-    {"ACPEndpointStatus", "acp_socket_is_live", "list_authenticated_agents"}
+    {
+        "ACPEndpointStatus",
+        "acp_socket_is_live",
+        "list_authenticated_agents",
+        "providers_config_dir",
+    }
 )
 
 __all__ = ["__version__", *_LAZY]
@@ -203,22 +215,34 @@ _bootstrapped = False
 
 
 def _bootstrap_roster() -> None:
-    """Populate the module-level agent dicts from the YAML roster.
+    """Populate the module-level agent mappings from the YAML roster.
 
-    ``AGENTS`` / ``AUTH_PROVIDERS`` / ``OPENCODE_PROVIDERS`` are declared
-    empty in their defining modules and filled here, once, from the
-    shared roster.  The empty-then-fill dance is what breaks the
-    ``roster → auth/providers → roster`` import cycle: the leaf modules
-    stay dependency-free and the root package (the one layer allowed to
-    depend on the roster) does the wiring.
+    The defining modules create empty ``AGENTS``, ``AUTH_PROVIDERS``, and
+    ``OPENCODE_PROVIDERS`` mappings. This function fills the mappings one time
+    from the shared roster. It also sets the callback that writes routes after
+    authentication. The root package owns this setup to prevent the
+    ``roster → auth/providers → roster`` import cycle. The leaf modules do not
+    depend on the roster.
     """
     global AGENT_NAMES  # noqa: PLW0603 — tuple requires rebind
 
     import terok_executor.provider.providers as _reg
-    from terok_executor.credentials.auth import AUTH_PROVIDERS
+    from terok_executor.credentials.auth import (
+        AUTH_PROVIDERS,
+        _set_auth_context_loader,
+        _set_vault_route_refresher,
+    )
     from terok_executor.roster import AgentRoster
 
     roster = AgentRoster.shared()
+
+    def _load_current_auth_context() -> tuple[dict[str, _AuthProvider], Callable[[], Path]]:
+        """Load auth providers and route publication from one fresh roster."""
+        current = AgentRoster.load()
+        return current.auth_providers, current.ensure_vault_routes
+
+    _set_auth_context_loader(_load_current_auth_context)
+    _set_vault_route_refresher(roster.ensure_vault_routes)
     _reg.AGENTS.update(roster.agents)
     AUTH_PROVIDERS.update(roster.auth_providers)
     AGENT_NAMES = _reg.AGENT_NAMES = roster.agent_names

@@ -22,6 +22,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import stat
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
         SandboxConfig,
     )
     from terok_executor.roster.loader import AgentRoster
+    from terok_executor.roster.types import Provider
 
 _logger = logging.getLogger(__name__)
 
@@ -526,23 +528,41 @@ def _clamp_credential_mode(host_file: Path) -> None:
 
 def _set_provider_handle(
     env: dict[str, str],
-    provider: str,
+    provider: Provider,
     token: str,
     base_prefix: str,
-    serves: dict[str, str],
 ) -> None:
-    """Materialize the generic ``TEROK_PROVIDER_<NAME>_*`` handle a harness reads
-    to select *provider* at runtime via ``--provider``.
+    """Set the generic provider variables that OpenCode and Pi read.
 
-    Writes the bearer token plus a per-protocol base URL (``base_prefix`` + the
-    provider's served path).  Routed providers pass the vault loopback as
-    *base_prefix* and a phantom *token*; exposed providers pass the upstream
-    directly and the real token — same handle shape either way, so a consumer
-    treats both uniformly.
+    The variables contain a token, model data, and a base URL for each
+    protocol. The ``--provider`` option selects *provider* at run time. For a
+    routed provider, *base_prefix* is the vault loopback and *token* is a
+    phantom token. For an exposed provider, these values are the upstream URL
+    and the real token. The variable format is the same for both provider
+    types.
     """
-    handle = provider.upper()
+    handle = provider.name.upper()
     env[f"TEROK_PROVIDER_{handle}_TOKEN"] = token
-    for proto, path in serves.items():
+    env[f"TEROK_PROVIDER_{handle}_LABEL"] = provider.label or provider.name
+    env[f"TEROK_PROVIDER_{handle}_MODELS"] = json.dumps(
+        {
+            model_id: {
+                key: value
+                for key, value in {
+                    "name": model.name,
+                    "context_limit": model.context_limit,
+                    "output_limit": model.output_limit,
+                }.items()
+                if value is not None
+            }
+            for model_id, model in sorted(provider.models.items())
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    if provider.default_model:
+        env[f"TEROK_PROVIDER_{handle}_DEFAULT_MODEL"] = provider.default_model
+    for proto, path in provider.serves.items():
         proto_var = proto.upper().replace("-", "_")
         env[f"TEROK_PROVIDER_{handle}_BASE_{proto_var}"] = f"{base_prefix}{path}"
 
@@ -575,7 +595,7 @@ def _materialize_exposed_providers(
             continue
         token = cred.get("access_token") or cred.get("token") or cred.get("key")
         if token:
-            _set_provider_handle(env, provider_name, token, provider.upstream, provider.serves)
+            _set_provider_handle(env, provider, token, provider.upstream)
     return env
 
 
@@ -615,6 +635,19 @@ def _inject_vault_tokens(
     from terok_executor.integrations.sandbox import SandboxConfig
 
     cfg = SandboxConfig()
+
+    # Provider YAML is live host configuration, not image content. Update vault
+    # routes before token assembly. Then, the next task can use a new provider
+    # without a manual command or an image rebuild.
+    try:
+        roster.ensure_vault_routes(cfg=cfg)
+    except Exception:
+        _logger.exception("Vault route generation failed")
+        if vault_required:
+            raise SystemExit(
+                "Terok could not generate vault routes. Read the logs for details."
+            ) from None
+        return {}
 
     vault_routes = roster.vault_routes
     try:
@@ -701,7 +734,7 @@ def _inject_vault_tokens(
         # via --provider — not just its bound default.  Routed providers go
         # through the vault, so the base is the loopback plus the served path.
         if provider and provider.serves:
-            _set_provider_handle(env, name, tokens[name], location.url, provider.serves)
+            _set_provider_handle(env, provider, tokens[name], location.url)
         # The gitlab provider (glab CLI) uses its own host+protocol split; in
         # socket mode it rides the same in-container loopback bridge as every
         # other HTTP-only client.

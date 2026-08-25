@@ -4,17 +4,19 @@
 
 """Authenticates AI coding agents via OAuth or API key.
 
-Two public entry points:
+Three public entry points:
 
 - ``authenticate(project_id, provider, *, mounts_dir, image)`` — dispatches
   based on the provider's ``modes`` field: prompts for an API key (no
   container) or launches an auth container with the vendor CLI.
 - ``store_api_key(provider, api_key)`` — stores an API key directly in the
   credential DB (non-interactive fast path for CI).
+- ``load_auth_providers()`` — loads the current authentication providers for
+  long-running frontends.
 
-``AUTH_PROVIDERS`` is a registry dict populated from the YAML roster at
-package load time; ``authenticate`` looks up the provider by name and
-delegates to the matching flow.
+``AUTH_PROVIDERS`` is a compatibility snapshot populated from the YAML roster
+at package load time. Use ``load_auth_providers()`` to read the current provider
+configuration in a long-running process.
 """
 
 from __future__ import annotations
@@ -149,10 +151,30 @@ class AuthKeyConfig:
 
 
 AUTH_PROVIDERS: dict[str, AuthProvider] = {}
-"""All known auth providers (agents + tools), keyed by name.  Loaded from ``resources/agents/*.yaml``."""
+"""Initial auth-provider snapshot, keyed by name.
+
+Use [`load_auth_providers`][terok_executor.load_auth_providers] when provider
+configuration can change during the process lifetime.
+"""
+
+_vault_route_refresher: Callable[[], Path] | None = None
+"""Callback that writes vault routes for the active roster."""
+
+_auth_context_loader: Callable[[], tuple[dict[str, AuthProvider], Callable[[], Path]]] | None = None
+"""Callback that loads auth providers and route publication from one roster."""
 
 
 # ── Public API ──
+
+
+def load_auth_providers() -> dict[str, AuthProvider]:
+    """Load auth providers from the current roster configuration.
+
+    This function reads one fresh roster snapshot. Authentication operations
+    use the route publisher from the same snapshot.
+    """
+    providers, _ = _load_auth_context()
+    return dict(providers)
 
 
 @dataclass(frozen=True)
@@ -228,9 +250,10 @@ class Authenticator:
         With *device_auth*, the session runs the provider's headless
         device-code login (see [`prepare_oauth_session`][terok_executor.prepare_oauth_session]).
         """
-        info = AUTH_PROVIDERS.get(self.provider)
+        providers, route_refresher = _load_auth_context()
+        info = providers.get(self.provider)
         if not info:
-            available = ", ".join(AUTH_PROVIDERS)
+            available = ", ".join(providers)
             raise SystemExit(f"Unknown auth provider: {self.provider}. Available: {available}")
         if not info.supports_oauth:
             raise SystemExit(
@@ -238,7 +261,7 @@ class Authenticator:
             )
         if device_auth and not info.supports_device_auth:
             raise SystemExit(f"Provider {self.provider!r} has no device-auth login.")
-        return prepare_oauth_session(
+        return _prepare_oauth_session(
             info,
             project_id,
             mounts_dir=mounts_dir,
@@ -246,6 +269,7 @@ class Authenticator:
             expose_token=expose_token,
             credential_set=credential_set,
             device_auth=device_auth,
+            route_refresher=route_refresher,
         )
 
 
@@ -312,9 +336,10 @@ def authenticate(
     Raises ``SystemExit`` if the provider name is unknown or no usable
     auth mode remains after gating.
     """
-    info = AUTH_PROVIDERS.get(provider)
+    providers, route_refresher = _load_auth_context()
+    info = providers.get(provider)
     if not info:
-        available = ", ".join(AUTH_PROVIDERS)
+        available = ", ".join(providers)
         raise SystemExit(f"Unknown auth provider: {provider}. Available: {available}")
 
     # Gating: a provider's roster may declare OAuth, but the deployment
@@ -334,10 +359,17 @@ def authenticate(
             expose_token=expose_token,
             credential_set=credential_set,
             device_auth=device,
+            route_refresher=route_refresher,
         )
 
     def _api_key() -> None:
-        store_api_key(provider, _prompt_api_key(info), credential_set=credential_set)
+        _store_api_key(
+            provider,
+            _prompt_api_key(info),
+            credential_set=credential_set,
+            providers=providers,
+            route_refresher=route_refresher,
+        )
 
     methods: list[tuple[str, Callable[[], None]]] = []
     if has_oauth:
@@ -431,25 +463,101 @@ def store_api_key(
     api_key: str,
     credential_set: str = "default",
 ) -> None:
-    """Store an API key directly in the credential DB (no container needed).
+    """Store an API key in the credential database without a container.
 
-    This is the non-interactive fast path for automated workflows and CI.
-    The key is stored as ``{"type": "api_key", "key": "<value>"}`` under the
-    resolved provider name (see [`credential_provider`][terok_executor.credentials.auth.credential_provider]).
+    This function supports non-interactive workflows and CI. It stores the key
+    under the resolved provider name. See
+    [`credential_provider`][terok_executor.credentials.auth.credential_provider].
+    Then Terok writes the current provider routes to ``routes.json``. Terok
+    reports success only after it writes the routes. The next task can use a new
+    provider without a separate command.
     """
+    providers, route_refresher = _load_auth_context()
+    _store_api_key(
+        provider,
+        api_key,
+        credential_set=credential_set,
+        providers=providers,
+        route_refresher=route_refresher,
+    )
+
+
+# ── Private helpers ──
+
+
+def _store_api_key(
+    provider: str,
+    api_key: str,
+    *,
+    credential_set: str,
+    providers: dict[str, AuthProvider],
+    route_refresher: Callable[[], Path] | None,
+) -> None:
+    """Store an API key and publish routes from one auth-provider snapshot."""
     from terok_executor.integrations.sandbox import SandboxConfig
 
-    cred_provider = credential_provider(provider)
+    info = providers.get(provider)
+    if info is None:
+        available = ", ".join(providers)
+        raise SystemExit(f"Unknown auth provider: {provider}. Available: {available}")
+    cred_provider = info.credential_provider or provider
     cfg = SandboxConfig()
     db = cfg.open_credential_db(prompt_on_tty=True)
     try:
         db.store_credential(credential_set, cred_provider, {"type": "api_key", "key": api_key})
-        print(f"API key stored for {cred_provider} (set: {credential_set})")
     finally:
         db.close()
+    if route_refresher is None:
+        _refresh_vault_routes()
+    else:
+        _refresh_vault_routes(route_refresher)
+    print(f"Stored API key for {cred_provider}. Credential set: {credential_set}.")
 
 
-# ── Private helpers ──
+def _set_vault_route_refresher(refresher: Callable[[], Path]) -> None:
+    """Set the callback that writes routes after authentication."""
+    global _vault_route_refresher
+    _vault_route_refresher = refresher
+
+
+def _set_auth_context_loader(
+    loader: Callable[[], tuple[dict[str, AuthProvider], Callable[[], Path]]],
+) -> None:
+    """Set the callback that loads one current auth and route context."""
+    global _auth_context_loader
+    _auth_context_loader = loader
+
+
+def _load_auth_context() -> tuple[dict[str, AuthProvider], Callable[[], Path] | None]:
+    """Load providers and their matching route publisher as one snapshot."""
+    if _auth_context_loader is not None:
+        providers, route_refresher = _auth_context_loader()
+        return dict(providers), route_refresher
+    return dict(AUTH_PROVIDERS), _vault_route_refresher
+
+
+def _refresh_vault_routes(refresher: Callable[[], Path] | None = None) -> None:
+    """Write current provider routes after Terok stores credentials.
+
+    Terok stores credentials before it writes routes. If the route write fails,
+    the credential stays in storage. The exception reaches the caller before a
+    success message. Terok does not delete the credential because this
+    operation can replace a valid credential. To retry both operations, run
+    authentication again. You can also retry the route write with ``terok vault
+    routes``. Both commands are safe to repeat.
+
+    The package composition root supplies the callback. The roster owns the
+    [`AuthProvider`][terok_executor.credentials.auth.AuthProvider] definitions
+    and already depends on this module.
+    """
+    active_refresher = refresher if refresher is not None else _vault_route_refresher
+    if active_refresher is None:
+        raise RuntimeError(
+            "Terok cannot update vault routes because the roster is not initialized. "
+            "Use the terok_executor public authentication API."
+        )
+
+    active_refresher()
 
 
 def _prompt_api_key(info: AuthProvider) -> str:
@@ -526,6 +634,11 @@ class AuthSession:
     expose_token: bool = False
     """When True, real credential files are copied into the shared mount (tier 3)."""
 
+    _route_refresher: Callable[[], Path] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+    """Internal: route publisher from the roster that supplied ``provider``."""
+
     _tmpdir: tempfile.TemporaryDirectory[str] | None = field(
         default=None, repr=False, compare=False
     )
@@ -551,6 +664,7 @@ class AuthSession:
             mounts_base=self.mounts_dir,
             auth_provider=self.provider,
             expose_token=self.expose_token,
+            route_refresher=self._route_refresher,
         )
 
     def cleanup(self) -> None:
@@ -601,6 +715,31 @@ def prepare_oauth_session(
     port-forwarding ``extra_run_args`` are dropped: the device-code flow
     polls a remote endpoint, so there is no localhost callback to forward.
     """
+    _, route_refresher = _load_auth_context()
+    return _prepare_oauth_session(
+        provider,
+        project_id,
+        mounts_dir=mounts_dir,
+        image=image,
+        expose_token=expose_token,
+        credential_set=credential_set,
+        device_auth=device_auth,
+        route_refresher=route_refresher,
+    )
+
+
+def _prepare_oauth_session(
+    provider: AuthProvider,
+    project_id: str | None,
+    *,
+    mounts_dir: Path,
+    image: str,
+    expose_token: bool,
+    credential_set: str,
+    device_auth: bool,
+    route_refresher: Callable[[], Path] | None,
+) -> AuthSession:
+    """Build an OAuth session with its selected roster route publisher."""
     _check_podman()
 
     tmpdir = tempfile.TemporaryDirectory(prefix=f"terok-auth-{provider.name}-")
@@ -634,7 +773,7 @@ def prepare_oauth_session(
         "",
     ]
 
-    return AuthSession(
+    session = AuthSession(
         provider=provider,
         project_id=project_id,
         container_name=container_name,
@@ -646,6 +785,8 @@ def prepare_oauth_session(
         expose_token=expose_token,
         _tmpdir=tmpdir,
     )
+    session._route_refresher = route_refresher
+    return session
 
 
 def _run_auth_container(
@@ -657,6 +798,7 @@ def _run_auth_container(
     credential_set: str = "default",
     expose_token: bool = False,
     device_auth: bool = False,
+    route_refresher: Callable[[], Path] | None = None,
 ) -> None:
     """Synchronous CLI helper: prepare a session, run it inline, capture.
 
@@ -665,7 +807,7 @@ def _run_auth_container(
     run ``podman`` in the foreground, capture on success, swallow 130
     (Ctrl-C inside the container) without surfacing as failure.
     """
-    with prepare_oauth_session(
+    with _prepare_oauth_session(
         provider,
         project_id,
         mounts_dir=mounts_dir,
@@ -673,6 +815,7 @@ def _run_auth_container(
         expose_token=expose_token,
         credential_set=credential_set,
         device_auth=device_auth,
+        route_refresher=route_refresher,
     ) as session:
         print(session.banner)
         try:
@@ -722,6 +865,7 @@ def _capture_credentials(
     auth_provider: AuthProvider | None = None,
     *,
     expose_token: bool = False,
+    route_refresher: Callable[[], Path] | None = None,
 ) -> None:
     """Extract credentials from *auth_dir* and store in the credential DB.
 
@@ -762,12 +906,7 @@ def _capture_credentials(
     # background refresher rotate a token nobody brokers back to the mount.
     exposed_directly = expose_token and post_capture is not None
 
-    if exposed_directly:
-        _out.print(
-            f"\n[green]Credentials for {provider_name} "
-            "bypassing vault DB (exposed directly)[/green]"
-        )
-    else:
+    if not exposed_directly:
         try:
             from terok_executor.integrations.sandbox import SandboxConfig
 
@@ -776,11 +915,12 @@ def _capture_credentials(
             try:
                 # Store under the resolved provider name (claude → anthropic);
                 # the mount writer above stays keyed by the agent's auth dir.
-                db.store_credential(credential_set, credential_provider(provider_name), cred_data)
-                _out.print(
-                    f"\n[green]Credentials captured for {provider_name} "
-                    f"(set: {credential_set})[/green]"
+                cred_provider = (
+                    auth_provider.credential_provider or provider_name
+                    if auth_provider is not None
+                    else credential_provider(provider_name)
                 )
+                db.store_credential(credential_set, cred_provider, cred_data)
             finally:
                 db.close()
         except Exception as exc:
@@ -820,6 +960,21 @@ def _capture_credentials(
                 f"[yellow]Warning: could not apply post_capture_state for "
                 f"{provider_name}: {exc}[/yellow]"
             )
+
+    if route_refresher is None:
+        _refresh_vault_routes()
+    else:
+        _refresh_vault_routes(route_refresher)
+    if exposed_directly:
+        _out.print(
+            f"\n[green]Credentials for {provider_name} are available directly. "
+            "The vault database is bypassed.[/green]"
+        )
+    else:
+        _out.print(
+            f"\n[green]Stored credentials for {provider_name}. "
+            f"Credential set: {credential_set}.[/green]"
+        )
 
 
 def _claude_oauth_mount_writer(

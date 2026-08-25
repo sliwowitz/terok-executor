@@ -584,10 +584,20 @@ class TestTemplateRendering:
         assert 'LABEL ai.terok.agents="blablador,opencode"' in content
 
     def test_l1_installs_readiness_check(self) -> None:
-        # The agent→protocol map and the terok-agents command must ship in L1.
+        # The agent→protocol map and readiness commands must ship in L1.
         content = render_l1("terok-l0:test", family="deb")
         assert "COPY agent-protocols.json /usr/local/share/terok/agent-protocols.json" in content
         assert "cp /tmp/terok-scripts/terok-agents.py /usr/local/bin/terok-agents" in content
+
+    def test_l1_amends_stale_init_with_readiness_hook(self) -> None:
+        """An agent refresh adds the checkpoint without replacing or rebuilding L0."""
+        content = render_l1("terok-l0:test", family="deb")
+        assert "grep -qE" in content
+        assert content.count("grep -qE") == 2
+        assert "terok-agents( |$)" in content
+        assert "sed -i" in content
+        assert "terok-agents || true" in content
+        assert "cp /tmp/terok-scripts/init-ssh-and-repo.sh" not in content
 
     def test_l1_banner_targets_family_specific_bashrc(self) -> None:
         # Debian patches bash to source /etc/bash.bashrc; Fedora's bash never

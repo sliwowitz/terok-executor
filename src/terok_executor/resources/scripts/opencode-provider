@@ -12,8 +12,9 @@ variables injected by the host.
 Usage:
   opencode-provider [--list-models] [--base-url BASE_URL] [--]
 
-The script determines the provider name from argv[0] (e.g., "blablador" or "kisski")
-and reads TEROK_OC_{NAME}_* environment variables for configuration.
+The script gets the provider name from argv[0]. For example, the name can be
+"blablador" or "kisski". The script reads legacy TEROK_OC_{NAME}_* variables.
+It also reads the generic TEROK_PROVIDER_{NAME}_* variables from the host.
 """
 
 import argparse
@@ -25,6 +26,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib import request
+
+_OPENCODE_SCHEMA = "https://opencode.ai/config.json"
+_OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
 
 # Hardcoded fallbacks for manual invocation (when env vars not set)
 _FALLBACK_PROVIDERS = {
@@ -47,19 +51,29 @@ _FALLBACK_PROVIDERS = {
 }
 
 
-def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
-    """Resolve provider configuration from environment variables or fallbacks.
+def _provider_prefix(name: str) -> str:
+    """Return the generic environment-variable prefix for *name*."""
+    return f"TEROK_PROVIDER_{name.upper()}_"
 
-    *name* selects the provider — the basename of ``argv[0]`` (the symlinked
-    command) by default, or an explicit ``--provider`` override.  A curated
-    provider carries full ``TEROK_OC_{NAME}_*`` config; any other authenticated
-    provider the host materialized exposes a generic
-    ``TEROK_PROVIDER_{NAME}_BASE_OPENAI_CHAT`` handle, in which case models are
-    discovered from the API rather than pinned.
+
+def _positive_integer(value: object) -> int | None:
+    """Return a positive non-boolean integer, or return ``None``."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
+    """Return provider configuration from environment variables or defaults.
+
+    By default, the file name in ``argv[0]`` selects the provider. An explicit
+    ``--provider`` option overrides this name. A curated provider uses the full
+    ``TEROK_OC_{NAME}_*`` configuration. Other authenticated providers use the
+    generic ``TEROK_PROVIDER_{NAME}_*`` variables. These variables contain the
+    base URL, label, model data, and default model.
     """
     if name is None:
         name = os.path.basename(sys.argv[0])
     prefix = f"TEROK_OC_{name.upper()}_"
+    provider_prefix = _provider_prefix(name)
 
     # Curated provider — full TEROK_OC_* config injected by the host.
     base_url = os.environ.get(f"{prefix}BASE_URL")
@@ -68,21 +82,24 @@ def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
             "name": name,
             "display_name": os.environ.get(f"{prefix}DISPLAY_NAME", name),
             "base_url": base_url,
-            "preferred_model": os.environ.get(f"{prefix}PREFERRED_MODEL", ""),
+            "preferred_model": os.environ.get(
+                f"{provider_prefix}DEFAULT_MODEL",
+                os.environ.get(f"{prefix}PREFERRED_MODEL", ""),
+            ),
             "fallback_model": os.environ.get(f"{prefix}FALLBACK_MODEL", ""),
             "env_var_prefix": os.environ.get(f"{prefix}ENV_VAR_PREFIX", name.upper()),
             "config_dir": os.environ.get(f"{prefix}CONFIG_DIR", f".{name}"),
         }
 
     # Generic provider — any authenticated, openai-chat-compatible provider
-    # the host materialized via TEROK_PROVIDER_{NAME}_*.  No pinned models.
+    # the host materialized via TEROK_PROVIDER_{NAME}_*.
     generic_base = os.environ.get(f"TEROK_PROVIDER_{name.upper()}_BASE_OPENAI_CHAT")
     if generic_base:
         return {
             "name": name,
-            "display_name": name,
+            "display_name": os.environ.get(f"{provider_prefix}LABEL", name),
             "base_url": generic_base,
-            "preferred_model": "",
+            "preferred_model": os.environ.get(f"{provider_prefix}DEFAULT_MODEL", ""),
             "fallback_model": "",
             "env_var_prefix": name.upper(),
             "config_dir": f".{name}",
@@ -93,6 +110,38 @@ def _resolve_provider_config(name: str | None = None) -> dict[str, str]:
         return {**_FALLBACK_PROVIDERS[name], "name": name}
 
     raise SystemExit(f"Unknown provider: {name}")
+
+
+def _declared_models(name: str) -> dict[str, dict[str, Any]]:
+    """Return provider-neutral model data from the host.
+
+    Ignore invalid values to prevent an OpenCode start failure. The host schema
+    validates the normal input. This parser also accepts manual environments
+    and containers from different releases.
+    """
+    raw = os.environ.get(f"{_provider_prefix(name)}MODELS")
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    models: dict[str, dict[str, Any]] = {}
+    for model_id, metadata in payload.items():
+        if not isinstance(model_id, str) or not model_id or not isinstance(metadata, dict):
+            continue
+        model: dict[str, Any] = {}
+        name_value = metadata.get("name")
+        if isinstance(name_value, str) and name_value:
+            model["name"] = name_value
+        for key in ("context_limit", "output_limit"):
+            if (value := _positive_integer(metadata.get(key))) is not None:
+                model[key] = value
+        models[model_id] = model
+    return models
 
 
 def _config_dir(config: dict[str, str]) -> Path:
@@ -136,7 +185,7 @@ def _load_api_key(config: dict[str, str]) -> str | None:
     return val if isinstance(val, str) and val.strip() else None
 
 
-def _fetch_models(base_url: str, api_key: str) -> list[str] | None:
+def _fetch_models(base_url: str, api_key: str) -> dict[str, dict[str, Any]] | None:
     """Fetch available models from the API. Returns None on failure.
 
     ``OSError`` is the whole network-failure family here — ``HTTPError``,
@@ -168,14 +217,42 @@ def _fetch_models(base_url: str, api_key: str) -> list[str] | None:
         elif isinstance(payload.get("models"), list):
             items = payload["models"]
 
-    models: list[str] = []
+    models: dict[str, dict[str, Any]] = {}
     for item in items:
         if isinstance(item, dict):
             model_id = item.get("id")
             if isinstance(model_id, str) and model_id:
-                models.append(model_id)
+                metadata: dict[str, Any] = {}
+                name = item.get("name")
+                if isinstance(name, str) and name:
+                    metadata["name"] = name
+                context_limit = _positive_integer(item.get("context_window"))
+                if context_limit is not None:
+                    metadata["context_limit"] = context_limit
+                output_limit = _positive_integer(item.get("max_tokens"))
+                if output_limit is not None:
+                    metadata["output_limit"] = output_limit
+                models[model_id] = metadata
 
-    return sorted(set(models)) if models else None
+    return dict(sorted(models.items())) if models else None
+
+
+def _opencode_models(models: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Convert generic model data to the OpenCode provider schema.
+
+    OpenCode requires both ``limit.context`` and ``limit.output``. Some
+    providers specify only one limit. Omit an incomplete pair. Do not create an
+    unknown value.
+    """
+    projected: dict[str, dict[str, Any]] = {}
+    for model_id, metadata in models.items():
+        model: dict[str, Any] = {"name": metadata.get("name") or model_id}
+        context = metadata.get("context_limit")
+        output = metadata.get("output_limit")
+        if context is not None and output is not None:
+            model["limit"] = {"context": context, "output": output}
+        projected[model_id] = model
+    return projected
 
 
 def _build_provider_update(
@@ -183,22 +260,19 @@ def _build_provider_update(
     base_url: str,
     api_key: str,
     model: str,
-    models: list[str] | None,
+    models: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     """Build the provider-specific config fragment for opencode.json."""
-    model_map = {model: {"name": model}}
-    if models:
-        for mid in models:
-            if isinstance(mid, str) and mid:
-                model_map.setdefault(mid, {"name": mid})
+    model_map = _opencode_models(models)
+    model_map.setdefault(model, {"name": model})
 
     provider_name = config["name"]
     return {
-        "$schema": "https://opencode.ai/config.json",
+        "$schema": _OPENCODE_SCHEMA,
         "model": f"{provider_name}/{model}",
         "provider": {
             provider_name: {
-                "npm": "@ai-sdk/openai-compatible",
+                "npm": _OPENAI_COMPATIBLE_NPM,
                 "name": config["display_name"],
                 "options": {
                     "baseURL": base_url,
@@ -269,16 +343,34 @@ def _load_opencode_config(config: dict[str, str]) -> dict | None:
     return loaded if isinstance(loaded, dict) else None
 
 
-def _get_configured_models(config: dict[str, str], existing_config: dict | None) -> set[str]:
-    """Extract model IDs from existing provider config."""
+def _get_configured_models(
+    config: dict[str, str], existing_config: dict | None
+) -> dict[str, dict[str, Any]]:
+    """Return generic model data from an existing OpenCode configuration."""
     if not existing_config:
-        return set()
+        return {}
 
     try:
         models = existing_config.get("provider", {}).get(config["name"], {}).get("models", {})
-        return set(models.keys()) if isinstance(models, dict) else set()
+        if not isinstance(models, dict):
+            return {}
+        generic: dict[str, dict[str, Any]] = {}
+        for model_id, raw in models.items():
+            if not isinstance(model_id, str) or not isinstance(raw, dict):
+                continue
+            metadata: dict[str, Any] = {}
+            if isinstance(raw.get("name"), str):
+                metadata["name"] = raw["name"]
+            limit = raw.get("limit")
+            if isinstance(limit, dict):
+                if (context := _positive_integer(limit.get("context"))) is not None:
+                    metadata["context_limit"] = context
+                if (output := _positive_integer(limit.get("output"))) is not None:
+                    metadata["output_limit"] = output
+            generic[model_id] = metadata
+        return generic
     except (AttributeError, TypeError):
-        return set()
+        return {}
 
 
 def _get_configured_options(config: dict[str, str], existing_config: dict | None) -> dict:
@@ -291,6 +383,35 @@ def _get_configured_options(config: dict[str, str], existing_config: dict | None
         return options if isinstance(options, dict) else {}
     except (AttributeError, TypeError):
         return {}
+
+
+def _get_configured_display_name(
+    config: dict[str, str], existing_config: dict | None
+) -> str | None:
+    """Return the stored display name for the selected provider."""
+    if not existing_config:
+        return None
+
+    try:
+        name = existing_config.get("provider", {}).get(config["name"], {}).get("name")
+        return name if isinstance(name, str) else None
+    except (AttributeError, TypeError):
+        return None
+
+
+def _managed_config_needs_update(config: dict[str, str], existing_config: dict | None) -> bool:
+    """Return whether OpenCode-managed fields need repair."""
+    if not existing_config:
+        return True
+
+    providers = existing_config.get("provider")
+    provider = providers.get(config["name"]) if isinstance(providers, dict) else None
+    return (
+        existing_config.get("$schema") != _OPENCODE_SCHEMA
+        or "permission" not in existing_config
+        or not isinstance(provider, dict)
+        or provider.get("npm") != _OPENAI_COMPATIBLE_NPM
+    )
 
 
 def _write_opencode_config(config: dict[str, str], content: dict) -> Path:
@@ -378,38 +499,61 @@ def main() -> int:
     )
     base_url = base_url.rstrip("/")
 
-    # Fetch models from API — announce first: the refresh can legitimately
-    # take up to the 30s timeout, and a silent launcher reads as frozen.
-    print(f"Updating the model list from {config['display_name']}...", file=sys.stderr)
-    fetched_models = _fetch_models(base_url, api_key)
-
-    if args.list_models:
-        if fetched_models:
-            for model in fetched_models:
-                print(model)
-        else:
-            raise SystemExit(f"Failed to fetch models from {config['display_name']} API")
-        return 0
+    # Declared provider model data is the source of truth. It preserves limits.
+    # It also supports an API whose chat endpoint and model list have different
+    # locations. A provider without declared data keeps live /models discovery.
+    declared_models = _declared_models(config["name"])
+    fetched_models = None
+    if declared_models:
+        available_models = declared_models
+    else:
+        # Announce first: the refresh can legitimately take up to the 30s
+        # timeout, and a silent launcher reads as frozen.
+        print(f"Updating the model list from {config['display_name']}.", file=sys.stderr)
+        fetched_models = _fetch_models(base_url, api_key)
+        available_models = fetched_models or {}
 
     # Load existing config
     existing_config = _load_opencode_config(config)
     configured_models = _get_configured_models(config, existing_config)
 
-    # Determine which model to use
+    # A failed live refresh preserves the last known config.  Declared models
+    # never merge with that cache: their non-empty set is the provider's source
+    # of truth and intentionally suppresses /models discovery.
+    models = dict(available_models or configured_models)
+
+    if args.list_models:
+        if models:
+            for model in models:
+                print(model)
+        else:
+            raise SystemExit(f"Failed to fetch models from {config['display_name']} API")
+        return 0
+
+    # Determine which model to use.
     model = config["preferred_model"]
-    if fetched_models and config["preferred_model"] not in fetched_models:
+    if not model and models:
+        model = next(iter(models))
+    elif models and model not in models:
         fallback = config["fallback_model"]
-        if fallback in fetched_models:
+        if fallback in models:
             model = fallback
         else:
             # Both defaults gone — pick the first available model
-            model = fetched_models[0]
+            model = next(iter(models))
         print(
             f"Warning: Preferred model '{config['preferred_model']}' is no longer available.\n"
             f"Using '{model}'.\n"
-            "Check for new upstream versions of terok to update the default model.",
+            "Update default_model in the provider YAML file if this change is permanent.",
             file=sys.stderr,
         )
+    if not model:
+        raise SystemExit(
+            f"No models are available from {config['display_name']}. "
+            "Add a models map to the provider YAML file. Alternatively, make the "
+            "provider's /models endpoint available."
+        )
+    models.setdefault(model, {})
 
     # Update config if needed
     stored_options = _get_configured_options(config, existing_config)
@@ -417,20 +561,26 @@ def main() -> int:
         stored_options.get("baseURL") != base_url or stored_options.get("apiKey") != api_key
     )
 
-    if fetched_models:
-        fetched_set = set(fetched_models)
-        needs_update = fetched_set != configured_models or options_changed
-        if needs_update:
-            new_models = fetched_set - configured_models
-            if new_models:
-                print(f"New models available: {', '.join(sorted(new_models))}", file=sys.stderr)
-            update = _build_provider_update(config, base_url, api_key, model, fetched_models)
-            merged = _merge_provider_config(existing_config or {}, update, config)
-            _write_opencode_config(config, merged)
-    elif options_changed or not configured_models:
-        # Fetch failed: preserve known models if available
-        fallback_models = sorted(configured_models) if configured_models else [model]
-        update = _build_provider_update(config, base_url, api_key, model, fallback_models)
+    projected_models = _opencode_models(models)
+    configured_projection = _opencode_models(configured_models)
+    current_model = (existing_config or {}).get("model")
+    managed_model = not current_model or (
+        isinstance(current_model, str) and current_model.startswith(f"{config['name']}/")
+    )
+    model_changed = managed_model and current_model != f"{config['name']}/{model}"
+    name_changed = _get_configured_display_name(config, existing_config) != config["display_name"]
+    needs_update = (
+        projected_models != configured_projection
+        or options_changed
+        or model_changed
+        or name_changed
+        or _managed_config_needs_update(config, existing_config)
+    )
+    if needs_update:
+        new_models = set(models) - set(configured_models)
+        if new_models:
+            print(f"New models available: {', '.join(sorted(new_models))}", file=sys.stderr)
+        update = _build_provider_update(config, base_url, api_key, model, models)
         merged = _merge_provider_config(existing_config or {}, update, config)
         _write_opencode_config(config, merged)
 

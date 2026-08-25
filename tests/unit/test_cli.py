@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -12,6 +13,9 @@ from unittest.mock import patch
 import pytest
 
 from terok_executor.cli import main
+from terok_executor.roster import AgentRoster
+from terok_executor.roster.types import Provider, ProviderAuth
+from tests.constants import EXAMPLE_PROVIDER_UPSTREAM
 
 
 def _run_cli(*args: str) -> tuple[str, str, int]:
@@ -54,6 +58,32 @@ class TestAgentsListCommand:
         assert "native" in out
         assert "harness" in out
         assert "tool" in out
+
+    def test_agents_keeps_installable_provider_aliases_as_harnesses(self) -> None:
+        out, _, _ = _run_cli("agents", "list", "--all")
+        row = next(line for line in out.splitlines() if line.startswith("blablador "))
+
+        assert row.endswith("harness")
+
+    def test_agents_classifies_noninstallable_providers_as_providers(self) -> None:
+        roster = AgentRoster.shared()
+        provider = Provider(
+            name="example",
+            upstream=EXAMPLE_PROVIDER_UPSTREAM,
+            api_key_auth=ProviderAuth(header="Authorization", prefix="Bearer "),
+            serves={"openai-chat": "/v1"},
+        )
+        custom = dataclasses.replace(
+            roster,
+            _providers=roster.providers | {"example": provider},
+            _all_names=(*roster.all_names, "example"),
+        )
+
+        with patch.object(AgentRoster, "shared", return_value=custom):
+            out, _, _ = _run_cli("agents", "list", "--all")
+
+        row = next(line for line in out.splitlines() if line.startswith("example "))
+        assert row.endswith("provider")
 
     def test_agents_has_header(self) -> None:
         out, _, _ = _run_cli("agents", "list")

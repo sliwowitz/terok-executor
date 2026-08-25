@@ -375,7 +375,7 @@ def _handle_auth(
     ``--device-auth`` are mutually exclusive; passing both takes the API-key
     route (no container) and warns that ``--device-auth`` was ignored.
     """
-    from .credentials.auth import AUTH_PROVIDERS, Authenticator, store_api_key
+    from .credentials.auth import Authenticator, store_api_key
 
     if api_key is not None and device_auth:
         import sys
@@ -389,9 +389,6 @@ def _handle_auth(
     if api_key is not None:
         if not api_key.strip():
             raise SystemExit("API key cannot be empty.")
-        if agent not in AUTH_PROVIDERS:
-            available = ", ".join(AUTH_PROVIDERS)
-            raise SystemExit(f"Unknown provider: {agent}. Available: {available}")
         store_api_key(agent, api_key.strip())
     else:
         from .config_schema import ExecutorConfigView
@@ -415,7 +412,7 @@ def _handle_auth(
 
 
 def _handle_agents_list(*, show_all: bool = False) -> None:
-    """List registered agents."""
+    """List agents. Include tools and LLM providers when requested."""
     import sys
 
     from .roster import AgentRoster
@@ -439,8 +436,11 @@ def _handle_agents_list(*, show_all: bool = False) -> None:
         provider = roster.providers.get(name)
         if name in raw:
             kind = raw[name].get("kind", "native")
-        elif provider is not None and provider.opencode_config is not None:
-            # A harness-driven provider (Blablador, …) — no agent YAML of its own.
+        elif provider is not None and provider.install_spec is None:
+            # A provider-only roster entry combines with a harness; unlike the
+            # curated aliases below, it is not itself installable.
+            kind = "provider"
+        elif provider is not None:
             kind = "harness"
         else:
             kind = "native"
@@ -920,10 +920,13 @@ RUN_TOOL_COMMAND = CommandDef(
 
 AUTH_COMMAND = CommandDef(
     name="auth",
-    help="Authenticate an agent",
+    help="Authenticate an agent, a tool, or an LLM provider",
     handler=_handle_auth,
     args=(
-        ArgDef(name="agent", help="Agent or tool name (claude, codex, gh, ...)"),
+        ArgDef(
+            name="agent",
+            help="Name of an agent, a tool, or a provider. Examples: claude, gh, openrouter",
+        ),
         ArgDef(name="--api-key", help="Store an API key directly (skip interactive auth)"),
         ArgDef(
             name="--device-auth",
@@ -946,14 +949,14 @@ AGENTS_COMMAND = CommandDef(
     children=(
         CommandDef(
             name="list",
-            help="List registered agents (use --all to include tools like gh, glab)",
+            help="List agents. Use --all to include tools and LLM providers",
             handler=_handle_agents_list,
             args=(
                 ArgDef(
                     name="--all",
                     action="store_true",
                     dest="show_all",
-                    help="Include tools (gh, glab)",
+                    help="Include tools and LLM providers",
                 ),
             ),
         ),

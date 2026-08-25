@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -29,6 +31,48 @@ import terok_executor.resources.scripts as _scripts_pkg
 _LOOPBACK = "http://localhost:9419"
 _OPENAI_RESPONSES_BASE = f"{_LOOPBACK}/v1"
 _OPENAI_CHAT_BASE = f"{_LOOPBACK}/api/v1"
+_EXAMPLE_CHAT_BASE = f"{_LOOPBACK}/v1"
+_BLABLADOR_MODEL = "alias-huge"
+_EXAMPLE_MODEL = "example-chat"
+
+_PROVIDER_ENV_NAMES = frozenset({"TEROK_PROVIDER", "TEROK_PI_PROVIDER"})
+_PROVIDER_ENV_PREFIXES = ("TEROK_OC_", "TEROK_PROVIDER_")
+
+
+def _run_pi_extension(
+    env: dict[str, str], discovered_models: list[dict[str, object]] | None = None
+) -> dict:
+    """Execute the staged Pi extension under Node and return its registrations."""
+    extension = Path(_scripts_pkg.__file__).parent / "pi-vault-routes.ts"
+    discovery_payload = json.dumps({"data": discovered_models or []})
+    source = f"""
+        import registerProviders from {json.dumps(extension.as_uri())};
+        const registrations = [];
+        let fetchCalls = 0;
+        globalThis.fetch = async () => {{
+            fetchCalls += 1;
+            return {{ ok: true, json: async () => ({discovery_payload}) }};
+        }};
+        await registerProviders({{
+            registerProvider: (name, config) => registrations.push({{ name, config }}),
+        }});
+        process.stdout.write(JSON.stringify({{ registrations, fetchCalls }}));
+    """
+    try:
+        completed = subprocess.run(  # noqa: S603
+            ["node", "--experimental-strip-types", "--input-type=module", "-e", source],  # noqa: S607
+            check=True,
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"], "NODE_NO_WARNINGS": "1"} | env,
+        )
+    except FileNotFoundError:
+        pytest.skip("Node is unavailable for the staged Pi extension test")
+    except subprocess.CalledProcessError as exc:
+        if "experimental-strip-types" in exc.stderr and "bad option" in exc.stderr:
+            pytest.skip("Node 22+ is required to execute the staged TypeScript directly")
+        raise
+    return json.loads(completed.stdout)
 
 
 def _load_script(filename: str, module_name: str) -> ModuleType:
@@ -63,6 +107,14 @@ def ocp() -> ModuleType:
 def pp() -> ModuleType:
     """The loaded pi-provider launcher module."""
     return _load_script("pi-provider", "terok_pi_provider")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep staged-script tests independent of the enclosing Terok task."""
+    for name in tuple(os.environ):
+        if name in _PROVIDER_ENV_NAMES or name.startswith(_PROVIDER_ENV_PREFIXES):
+            monkeypatch.delenv(name)
 
 
 def _c_settings(args: list[str]) -> dict[str, str]:
@@ -253,6 +305,7 @@ class TestOpencodeProviderSelection:
         monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "blablador"])
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
@@ -279,6 +332,7 @@ class TestOpencodeProviderSelection:
         monkeypatch.setattr(ocp.sys, "argv", ["blablador"])
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)
@@ -289,6 +343,364 @@ class TestOpencodeProviderSelection:
         assert ocp.main() == 0
         assert launched["cmd"][0] == "opencode"
         assert "bash" not in launched["cmd"]
+
+    def test_failed_discovery_validates_preferred_against_cached_models(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed refresh selects the cached fallback instead of restoring a stale default."""
+        monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "blablador"])
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_FALLBACK_MODEL", "alias-code")
+        monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
+        existing = {
+            "model": f"blablador/{_BLABLADOR_MODEL}",
+            "provider": {
+                "blablador": {
+                    "options": {"baseURL": _LOOPBACK + "/v1", "apiKey": "tok"},
+                    "models": {"alias-code": {"name": "Cached fallback"}},
+                }
+            },
+        }
+        monkeypatch.setattr(ocp, "_fetch_models", lambda *_args: None)
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: existing)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        assert written["content"]["model"] == "blablador/alias-code"
+        assert set(written["content"]["provider"]["blablador"]["models"]) == {"alias-code"}
+
+    def test_failed_discovery_persists_preferred_into_an_empty_cache(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A selected preferred model is written without mutating the comparison baseline."""
+        monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "blablador"])
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_DISPLAY_NAME", "Blablador")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
+        monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
+        existing = {
+            "model": f"blablador/{_BLABLADOR_MODEL}",
+            "provider": {
+                "blablador": {
+                    "name": "Blablador",
+                    "options": {"baseURL": _LOOPBACK + "/v1", "apiKey": "tok"},
+                    "models": {},
+                }
+            },
+        }
+        monkeypatch.setattr(ocp, "_fetch_models", lambda *_args: None)
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: existing)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        assert set(written["content"]["provider"]["blablador"]["models"]) == {_BLABLADOR_MODEL}
+
+    def test_list_models_uses_cache_after_failed_discovery(
+        self,
+        ocp: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--list-models`` prints cached model IDs when live discovery fails."""
+        monkeypatch.setattr(
+            ocp.sys,
+            "argv",
+            ["opencode-provider", "--provider", "blablador", "--list-models"],
+        )
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
+        existing = {
+            "provider": {
+                "blablador": {
+                    "models": {"cached-model": {"name": "Cached model"}},
+                }
+            },
+        }
+        monkeypatch.setattr(ocp, "_fetch_models", lambda *_args: None)
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: existing)
+        monkeypatch.setattr(
+            ocp.subprocess,
+            "call",
+            lambda *_args, **_kwargs: pytest.fail("listing models must not launch OpenCode"),
+        )
+
+        assert ocp.main() == 0
+        assert capsys.readouterr().out == "cached-model\n"
+
+
+class TestProviderModelMetadata:
+    """Provider-neutral model declarations project into each harness schema."""
+
+    def test_opencode_skips_discovery_for_declared_context_only_model(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A declared context-only model avoids optional ``/models`` discovery.
+
+        OpenCode cannot represent a context-only ``limit`` object, so it keeps
+        the declared model and name while omitting the incomplete limit pair.
+        """
+        monkeypatch.setattr(
+            ocp.sys,
+            "argv",
+            ["opencode-provider", "--provider", "example"],
+        )
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT", _EXAMPLE_CHAT_BASE)
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_TOKEN", "tok")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_LABEL", "Example")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL", _EXAMPLE_MODEL)
+        monkeypatch.setenv(
+            "TEROK_PROVIDER_EXAMPLE_MODELS",
+            json.dumps(
+                {
+                    _EXAMPLE_MODEL: {
+                        "name": "Example Chat",
+                        "context_limit": 120_000,
+                    }
+                }
+            ),
+        )
+        monkeypatch.setattr(
+            ocp,
+            "_fetch_models",
+            lambda *_args: pytest.fail("declared models must suppress network discovery"),
+        )
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: None)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        provider = written["content"]["provider"]["example"]
+        assert provider["name"] == "Example"
+        assert provider["models"] == {_EXAMPLE_MODEL: {"name": "Example Chat"}}
+
+    def test_opencode_emits_complete_official_limit_pair(self, ocp: ModuleType) -> None:
+        """Known context and output limits map to OpenCode's required pair."""
+        models = {
+            _EXAMPLE_MODEL: {
+                "name": "Example Chat",
+                "context_limit": 120_000,
+                "output_limit": 8_192,
+            }
+        }
+        assert ocp._opencode_models(models) == {
+            _EXAMPLE_MODEL: {
+                "name": "Example Chat",
+                "limit": {"context": 120_000, "output": 8_192},
+            }
+        }
+
+    def test_opencode_rejects_invalid_cached_limits(self, ocp: ModuleType) -> None:
+        """Cached limits obey the same positive, non-boolean contract as live metadata."""
+        config = {"name": "example"}
+        existing = {
+            "provider": {
+                "example": {
+                    "models": {
+                        "valid": {"limit": {"context": 120_000, "output": 8_192}},
+                        "boolean": {"limit": {"context": True, "output": False}},
+                        "nonpositive": {"limit": {"context": 0, "output": -1}},
+                        "noninteger": {"limit": {"context": 120_000.0, "output": "8192"}},
+                    }
+                }
+            }
+        }
+
+        assert ocp._get_configured_models(config, existing) == {
+            "valid": {"context_limit": 120_000, "output_limit": 8_192},
+            "boolean": {},
+            "nonpositive": {},
+            "noninteger": {},
+        }
+
+    def test_pi_skips_discovery_and_preserves_declared_context(self) -> None:
+        """Pi receives a declared 120k context and defaults only its unknown output."""
+        result = _run_pi_extension(
+            {
+                "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
+                "TEROK_PROVIDER_EXAMPLE_TOKEN": "tok",
+                "TEROK_PROVIDER_EXAMPLE_LABEL": "Example",
+                "TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL": _EXAMPLE_MODEL,
+                "TEROK_PROVIDER_EXAMPLE_MODELS": json.dumps(
+                    {
+                        _EXAMPLE_MODEL: {
+                            "name": "Example Chat",
+                            "context_limit": 120_000,
+                        }
+                    }
+                ),
+            }
+        )
+
+        assert result["fetchCalls"] == 0
+        assert result["registrations"] == [
+            {
+                "name": "example",
+                "config": {
+                    "baseUrl": _EXAMPLE_CHAT_BASE,
+                    "api": "openai-completions",
+                    "name": "Example",
+                    "apiKey": "$TEROK_PROVIDER_EXAMPLE_TOKEN",
+                    "models": [
+                        {
+                            "id": _EXAMPLE_MODEL,
+                            "name": "Example Chat",
+                            "reasoning": False,
+                            "input": ["text"],
+                            "cost": {
+                                "input": 0,
+                                "output": 0,
+                                "cacheRead": 0,
+                                "cacheWrite": 0,
+                            },
+                            "contextWindow": 120_000,
+                            "maxTokens": 4_096,
+                        }
+                    ],
+                },
+            }
+        ]
+
+    def test_pi_prefers_default_model_after_discovery(self) -> None:
+        """The declared default leads a model list discovered from the endpoint."""
+        result = _run_pi_extension(
+            {
+                "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
+                "TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL": _EXAMPLE_MODEL,
+            },
+            discovered_models=[{"id": "another-model"}, {"id": _EXAMPLE_MODEL}],
+        )
+
+        models = result["registrations"][0]["config"]["models"]
+        assert [model["id"] for model in models] == [_EXAMPLE_MODEL, "another-model"]
+
+    def test_opencode_refreshes_a_changed_provider_label(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A label-only change updates the persistent OpenCode provider name."""
+        monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "example"])
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT", _EXAMPLE_CHAT_BASE)
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_TOKEN", "tok")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_LABEL", "New Example")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL", _EXAMPLE_MODEL)
+        monkeypatch.setenv(
+            "TEROK_PROVIDER_EXAMPLE_MODELS",
+            json.dumps({_EXAMPLE_MODEL: {"name": "Example Chat"}}),
+        )
+        existing = {
+            "model": f"example/{_EXAMPLE_MODEL}",
+            "provider": {
+                "example": {
+                    "name": "Old Example",
+                    "options": {"baseURL": _EXAMPLE_CHAT_BASE, "apiKey": "tok"},
+                    "models": {_EXAMPLE_MODEL: {"name": "Example Chat"}},
+                }
+            },
+        }
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: existing)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        assert written["content"]["provider"]["example"]["name"] == "New Example"
+
+    @pytest.mark.parametrize("drift", ["npm", "schema", "permission"])
+    def test_opencode_repairs_managed_config_drift(
+        self, ocp: ModuleType, monkeypatch: pytest.MonkeyPatch, drift: str
+    ) -> None:
+        """Repair managed fields and preserve an existing user permission."""
+        monkeypatch.setattr(ocp.sys, "argv", ["opencode-provider", "--provider", "example"])
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT", _EXAMPLE_CHAT_BASE)
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_TOKEN", "tok")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_LABEL", "Example")
+        monkeypatch.setenv("TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL", _EXAMPLE_MODEL)
+        monkeypatch.setenv(
+            "TEROK_PROVIDER_EXAMPLE_MODELS",
+            json.dumps({_EXAMPLE_MODEL: {"name": "Example Chat"}}),
+        )
+        user_permission = {"edit": "ask"}
+        existing = {
+            "$schema": ocp._OPENCODE_SCHEMA,
+            "model": f"example/{_EXAMPLE_MODEL}",
+            "permission": user_permission,
+            "provider": {
+                "example": {
+                    "npm": ocp._OPENAI_COMPATIBLE_NPM,
+                    "name": "Example",
+                    "options": {"baseURL": _EXAMPLE_CHAT_BASE, "apiKey": "tok"},
+                    "models": {_EXAMPLE_MODEL: {"name": "Example Chat"}},
+                }
+            },
+        }
+        if drift == "npm":
+            existing["provider"]["example"]["npm"] = "wrong-package"
+        elif drift == "schema":
+            existing["$schema"] = "wrong-schema"
+        else:
+            del existing["permission"]
+
+        monkeypatch.setattr(ocp, "_load_opencode_config", lambda *_args: existing)
+        written: dict[str, object] = {}
+        monkeypatch.setattr(
+            ocp,
+            "_write_opencode_config",
+            lambda _config, content: written.update(content=content),
+        )
+        monkeypatch.setattr(ocp.subprocess, "call", lambda _cmd, env=None: 0)
+
+        assert ocp.main() == 0
+        content = written["content"]
+        assert content["$schema"] == ocp._OPENCODE_SCHEMA
+        assert content["provider"]["example"]["npm"] == ocp._OPENAI_COMPATIBLE_NPM
+        expected_permission = {"*": "allow"} if drift == "permission" else user_permission
+        assert content["permission"] == expected_permission
+
+    def test_pi_rejects_array_model_metadata(self) -> None:
+        """Array metadata does not register a declared model or suppress discovery."""
+        result = _run_pi_extension(
+            {
+                "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
+                "TEROK_PROVIDER_EXAMPLE_TOKEN": "tok",
+                "TEROK_PROVIDER_EXAMPLE_MODELS": json.dumps({_EXAMPLE_MODEL: []}),
+            }
+        )
+
+        assert result["fetchCalls"] == 1
+        assert result["registrations"] == [
+            {
+                "name": "example",
+                "config": {
+                    "baseUrl": _EXAMPLE_CHAT_BASE,
+                    "api": "openai-completions",
+                    "apiKey": "$TEROK_PROVIDER_EXAMPLE_TOKEN",
+                },
+            }
+        ]
 
 
 class TestPiProvider:
@@ -435,6 +847,7 @@ class TestOpencodeModelFetchFeedback:
         monkeypatch.setenv("TEROK_OC_BLABLADOR_BASE_URL", _LOOPBACK + "/v1")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_DISPLAY_NAME", "Helmholtz Blablador")
         monkeypatch.setenv("TEROK_OC_BLABLADOR_ENV_VAR_PREFIX", "BLABLADOR")
+        monkeypatch.setenv("TEROK_OC_BLABLADOR_PREFERRED_MODEL", _BLABLADOR_MODEL)
         monkeypatch.setenv("TEROK_PROVIDER_BLABLADOR_TOKEN", "tok")
         monkeypatch.setattr(ocp, "_fetch_models", lambda *a: None)
         monkeypatch.setattr(ocp, "_write_opencode_config", lambda *a: None)

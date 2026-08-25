@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import stat
 from pathlib import Path
 from unittest.mock import patch
@@ -25,8 +26,12 @@ from terok_executor.integrations.sandbox import (
     CONTAINER_VAULT_SOCKET,
 )
 from terok_executor.roster import AgentRoster
+from terok_executor.roster.types import Provider, ProviderAuth, ProviderModel, VaultRoute
 from terok_executor.vault_addr import LOOPBACK_BRIDGE_SOCKET
+from tests.constants import EXAMPLE_PROVIDER_HOST, EXAMPLE_PROVIDER_UPSTREAM
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+_EXAMPLE_MODEL = "example-chat"
 
 
 def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpec | None:
@@ -728,6 +733,59 @@ class TestVaultTokenInjection:
         assert env["TEROK_PROVIDER_OPENROUTER_BASE_ANTHROPIC_MESSAGES"].endswith("/api")
         # The curated OpenCode base URL picks up the same /api/v1, not a bare /v1.
         assert env["TEROK_OC_OPENROUTER_BASE_URL"].endswith("/api/v1")
+
+    def test_new_provider_refreshes_routes_and_projects_model_metadata(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """Token assembly makes a new provider routable without an image rebuild.
+
+        The same materialized handle gives every harness the provider label,
+        default, and provider-neutral model limits.
+        """
+        provider = Provider(
+            name="example",
+            label="Example",
+            upstream=EXAMPLE_PROVIDER_UPSTREAM,
+            api_key_auth=ProviderAuth(header="Authorization", prefix="Bearer "),
+            serves={"openai-chat": "/v1"},
+            default_model=_EXAMPLE_MODEL,
+            models={
+                _EXAMPLE_MODEL: ProviderModel(
+                    name="Example Chat",
+                    context_limit=120_000,
+                )
+            },
+        )
+        route = VaultRoute(
+            provider="example",
+            route_prefix="example",
+            upstream=EXAMPLE_PROVIDER_UPSTREAM,
+            token_env={"_default": "EXAMPLE_API_KEY"},
+        )
+        live_roster = dataclasses.replace(
+            roster,
+            _providers=roster.providers | {"example": provider},
+            _vault_routes=roster.vault_routes | {"example": route},
+        )
+        cfg = _make_vault_db(tmp_path, cred_name="example")
+        cfg.routes_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg.routes_path.write_text("{}\n", encoding="utf-8")
+        spec = _spec(workspace, envs_dir)
+
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            result = assemble_container_env(spec, live_roster, caller_manages_vault=False)
+        env = result.env
+
+        assert "example" in json.loads(cfg.routes_path.read_text(encoding="utf-8"))
+        assert EXAMPLE_PROVIDER_HOST in result.egress.deny_to_vault
+        assert env["TEROK_PROVIDER_EXAMPLE_LABEL"] == "Example"
+        assert env["TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL"] == _EXAMPLE_MODEL
+        assert json.loads(env["TEROK_PROVIDER_EXAMPLE_MODELS"]) == {
+            _EXAMPLE_MODEL: {
+                "context_limit": 120_000,
+                "name": "Example Chat",
+            }
+        }
 
     def test_vault_ssh_only_no_provider_creds(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected even when no provider credentials are stored."""
