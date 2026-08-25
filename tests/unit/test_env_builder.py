@@ -25,6 +25,7 @@ from terok_executor.integrations.sandbox import (
     CONTAINER_VAULT_SOCKET,
 )
 from terok_executor.roster import AgentRoster
+from terok_executor.vault_addr import LOOPBACK_BRIDGE_SOCKET
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 
@@ -562,7 +563,7 @@ class TestVaultTokenInjection:
         with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
             result = assemble_container_env(spec, roster, caller_manages_vault=False)
 
-        assert result.env["ANTHROPIC_UNIX_SOCKET"] == CONTAINER_VAULT_SOCKET
+        assert result.env["ANTHROPIC_UNIX_SOCKET"] == LOOPBACK_BRIDGE_SOCKET
         assert result.env["TEROK_VAULT_SOCKET"] == CONTAINER_VAULT_SOCKET
         assert "TEROK_TOKEN_BROKER_PORT" not in result.env
 
@@ -598,7 +599,7 @@ class TestVaultTokenInjection:
         # GITLAB_API_HOST is now always set for glab — but never with "None".
         assert not any("None" in v for v in result.env.values())
         # Socket transport uses the mounted host socket directly.
-        assert result.env.get("ANTHROPIC_UNIX_SOCKET") == CONTAINER_VAULT_SOCKET
+        assert result.env.get("ANTHROPIC_UNIX_SOCKET") == LOOPBACK_BRIDGE_SOCKET
         assert result.env.get("TEROK_VAULT_SOCKET") == CONTAINER_VAULT_SOCKET
         # The in-container loopback port is advertised so ensure-bridges.sh
         # stands up its TCP→UNIX bridge.
