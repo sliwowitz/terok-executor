@@ -266,21 +266,23 @@ def resolve_vault_location(token_broker_port: int | None = None) -> VaultLocatio
     [`LOOPBACK_VAULT_PORT`][terok_executor.vault_addr.LOOPBACK_VAULT_PORT]
     — the bridge runs in both transports and forwards to the
     transport-specific target (host unix socket or per-container host
-    TCP port).  *token_broker_port* picks the socket-facade shape for
-    socket-only clients: ``/run/terok/vault/vault.sock`` in socket mode
-    (exposed through the read-only runtime-tree mount),
-    ``/tmp/terok-vault.sock`` in TCP mode (in-container socat unix→host-TCP).
+    TCP port).  The socket is always the bridge-owned
+    ``/tmp/terok-vault.sock``: a real socat socket in TCP mode, a link
+    to this generation's mounted host socket in socket mode.  One
+    generation-independent path, so the shared singleton agent configs
+    stay valid when the mount layout changes between container
+    generations.  *token_broker_port* is accepted for the callers that
+    already resolved the transport; both shapes now share the address.
     """
     from terok_executor.vault_addr import (
-        CONTAINER_VAULT_SOCKET,
         LOOPBACK_BRIDGE_SOCKET,
         LOOPBACK_VAULT_PORT,
     )
 
-    socket = LOOPBACK_BRIDGE_SOCKET if token_broker_port is not None else CONTAINER_VAULT_SOCKET
+    del token_broker_port  # both transports share the bridge-owned address
     return VaultLocation(
         url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
-        socket=socket,
+        socket=LOOPBACK_BRIDGE_SOCKET,
     )
 
 
