@@ -104,6 +104,47 @@ class TestAgentRunner:
         reg = runner.roster
         assert "claude" in reg.agent_names
 
+    def test_default_run_loads_one_fresh_roster(self, tmp_path: Path) -> None:
+        """A default runner uses one current roster snapshot for a complete run."""
+        import terok_executor.container.env as env_mod
+        from terok_executor.roster import AgentRoster
+
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+        fresh = AgentRoster.shared()
+        seen: list[AgentRoster] = []
+        real_assemble = env_mod.assemble_container_env
+
+        def _spy_assemble(spec, roster, **kwargs):  # type: ignore[no-untyped-def]
+            seen.append(roster)
+            return real_assemble(spec, roster, **kwargs)
+
+        with (
+            patch.object(AgentRoster, "load", return_value=fresh) as load,
+            patch.object(env_mod, "assemble_container_env", _spy_assemble),
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+        ):
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test")
+
+        load.assert_called_once_with()
+        assert seen == [fresh]
+
+    def test_run_keeps_injected_roster(self, tmp_path: Path) -> None:
+        """A runner with an injected roster does not load another snapshot."""
+        from terok_executor.roster import AgentRoster
+
+        sandbox = _mock_sandbox()
+        injected = AgentRoster.shared()
+        runner = AgentRunner(sandbox=sandbox, roster=injected)
+
+        with (
+            patch.object(AgentRoster, "load") as load,
+            patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
+        ):
+            runner.run_headless("claude", None, workspace=tmp_path, prompt="test")
+
+        load.assert_not_called()
+
     def test_mismatched_sandbox_and_runtime_rejected(self) -> None:
         """Passing a sandbox and a runtime from different backend types raises."""
         from terok_sandbox import NullRuntime, PodmanRuntime, Sandbox

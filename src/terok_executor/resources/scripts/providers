@@ -3,26 +3,28 @@
 # SPDX-License-Identifier: Apache-2.0
 # terok:container — this file is deployed into task containers, not used on the host.
 
-"""Print the readiness manifest concisely: which providers each agent can use.
+"""Show the providers that each agent can use in this task.
 
-A friendlier view of ``~/.terok/agents.json`` (written per task by
-``terok-agents``) — grouped by agent, coloured, ready pairs only.  ``--all``
-also lists the pairs that aren't ready (and why-not is implicit: the provider
-doesn't serve the agent's wire protocol, or isn't authenticated), plus the
-locked providers — candidates no one has authenticated yet, which the user
-can unlock by running ``terok auth <provider>`` on the host.  The default
-view compresses that into a one-line hint so the unlock path is never more
-than one command away.
+The script reads ``~/.terok/agents.json``. The ``terok-agents`` command writes
+this readiness manifest for each task. If the manifest is missing or invalid,
+the script creates it again from the current container state.
 
-Agents are the CLI tools (cyan, matching ``hilfe``); providers are the LLM
-endpoints (magenta).  Self-contained (stdlib only): it runs inside task
-containers where terok is not installed.
+By default, the script groups ready pairs by agent. The ``--all`` option also
+shows pairs that are not ready and providers that are locked. A pair is not
+ready if the protocol is not supported or the provider is not authenticated.
+A locked provider is not authenticated. Run ``terok auth <provider>`` on the
+host to unlock it. The default view shows this command in a short hint.
+
+Agents are command-line tools and are cyan. This color is the same as in
+``hilfe``. Providers are LLM services and are magenta. This script uses only
+the standard library because Terok is not installed in task containers.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -37,12 +39,26 @@ _RESET = "\033[0m"
 
 
 def main(argv: list[str]) -> int:
-    """Render the manifest; ``--all`` includes not-ready pairs."""
+    """Show the manifest. Use ``--all`` to include pairs that are not ready."""
     show_all = "--all" in argv[1:]
-    try:
-        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        print(f"No readiness manifest at {MANIFEST} - run inside a terok task.", file=sys.stderr)
+    manifest = _read_manifest(MANIFEST)
+    if manifest is None:
+        diagnostic = _regenerate_manifest()
+        manifest = _read_manifest(MANIFEST)
+    else:
+        diagnostic = ""
+    if manifest is None:
+        print(
+            f"Terok could not create a valid readiness manifest at {MANIFEST}.",
+            file=sys.stderr,
+        )
+        if diagnostic:
+            print(diagnostic, file=sys.stderr)
+        print(
+            "Run terok-agents to see the error. If the error continues, rebuild the "
+            "agent image for the project on the host.",
+            file=sys.stderr,
+        )
         return 1
 
     ready: dict[str, list[str]] = defaultdict(list)
@@ -74,6 +90,62 @@ def main(argv: list[str]) -> int:
         _print_locked_hint(locked)
         print(f"\n{_DIM}Use:{_RESET} {_CYAN}<agent>{_RESET} --provider {_MAGENTA}<name>{_RESET}")
     return 0
+
+
+def _read_manifest(path: Path) -> dict | None:
+    """Return a valid readiness manifest, or return ``None``."""
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    pairs = manifest.get("pairs")
+    if not isinstance(pairs, list):
+        return None
+    if any(
+        not isinstance(pair, dict)
+        or not isinstance(pair.get("agent"), str)
+        or not isinstance(pair.get("provider"), str)
+        for pair in pairs
+    ):
+        return None
+    protocols = manifest.get("protocols")
+    if not isinstance(protocols, list):
+        return None
+    if any(
+        not isinstance(row, dict)
+        or not isinstance(row.get("protocol"), str)
+        or not _is_string_list(row.get("candidates"))
+        or not _is_string_list(row.get("authenticated"))
+        for row in protocols
+    ):
+        return None
+    return manifest
+
+
+def _is_string_list(value: object) -> bool:
+    """Return whether *value* is a list that contains only strings."""
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _regenerate_manifest() -> str:
+    """Create the readiness manifest again and return diagnostic text."""
+    try:
+        result = subprocess.run(  # nosec B603, B607 - fixed L1 command, no shell
+            ["terok-agents"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as exc:
+        return f"Could not run terok-agents: {exc}"
+    stderr = result.stderr.strip()
+    if result.returncode:
+        status = f"terok-agents exited with status {result.returncode}."
+        return f"{status} {stderr}" if stderr else status
+    return stderr
 
 
 def _locked_providers(manifest: dict) -> list[tuple[str, list[str]]]:

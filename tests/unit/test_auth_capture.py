@@ -9,7 +9,7 @@ import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER, CredentialDB
@@ -19,10 +19,19 @@ from terok_executor.credentials.auth import (
     _capture_credentials,
     _claude_oauth_mount_writer,
     _codex_oauth_mount_writer,
+    _refresh_vault_routes,
     _write_claude_credentials_file,
     store_api_key,
 )
+from tests.constants import EXAMPLE_PROVIDER_UPSTREAM
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
+
+
+@pytest.fixture(autouse=True)
+def _use_static_auth_context(_bootstrap_agent_registry: None):
+    """Keep legacy registry-patching tests independent of the fresh loader."""
+    with patch("terok_executor.credentials.auth._auth_context_loader", None):
+        yield
 
 
 def _fake_jwt(payload: dict | None = None) -> str:
@@ -67,6 +76,94 @@ class TestCaptureCredentials:
         db.close()
         assert stored is not None
         assert stored["access_token"] == "sk-test-123"
+
+    def test_fresh_auth_descriptor_controls_credential_key(self, tmp_path: Path) -> None:
+        """Delayed capture does not resolve the credential key from the static registry."""
+        from terok_executor.credentials.auth import AuthProvider
+
+        provider = AuthProvider(
+            name="claude",
+            label="Claude",
+            host_dir_name="_claude-config",
+            container_mount="/home/dev/.claude",
+            command=["claude"],
+            banner_hint="",
+            credential_provider="current",
+        )
+        (tmp_path / ".credentials.json").write_text(
+            json.dumps({"claudeAiOauth": {"accessToken": "sk-test-123"}})
+        )
+        db_path = tmp_path / "proxy" / "credentials.db"
+        refresh_routes = MagicMock()
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch(
+                "terok_executor.credentials.auth.credential_provider",
+                side_effect=AssertionError("stale registry lookup"),
+            ),
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials(
+                "claude",
+                tmp_path,
+                "default",
+                mounts_base=tmp_path / "mounts",
+                auth_provider=provider,
+                route_refresher=refresh_routes,
+            )
+
+        refresh_routes.assert_called_once_with()
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        try:
+            assert db.load_credential("default", "current") is not None
+        finally:
+            db.close()
+
+    def test_oauth_capture_refreshes_vault_routes(self, tmp_path: Path) -> None:
+        """A durable OAuth credential publishes the current provider roster."""
+        cred = {"claudeAiOauth": {"accessToken": "sk-test-123"}}
+        (tmp_path / ".credentials.json").write_text(json.dumps(cred))
+        db_path = tmp_path / "proxy" / "credentials.db"
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch("terok_executor.credentials.auth._refresh_vault_routes") as refresh_routes,
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials("claude", tmp_path, "default")
+
+        refresh_routes.assert_called_once_with()
+
+    def test_route_failure_does_not_report_oauth_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Route publication errors propagate after storage and before success output."""
+        cred = {"claudeAiOauth": {"accessToken": "sk-test-123"}}
+        (tmp_path / ".credentials.json").write_text(json.dumps(cred))
+        db_path = tmp_path / "proxy" / "credentials.db"
+
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch(
+                "terok_executor.credentials.auth._refresh_vault_routes",
+                side_effect=OSError("route write failed"),
+            ),
+            pytest.raises(OSError, match="route write failed"),
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials("claude", tmp_path, "default")
+
+        assert "Credentials captured" not in capsys.readouterr().out
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        try:
+            assert db.load_credential("default", "anthropic") is not None
+        finally:
+            db.close()
 
     def test_captures_json_api_key(self, tmp_path: Path) -> None:
         """API key extraction works for JSON-based providers."""
@@ -321,6 +418,7 @@ class TestCaptureAppliesPostCaptureState:
             banner_hint="",
             modes=("api_key",),
             post_capture_state={".claude.json": {"hasCompletedOnboarding": True}},
+            credential_provider="anthropic",
         )
 
         # Set up a valid credential file so capture succeeds
@@ -354,6 +452,7 @@ class TestCaptureAppliesPostCaptureState:
             command=["claude"],
             banner_hint="",
             modes=("api_key",),
+            credential_provider="anthropic",
         )
 
         cred = {"claudeAiOauth": {"accessToken": "sk-test"}}
@@ -389,6 +488,7 @@ class TestCaptureAppliesPostCaptureState:
             modes=("api_key",),
             # Target file is a directory — write will fail
             post_capture_state={".claude.json": {"hasCompletedOnboarding": True}},
+            credential_provider="anthropic",
         )
 
         cred = {"claudeAiOauth": {"accessToken": "sk-test"}}
@@ -731,7 +831,10 @@ class TestCaptureWithExposeToken:
 
         db_path = tmp_path / "proxy" / "credentials.db"
         mounts = tmp_path / "mounts"
-        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch("terok_executor.credentials.auth._refresh_vault_routes") as refresh_routes,
+        ):
             mock_cfg_cls.return_value.db_path = db_path
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
@@ -740,10 +843,60 @@ class TestCaptureWithExposeToken:
                 "claude", tmp_path, "default", mounts_base=mounts, expose_token=True
             )
 
+        refresh_routes.assert_called_once_with()
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
         stored = db.load_credential("default", "claude")
         db.close()
         assert stored is None
+
+
+class TestRouteRefreshComposition:
+    """Bind authentication to route publication without a roster import cycle."""
+
+    def test_bootstrap_registers_shared_roster(self) -> None:
+        """The package composition root injects the shared roster operation."""
+        from terok_executor import _bootstrap_roster
+        from terok_executor.roster import AgentRoster
+
+        roster = AgentRoster.shared()
+        with (
+            patch("terok_executor.credentials.auth._set_vault_route_refresher") as register_refresh,
+            patch("terok_executor.credentials.auth._set_auth_context_loader") as register_context,
+        ):
+            _bootstrap_roster()
+
+        register_refresh.assert_called_once_with(roster.ensure_vault_routes)
+        context_loader = register_context.call_args.args[0]
+        current = MagicMock()
+        current.auth_providers = {"current": object()}
+        with patch.object(AgentRoster, "load", return_value=current) as load:
+            providers, refresh_routes = context_loader()
+
+        load.assert_called_once_with()
+        assert providers == current.auth_providers
+        assert refresh_routes == current.ensure_vault_routes
+
+    def test_public_accessor_loads_current_context(self) -> None:
+        """The public accessor does not expose the initial compatibility snapshot."""
+        from terok_executor import load_auth_providers
+
+        current = {"current": object()}
+        loader = MagicMock(return_value=(current, MagicMock()))
+
+        with patch("terok_executor.credentials.auth._auth_context_loader", loader):
+            loaded = load_auth_providers()
+
+        loader.assert_called_once_with()
+        assert loaded == current
+        assert loaded is not current
+
+    def test_missing_bootstrap_fails_clearly(self) -> None:
+        """Direct submodule use cannot silently skip route publication."""
+        with (
+            patch("terok_executor.credentials.auth._vault_route_refresher", None),
+            pytest.raises(RuntimeError, match="roster is not initialized"),
+        ):
+            _refresh_vault_routes()
 
 
 class TestStoreApiKey:
@@ -778,6 +931,85 @@ class TestStoreApiKey:
         stored = db.load_credential("work", "anthropic")  # claude → anthropic
         db.close()
         assert stored["key"] == "sk-ant-key"
+
+    def test_custom_provider_refreshes_routes(self, tmp_path: Path) -> None:
+        """Authenticating a user provider immediately publishes its vault route."""
+        from terok_executor.credentials.auth import AUTH_PROVIDERS
+        from terok_executor.roster import AgentRoster
+
+        providers_dir = tmp_path / "providers"
+        providers_dir.mkdir()
+        (providers_dir / "example.yaml").write_text(
+            f"upstream: {EXAMPLE_PROVIDER_UPSTREAM}\n"
+            "auth:\n  api_key: {}\n"
+            "serves:\n  openai-chat: /v1\n",
+            encoding="utf-8",
+        )
+        db_path = tmp_path / "vault" / "credentials.db"
+        routes_path = tmp_path / "vault" / "routes.json"
+        cfg = SimpleNamespace(
+            routes_path=routes_path,
+            open_credential_db=lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            ),
+        )
+
+        def load_current_context():
+            roster = AgentRoster.load()
+            return roster.auth_providers, roster.ensure_vault_routes
+
+        context_loader = MagicMock(side_effect=load_current_context)
+        with (
+            patch(
+                "terok_executor.roster.loader._legacy_user_providers_dir",
+                return_value=tmp_path / "legacy-providers",
+            ),
+            patch(
+                "terok_executor.roster.loader.providers_config_dir",
+                return_value=providers_dir,
+            ),
+            patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg),
+            patch("terok_executor.roster.loader.SandboxConfig", return_value=cfg),
+            patch(
+                "terok_executor.credentials.auth._auth_context_loader",
+                context_loader,
+            ),
+        ):
+            store_api_key("example", "sk-test-key")
+
+        context_loader.assert_called_once_with()
+        assert "example" not in AUTH_PROVIDERS
+        routes = json.loads(routes_path.read_text(encoding="utf-8"))
+        assert routes["example"] == {
+            "upstream": EXAMPLE_PROVIDER_UPSTREAM,
+            "auth_header": "Authorization",
+            "auth_prefix": "Bearer ",
+        }
+
+    def test_route_failure_does_not_report_api_key_success(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A stored key survives route failure without a false success message."""
+        db_path = tmp_path / "proxy" / "credentials.db"
+        with (
+            patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls,
+            patch(
+                "terok_executor.credentials.auth._refresh_vault_routes",
+                side_effect=OSError("route write failed"),
+            ),
+            pytest.raises(OSError, match="route write failed"),
+        ):
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            store_api_key("vibe", "sk-test-key")
+
+        assert "API key stored" not in capsys.readouterr().out
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        try:
+            assert db.load_credential("default", "mistral") is not None
+        finally:
+            db.close()
 
 
 class TestAuthenticateImageLaziness:
@@ -816,12 +1048,13 @@ class TestAuthenticateImageLaziness:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-ant-test",
             ),
-            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+            patch("terok_executor.credentials.auth._store_api_key") as mock_store,
         ):
             authenticate(None, "claude", mounts_dir=tmp_path, image=resolver)
 
         resolver.assert_not_called()
-        mock_store.assert_called_once_with("claude", "sk-ant-test", credential_set="default")
+        assert mock_store.call_args.args == ("claude", "sk-ant-test")
+        assert mock_store.call_args.kwargs["credential_set"] == "default"
 
     def test_oauth_choice_resolves_image(self, tmp_path: Path) -> None:
         """User picks ``1`` (OAuth) → resolver is called exactly once."""
@@ -909,7 +1142,7 @@ class TestAuthenticateImageLaziness:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-bbl-test",
             ),
-            patch("terok_executor.credentials.auth.store_api_key"),
+            patch("terok_executor.credentials.auth._store_api_key"),
         ):
             authenticate(None, "blablador", mounts_dir=tmp_path, image=resolver)
 
@@ -1005,7 +1238,7 @@ class TestAuthenticateOauthGate:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-ant-test",
             ),
-            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+            patch("terok_executor.credentials.auth._store_api_key") as mock_store,
             patch("terok_executor.credentials.auth._run_auth_container") as mock_run,
         ):
             authenticate(
@@ -1016,7 +1249,8 @@ class TestAuthenticateOauthGate:
                 oauth_enabled=False,
             )
 
-        mock_store.assert_called_once_with("claude", "sk-ant-test", credential_set="default")
+        assert mock_store.call_args.args == ("claude", "sk-ant-test")
+        assert mock_store.call_args.kwargs["credential_set"] == "default"
         mock_run.assert_not_called()
 
     def test_oauth_enabled_default_keeps_dual_prompt(self, tmp_path: Path) -> None:
@@ -1045,7 +1279,7 @@ class TestAuthenticateOauthGate:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-ant",
             ),
-            patch("terok_executor.credentials.auth.store_api_key"),
+            patch("terok_executor.credentials.auth._store_api_key"),
         ):
             authenticate(None, "claude", mounts_dir=tmp_path, image="img:tag")
         # Default ``oauth_enabled=True`` ⇒ user is asked to choose.
@@ -1170,7 +1404,12 @@ class TestPrepareOauthSession:
         """``session.capture()`` forwards to ``_capture_credentials`` with stored kwargs."""
         from terok_executor.credentials.auth import prepare_oauth_session
 
-        with patch("terok_executor.credentials.auth._check_podman"):
+        route_refresher = MagicMock()
+        context_loader = MagicMock(return_value=({}, route_refresher))
+        with (
+            patch("terok_executor.credentials.auth._auth_context_loader", context_loader),
+            patch("terok_executor.credentials.auth._check_podman"),
+        ):
             with prepare_oauth_session(
                 self._provider(),
                 "myproj",
@@ -1188,7 +1427,31 @@ class TestPrepareOauthSession:
                     mounts_base=tmp_path,
                     auth_provider=session.provider,
                     expose_token=True,
+                    route_refresher=route_refresher,
                 )
+        context_loader.assert_called_once_with()
+
+    def test_authenticator_keeps_one_context_through_delayed_capture(
+        self, tmp_path: Path, podman_free: list[list[str]]
+    ) -> None:
+        """OAuth lookup and delayed route publication use one roster snapshot."""
+        from terok_executor.credentials.auth import Authenticator
+
+        provider = self._provider()
+        refresh_routes = MagicMock()
+        context_loader = MagicMock(return_value=({"claude": provider}, refresh_routes))
+        with (
+            patch("terok_executor.credentials.auth._auth_context_loader", context_loader),
+            patch("terok_executor.credentials.auth._check_podman"),
+            Authenticator("claude").prepare_oauth(
+                None, mounts_dir=tmp_path, image="img"
+            ) as session,
+            patch("terok_executor.credentials.auth._capture_credentials") as capture,
+        ):
+            session.capture()
+
+        context_loader.assert_called_once_with()
+        assert capture.call_args.kwargs["route_refresher"] is refresh_routes
 
     def test_cleanup_is_idempotent(self, tmp_path: Path, podman_free: list[list[str]]) -> None:
         """Calling ``cleanup`` twice does not raise; the temp dir is released once."""
@@ -1373,10 +1636,11 @@ class TestAuthenticateCredentialSet:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-ant",
             ),
-            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+            patch("terok_executor.credentials.auth._store_api_key") as mock_store,
         ):
             authenticate(None, "claude", mounts_dir=tmp_path, credential_set="my-proj")
-        mock_store.assert_called_once_with("claude", "sk-ant", credential_set="my-proj")
+        assert mock_store.call_args.args == ("claude", "sk-ant")
+        assert mock_store.call_args.kwargs["credential_set"] == "my-proj"
 
     def test_dual_mode_oauth_choice_threads_set(self, tmp_path: Path) -> None:
         """Dual-prompt + ``1`` (OAuth) → ``_run_auth_container`` sees the set."""
@@ -1432,10 +1696,11 @@ class TestAuthenticateCredentialSet:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk-vibe",
             ),
-            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+            patch("terok_executor.credentials.auth._store_api_key") as mock_store,
         ):
             authenticate(None, "vibe", mounts_dir=tmp_path, credential_set="my-proj")
-        mock_store.assert_called_once_with("vibe", "sk-vibe", credential_set="my-proj")
+        assert mock_store.call_args.args == ("vibe", "sk-vibe")
+        assert mock_store.call_args.kwargs["credential_set"] == "my-proj"
 
     def test_oauth_only_threads_set(self, tmp_path: Path) -> None:
         """OAuth-only provider → ``_run_auth_container`` sees the set."""
@@ -1490,10 +1755,11 @@ class TestAuthenticateCredentialSet:
                 "terok_executor.credentials.auth._prompt_api_key",
                 return_value="sk",
             ),
-            patch("terok_executor.credentials.auth.store_api_key") as mock_store,
+            patch("terok_executor.credentials.auth._store_api_key") as mock_store,
         ):
             authenticate(None, "vibe", mounts_dir=tmp_path)
-        mock_store.assert_called_once_with("vibe", "sk", credential_set="default")
+        assert mock_store.call_args.args == ("vibe", "sk")
+        assert mock_store.call_args.kwargs["credential_set"] == "default"
 
 
 class TestDeviceAuthForcePath:

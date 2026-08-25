@@ -122,7 +122,75 @@ See the bundled definitions in `resources/agents/` for the schema:
 binary, headless flags, provider binding, auth modes, and git
 identity.  Endpoint definitions (upstream URL, wire auth) live
 separately in `resources/providers/`, with user overrides in
-`~/.config/terok/agent/providers/`.
+`~/.config/terok/providers/`.
+
+## Custom providers
+
+A provider is an LLM endpoint. It is not an agent that Terok installs. The YAML
+file name, without `.yaml`, is the provider name. The name must match
+`[a-z0-9]+`. Thus, use only lowercase ASCII letters and digits. Terok uses the
+name in environment variables and provider selectors. A new provider name must
+not match an existing agent or tool name.
+
+This example defines the `example` provider:
+
+```yaml title="~/.config/terok/providers/example.yaml"
+label: Example
+upstream: https://api.example.com
+
+auth:
+  api_key: {}
+
+serves:
+  openai-chat: /v1
+
+default_model: example-chat
+models:
+  example-chat:
+    name: Example Chat
+    limit:
+      context: 120000
+```
+
+`auth.api_key: {}` uses the standard `Authorization: Bearer <key>` format.
+Specify `header` or `prefix` only if the endpoint uses a different format. In
+legacy files, an explicit header and no prefix means that there is no prefix.
+Specify `prefix: "Bearer "` if you need this prefix. The `serves` map assigns an
+API base path to each supported protocol.
+
+When `models` is not empty, OpenCode and Pi do not request `/models`. This map
+is the source of model data. `default_model` specifies the preferred model. The
+optional model fields are `name`, `limit.context`, and `limit.output`. Pi uses
+each limit independently. OpenCode requires both limits in one `limit` block.
+Therefore, Terok writes this block only when both limits are available. In this
+example, OpenCode registers the model without a `limit` block.
+
+Authenticate on the host. Then start a new task:
+
+```bash
+terok-executor auth example
+
+# Inside a task that includes OpenCode or Pi:
+opencode --provider example
+pi --provider example
+```
+
+After successful authentication, Terok updates the vault routes automatically.
+Terok updates the routes again when a task starts. You do not have to run the
+`vault routes` command.
+
+You do not have to rebuild an image after you add or change a provider file.
+Add `opencode` or `pi` to `image.agents`. Do not add `example` to
+`image.agents`. Select the provider at run time. Start a new task to load the
+changed provider settings.
+
+Terok continues to read the legacy `~/.config/terok/agent/providers/`
+directory. Terok also reads provider files that contain the legacy `opencode:`
+block. Terok loads the legacy directory before the current provider directory.
+Thus, a file in the current directory overrides a legacy file that has the same
+name. Use the provider-neutral format for new files. For all fields, see the generated
+[Provider YAML reference](roster-reference.md#provider-yaml) and the
+[provider JSON Schema](schemas/provider.schema.json).
 
 ## Git identity
 

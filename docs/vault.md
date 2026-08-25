@@ -80,7 +80,7 @@ it in different ways, depending on what their SDK supports:
 | **Claude** | `ANTHROPIC_BASE_URL=http://localhost:9419` (+ `ANTHROPIC_UNIX_SOCKET` pointing at the vault socket) | Anthropic SDK respects these env vars |
 | **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars.  `openai_base_url` is keyed by stored credential type: OAuth → `{vault_url}/backend-api/codex`, API key → `{vault_url}/v1` |
 | **Vibe** | `config.toml` with `api_base` (+ `api_key_env_var`) in shared `~/.vibe` mount | Mistral SDK ignores the URL path in api_base, only uses host:port. Written by the `provider.config_patch` in YAML |
-| **Blablador / KISSKI / OpenRouter** | `TEROK_OC_<NAME>_BASE_URL` env var override | The OpenCode wrapper reads this; computed at launch as the vault URL plus the provider's served path (e.g. `/v1`, `/api/v1` for OpenRouter) |
+| **OpenCode / Pi** | Generic `TEROK_PROVIDER_<NAME>_*` variables | Terok creates a phantom token, a vault base URL, a label, and model data for each authenticated provider. The provider must support the agent protocol. Use `--provider <name>` to select the provider. Legacy aliases also keep their `TEROK_OC_<NAME>_*` settings. |
 | **gh** | `http_unix_socket` in `~/.config/gh/config.yml` | gh routes ALL API traffic through a Unix socket. See below. |
 | **glab** | `GITLAB_API_HOST` + `API_PROTOCOL=http` env vars | glab sends to `http://<api_host>/api/v4/...`; the host is `localhost:9419` in socket mode, `host.containers.internal:<port>` in TCP mode |
 | **CodeRabbit** | Real API key via sidecar `env_map` | CLI has no base URL override, so token broker routing is not possible. The sidecar receives the real key directly from the credential DB. |
@@ -161,6 +161,17 @@ serves:                          # protocol → served path (harness selection)
   anthropic-messages: ""
 ```
 
+Define a user provider in `~/.config/terok/providers/<name>.yaml`. Use the same
+schema as the bundled providers. For a typical OpenAI-compatible API,
+`auth: {api_key: {}}` selects the `Authorization: Bearer` format. Add a
+`serves:` entry to make the provider available to OpenCode and Pi. When the
+`models:` map is present, OpenCode and Pi do not request `/models`.
+
+See [Custom providers](agents.md#custom-providers) for a minimal example. Terok
+also reads the legacy directory `~/.config/terok/agent/providers/` and the
+legacy `opencode:` fields. Terok loads the current provider directory last.
+Thus, a current file overrides a legacy file that has the same name.
+
 The **delivery** half is the agent's `provider:` binding in
 `resources/agents/<name>.yaml`:
 
@@ -178,13 +189,14 @@ provider:
   config_patch: ...              # optional: file patch for the vault address
 ```
 
-A provider maps to exactly one vault route: the roster loader rejects
-a provider bound by more than one agent.  `routes.json` (regenerated
-by `terok-executor vault routes` and by `setup`) carries one entry per
-provider, keyed by its clean name — which is also what keeps a
-provider routable for harnesses even when no agent binds it (the
-curated OpenCode providers declare their endpoint plus an `opencode:`
-block and have no agent YAML at all).
+A provider maps to exactly one vault route. The roster loader rejects a
+provider that is bound to more than one agent. `routes.json` contains one entry
+for each provider. The provider name is the entry key. Thus, OpenCode or Pi can
+use a provider that is not bound to an agent.
+
+After successful authentication, Terok updates `routes.json`. Terok updates the
+file again before it creates phantom tokens for a task. The `setup` command and
+the `terok-executor vault routes` command also update the file.
 
 ### Agent-specific settings not in YAML
 
@@ -214,15 +226,19 @@ directory.  After exit, the extractor captures the OAuth token to the
 DB.  Codex additionally offers a headless device-code variant
 (`--device-auth`).
 
-**2. API key -- interactive prompt** (Vibe, Blablador, KISSKI,
-OpenRouter, glab, CodeRabbit, SonarCloud): Prompts for an API key on
-the terminal. No container needed.
+**2. API key -- interactive prompt** (Vibe, Blablador, KISSKI, OpenRouter,
+custom API-key providers, glab, CodeRabbit, SonarCloud): Terok asks for an API
+key in the terminal. You do not need a container.
 
 **3. API key -- non-interactive** (any provider with an auth flow):
 `terok-executor auth <provider> --api-key <key>`
 
 Credentials are stored keyed by the entry's *provider* (`claude` →
 `anthropic`, `gh` → `github`), matching the vault route names.
+
+After successful API-key or OAuth authentication, Terok updates `routes.json`.
+The next task can use the new provider without another command. At task start,
+Terok updates the file again to include provider-file changes.
 
 ### Post-auth config patching
 

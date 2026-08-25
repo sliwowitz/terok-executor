@@ -15,12 +15,14 @@ Directory layout::
     resources/agents/codex.yaml
     ...
     ~/.config/terok/agent/agents/      (user overrides / additions)
+    ~/.config/terok/providers/         (user provider overrides / additions)
 """
 
 from __future__ import annotations
 
 import importlib.resources
 import os
+import re
 import sys
 import tempfile
 from dataclasses import dataclass, field, replace
@@ -40,7 +42,6 @@ from .types import (
     HelpSpec,
     InstallSpec,
     MountDef,
-    OpenCodeProviderConfig,
     Provider,
     SidecarSpec,
     VaultRoute,
@@ -53,6 +54,9 @@ from .types import (
 _USER_AGENTS_DIR_NAME = "agents"
 _USER_PROVIDERS_DIR_NAME = "providers"
 _YAML_SUFFIX = ".yaml"
+_CONTAINER_HOME = "/home/dev"
+# Use names that the ``pi-provider`` environment-variable parser accepts.
+_PROVIDER_NAME_PATTERN = re.compile(r"[a-z0-9]+")
 
 ROSTER_VERSION = 3
 """Schema version of the agent-roster YAML format.
@@ -126,7 +130,7 @@ class AgentRoster:
 
     @property
     def all_names(self) -> tuple[str, ...]:
-        """Names of all entries (agents + tools)."""
+        """Return the names of agents, tools, and selectable LLM providers."""
         return self._all_names
 
     @property
@@ -171,11 +175,12 @@ class AgentRoster:
         Returns the names sorted alphabetically — the canonical order used
         for the OCI label, the tag suffix, and the in-container manifest.
 
-        Raises ``ValueError`` if a requested include or exclude name is not
-        in the roster, or ``TypeError`` if *selection* is a string other
-        than ``"all"`` (a bare name like ``"claude"`` would otherwise be
-        iterated into characters).  Excludes that name a known agent but
-        don't appear in the resolved include set are a no-op.
+        This method raises ``ValueError`` if an include or exclude specifies a
+        provider-only name or an unknown name. It raises ``TypeError`` if
+        *selection* is a string other than ``"all"``. This check prevents
+        iteration through the characters of a bare name such as ``"claude"``.
+        An exclusion has no effect if the agent is not in the resolved include
+        set.
         """
         if isinstance(selection, str):
             if selection != "all":
@@ -189,6 +194,18 @@ class AgentRoster:
         excludes = {t[1:] for t in selection if t.startswith("-")}
 
         referenced = (includes | excludes) - {"all"}
+        runtime_endpoints = {
+            name
+            for name, provider in self._providers.items()
+            if provider.serves and name not in self._installs
+        }
+        endpoint_only = referenced & runtime_endpoints
+        if endpoint_only:
+            raise ValueError(
+                f"These names are providers, not installable agents: "
+                f"{sorted(endpoint_only)!r}. Add 'opencode' or 'pi' to image.agents. "
+                "Then select a provider with --provider <name>."
+            )
         unknown = referenced - set(self._installs)
         if unknown:
             avail = ", ".join(sorted(self._installs))
@@ -377,14 +394,24 @@ class AgentRoster:
     # ── Process-singleton + selection parsing ──
 
     @staticmethod
+    def load() -> AgentRoster:
+        """Load a fresh roster from the current configuration.
+
+        This method reads the configuration on each call. It does not replace
+        the process-wide snapshot from
+        [`AgentRoster.shared`][terok_executor.roster.loader.AgentRoster.shared].
+        """
+        return load_roster()
+
+    @staticmethod
     def shared() -> AgentRoster:
         """Return the process-wide cached roster.
 
         Loaded on first access; every subsequent call returns the same
         instance.  Use this from anywhere that just needs the global
-        view; tests that mutate or replace the roster should call
-        [`load_roster`][terok_executor.roster.loader.load_roster] and
-        keep the result local.
+        view. Call
+        [`AgentRoster.load`][terok_executor.roster.loader.AgentRoster.load]
+        when the caller needs the current configuration.
         """
         return _shared_roster()
 
@@ -511,6 +538,17 @@ def _shared_roster() -> AgentRoster:
 # ── Public API ────────────────────────────────────────────────────────────
 
 
+def providers_config_dir() -> Path:
+    """Return the current directory for user provider files.
+
+    The function uses the shared XDG-aware Terok configuration root. The
+    default directory is ``~/.config/terok/providers/``. Terok also reads the
+    legacy ``~/.config/terok/agent/providers/`` directory. Do not use the
+    legacy directory for new files.
+    """
+    return namespace_config_dir() / _USER_PROVIDERS_DIR_NAME
+
+
 def load_roster() -> AgentRoster:
     """Load the agent roster from bundled YAML + user overrides.
 
@@ -519,7 +557,9 @@ def load_roster() -> AgentRoster:
     on top (allowing field-level overrides or entirely new agents).  Each
     merged entry is then validated through [`RawAgentYaml`][terok_executor.roster.schema.RawAgentYaml]
     — typos in section keys, wrong types, or unknown fields fail loud
-    instead of silently defaulting.
+    instead of silently defaulting. Providers use the bundled,
+    legacy-user, and current-user layers. See
+    [`providers_config_dir`][terok_executor.roster.loader.providers_config_dir].
     """
     raw = _load_bundled_agents()
 
@@ -530,7 +570,7 @@ def load_roster() -> AgentRoster:
         else:
             raw[name] = user_data
 
-    providers = _load_providers()
+    providers = _load_providers(reserved_names=frozenset(raw))
 
     agents: dict[str, Agent] = {}
     auth_providers: dict[str, AuthProvider] = {}
@@ -622,34 +662,38 @@ def load_roster() -> AgentRoster:
         if spec.web_ingress:
             web_ingress_names.add(name)
 
-    # Curated harness providers (Blablador, KISSKI, OpenRouter) carry their own
-    # endpoint + OpenCode config instead of riding an agent binding.  Synthesize
-    # the delivery route, API-key capture, mount, install and help the (now
-    # removed) shim agents used to contribute, so phantom-token routing and
-    # ``terok build/auth <provider>`` keep working without a duplicate agent.
+    # LLM endpoints without an agent binding still need credential delivery.
+    # New provider-neutral entries opt in through ``serves`` + API-key auth;
+    # legacy curated providers remain eligible through their ``opencode`` block.
+    # Install/help are independent decorations for the curated one-word aliases.
     for pname, provider in providers.items():
         oc = provider.opencode_config
-        if oc is None:
-            continue
-        if pname not in vault_routes:
-            vault_routes[pname] = _opencode_provider_route(provider, oc)
-        if pname not in auth_providers:
-            auth_prov = replace(_opencode_provider_auth(pname, oc), credential_provider=pname)
-            auth_providers[pname] = auth_prov
-            if auth_prov.host_dir_name not in seen_mounts:
-                seen_mounts[auth_prov.host_dir_name] = MountDef(
-                    host_dir=auth_prov.host_dir_name,
-                    container_path=auth_prov.container_mount,
-                    label=f"{auth_prov.label} config",
-                    credential_file=_OPENCODE_CREDENTIAL_FILE,
-                    provider=pname,
-                )
+        unbound_api_endpoint = (
+            pname not in vault_routes
+            and bool(provider.serves)
+            and provider.api_key_auth is not None
+        )
+        delivers_to_harness = oc is not None or unbound_api_endpoint
+        if delivers_to_harness:
+            if pname not in vault_routes:
+                vault_routes[pname] = _harness_provider_route(provider)
+            if pname not in auth_providers:
+                auth_prov = replace(_harness_provider_auth(provider), credential_provider=pname)
+                auth_providers[pname] = auth_prov
+                if auth_prov.host_dir_name not in seen_mounts:
+                    seen_mounts[auth_prov.host_dir_name] = MountDef(
+                        host_dir=auth_prov.host_dir_name,
+                        container_path=auth_prov.container_mount,
+                        label=f"{auth_prov.label} config",
+                        credential_file=_PROVIDER_CREDENTIAL_FILE,
+                        provider=pname,
+                    )
+            if pname not in all_names:
+                all_names.append(pname)
         if provider.install_spec is not None and pname not in installs:
             installs[pname] = provider.install_spec
         if provider.help_spec is not None and pname not in helps:
             helps[pname] = provider.help_spec
-        if pname not in all_names:
-            all_names.append(pname)
 
     return AgentRoster(
         _agents=agents,
@@ -680,8 +724,8 @@ def _load_yaml(text: str) -> dict:
     return result if isinstance(result, dict) else {}
 
 
-def _user_providers_dir() -> Path:
-    """Return ``~/.config/terok/agent/providers/``."""
+def _legacy_user_providers_dir() -> Path:
+    """Return the legacy provider-directory path."""
     return namespace_config_dir("agent") / _USER_PROVIDERS_DIR_NAME
 
 
@@ -711,25 +755,44 @@ def _load_raw_yaml_dir(pkg_or_path: object, *, label: str) -> dict[str, dict]:
     return out
 
 
-def _load_providers() -> dict[str, Provider]:
-    """Load + validate ``resources/providers/*.yaml`` with user overrides merged on top.
+def _load_providers(*, reserved_names: frozenset[str] = frozenset()) -> dict[str, Provider]:
+    """Load and validate bundled and user provider files.
 
-    Mirrors the agent load path: bundled definitions first, then user files in
-    ``~/.config/terok/agent/providers/`` deep-merged over them.  Each merged
-    entry is validated through [`RawProvider`][terok_executor.roster.schema.RawProvider]
-    so a typo fails loud instead of silently defaulting.
+    Terok loads the bundled definitions first. It then loads the legacy
+    ``~/.config/terok/agent/providers/`` directory. It loads the current
+    ``~/.config/terok/providers/`` directory last. Each later layer merges into
+    the earlier layers. Terok validates each result with
+    [`RawProvider`][terok_executor.roster.schema.RawProvider]. Thus, an invalid
+    field causes an error instead of a silent default.
     """
     raw = _load_raw_yaml_dir(
         importlib.resources.files("terok_executor.resources.providers"),
         label="providers",
     )
-    user_dir = _user_providers_dir()
-    if user_dir.is_dir():
-        for name, user_data in _load_raw_yaml_dir(user_dir, label="providers").items():
+    bundled_names = frozenset(raw)
+    user_layers = (
+        (_legacy_user_providers_dir(), "legacy providers"),
+        (providers_config_dir(), "providers"),
+    )
+    for user_dir, label in user_layers:
+        if not user_dir.is_dir():
+            continue
+        for name, user_data in _load_raw_yaml_dir(user_dir, label=label).items():
+            if name in reserved_names and name not in bundled_names:
+                raise ValueError(
+                    f"Provider {name!r} conflicts with an existing agent or tool. "
+                    "Rename the provider YAML file."
+                )
             raw[name] = deep_merge(raw[name], user_data) if name in raw else user_data
 
     providers: dict[str, Provider] = {}
     for name, data in sorted(raw.items()):
+        if _PROVIDER_NAME_PATTERN.fullmatch(name) is None:
+            raise ValueError(
+                f"Provider {name!r} has an invalid name. The YAML file name, without "
+                "'.yaml', must match '[a-z0-9]+'. Use only lowercase ASCII letters "
+                "and digits."
+            )
         try:
             spec = RawProvider.model_validate(data)
         except ValidationError as exc:
@@ -790,21 +853,23 @@ def _vault_route_from_binding(
     )
 
 
-_OPENCODE_CREDENTIAL_FILE = "config.json"
-"""File under the provider's config mount that holds the captured API key —
-the read-only credential shadow (terok-ai/terok#873) is layered over it."""
+_PROVIDER_CREDENTIAL_FILE = "config.json"
+"""File that stores the captured API key in the provider configuration mount.
+
+The read-only credential shadow (terok-ai/terok#873) covers this file.
+"""
 
 
-def _opencode_provider_route(provider: Provider, oc: OpenCodeProviderConfig) -> VaultRoute:
-    """Build the in-container delivery route for a harness-driven provider.
+def _harness_provider_route(provider: Provider) -> VaultRoute:
+    """Build a route that delivers provider credentials to OpenCode or Pi.
 
-    The endpoint half comes from *provider*; the delivery half is derived from
-    its OpenCode config (*oc*) — the phantom API key lands in
-    ``{env_var_prefix}_API_KEY`` (e.g. ``BLABLADOR_API_KEY``), the var the
-    ``opencode-provider`` wrapper reads.  This reconstructs the route the shim
-    agent's binding used to supply, now that the agent is gone.
+    Legacy OpenCode configuration uses its specified environment-variable
+    prefix. A provider-neutral entry uses an uppercase roster name. For
+    example, ``example`` creates ``EXAMPLE_API_KEY``.
     """
     auth_header, auth_prefix, oauth_extra_headers = provider.wire_auth()
+    oc = provider.opencode_config
+    env_prefix = oc.env_var_prefix if oc else provider.name.upper()
     return VaultRoute(
         provider=provider.name,
         route_prefix=provider.name,
@@ -814,8 +879,8 @@ def _opencode_provider_route(provider: Provider, oc: OpenCodeProviderConfig) -> 
         auth_header=auth_header,
         auth_prefix=auth_prefix,
         credential_type="api_key",
-        credential_file=_OPENCODE_CREDENTIAL_FILE,
-        token_env={"_default": f"{oc.env_var_prefix}_API_KEY"},
+        credential_file=_PROVIDER_CREDENTIAL_FILE,
+        token_env={"_default": f"{env_prefix}_API_KEY"},
         base_url_env="",
         socket_env="",
         shared_config_patch=None,
@@ -824,19 +889,20 @@ def _opencode_provider_route(provider: Provider, oc: OpenCodeProviderConfig) -> 
     )
 
 
-def _opencode_provider_auth(name: str, oc: OpenCodeProviderConfig) -> AuthProvider:
-    """Synthesize the API-key capture for a harness-driven provider.
+def _harness_provider_auth(provider: Provider) -> AuthProvider:
+    """Build API-key capture settings for a provider.
 
-    Mirrors the (now removed) shim agent's ``derive_opencode_auth`` so
-    ``terok auth <provider>`` prompts for an OpenAI-compatible key and lands it
-    in the provider's OpenCode config dir.
+    Legacy OpenCode fields specify the key hint and configuration directory. A
+    provider-neutral entry uses defaults that Terok derives from the name.
     """
-    hint = oc.api_key_hint or f"Get your API key at: {oc.auth_key_url}"
+    oc = provider.opencode_config
+    hint = (oc.api_key_hint or f"Get your API key at: {oc.auth_key_url}") if oc else ""
+    config_dir = oc.config_dir if oc else f".{provider.name}"
     return AuthProvider(
-        name=name,
-        label=oc.display_name,
-        host_dir_name=f"_{name}-config",
-        container_mount=f"/home/dev/{oc.config_dir}",
+        name=provider.name,
+        label=provider.label or provider.name,
+        host_dir_name=f"_{provider.name}-config",
+        container_mount=f"{_CONTAINER_HOME}/{config_dir}",
         command=[],
         banner_hint="",
         modes=("api_key",),

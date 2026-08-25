@@ -29,9 +29,11 @@ The views are derived from three in-container sources:
   * served protocols        — a ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>`` per
     protocol the provider actually serves
 
-plus two baked maps the environment cannot reconstruct: per-agent facts
-(protocol, label) in ``agent-protocols.json``, and the protocol → candidate
-providers universe in ``provider-protocols.json``.
+plus agent facts in ``agent-protocols.json``. These facts contain the protocol
+and label. The ``provider-protocols.json`` file supplies unauthenticated
+provider candidates. Live provider variables add current custom providers.
+Thus, a custom provider appears in the readiness views without an image
+rebuild.
 
 Run with no arguments to (re)write the manifest — done at container startup,
 and any time to refresh.  Run with ``--banner`` / ``--protocols`` to print just
@@ -150,7 +152,8 @@ def build_manifest(
         agent_facts: Agent name → ``{protocol, label}``, baked from the roster.
         provider_protocols: Protocol → candidate provider names, baked from the
             roster (the providers a user *could* authenticate, beyond the ones
-            the environment already carries).
+            the environment already carries). Live served protocols add custom
+            providers that were created after the image was built.
         env: The container environment, scanned for authenticated providers
             and the protocols each one serves.
 
@@ -179,13 +182,21 @@ def build_manifest(
         usable, reason = _assess(protocol, authenticated, served)
         agents.append({"name": name, "label": label, "usable": usable, "reason": reason})
 
+    candidates_by_protocol = {
+        protocol: set(candidates) for protocol, candidates in provider_protocols.items()
+    }
+    for provider, protocol_tokens in served.items():
+        for protocol_token in protocol_tokens:
+            protocol = protocol_token.lower().replace("_", "-")
+            candidates_by_protocol.setdefault(protocol, set()).add(provider)
+
     protocols = [
         {
             "protocol": protocol,
-            "candidates": candidates,
-            "authenticated": [p for p in candidates if p in authenticated],
+            "candidates": sorted(candidates),
+            "authenticated": sorted(candidates & authenticated),
         }
-        for protocol, candidates in sorted(provider_protocols.items())
+        for protocol, candidates in sorted(candidates_by_protocol.items())
     ]
     return {"version": MANIFEST_VERSION, "pairs": pairs, "agents": agents, "protocols": protocols}
 

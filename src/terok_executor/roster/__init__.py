@@ -20,13 +20,14 @@ if TYPE_CHECKING:
         SidecarSpec as SidecarSpec,
         VaultRoute as VaultRoute,
         load_roster as load_roster,
+        providers_config_dir as providers_config_dir,
     )
 
-#: Names resolvable through this package.  ``AgentRoster`` and its egress
-#: projection result ``EgressProjection`` are the stable public surface
-#: (re-exported as ``terok_executor.*``); the rest stay importable here for
-#: internal callers but are absent from ``__all__`` — reach for them via
-#: [`.loader`][terok_executor.roster.loader] when you need them.
+#: Names resolvable through this package.  ``AgentRoster``, its egress
+#: projection, and the current provider-config path accessor are the stable
+#: public surface (re-exported as ``terok_executor.*``); the rest stay
+#: importable here for internal callers but are absent from ``__all__`` — reach
+#: for them via [`.loader`][terok_executor.roster.loader] when you need them.
 _LAZY: dict[str, str] = {
     "AgentRoster": ".loader",
     "EgressProjection": ".loader",
@@ -34,9 +35,10 @@ _LAZY: dict[str, str] = {
     "SidecarSpec": ".loader",
     "VaultRoute": ".loader",
     "load_roster": ".loader",
+    "providers_config_dir": ".loader",
 }
 
-__all__ = ["AgentRoster", "EgressProjection"]
+__all__ = ["AgentRoster", "EgressProjection", "providers_config_dir"]
 
 
 def __getattr__(name: str) -> object:

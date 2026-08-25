@@ -130,6 +130,7 @@ class AgentRunner:
         self._sandbox: Sandbox | None = sandbox
         self._runtime: ContainerRuntime | None = runtime
         self._roster: AgentRoster | None = roster
+        self._uses_default_roster = roster is None
         self._cfg: SandboxConfig | None = cfg
 
     # ------------------------------------------------------------------
@@ -951,6 +952,7 @@ class AgentRunner:
 
         from .env import ContainerEnvSpec, assemble_container_env
 
+        run_roster = self._roster_for_run()
         is_tool = mode == "tool"
         task_id = _generate_task_id()
 
@@ -968,10 +970,10 @@ class AgentRunner:
 
         # Ensure images — sidecar L1 for tools, agent L1 for everything else
         if is_tool:
-            sidecar_spec = self.roster.get_sidecar_spec(agent)
+            sidecar_spec = run_roster.get_sidecar_spec(agent)
             image_tag = self._ensure_sidecar_image(sidecar_spec.tool_name)
         else:
-            agent_spec = self.roster.get_agent(agent)
+            agent_spec = run_roster.get_agent(agent)
             image_tag = self._ensure_images()
 
         provision = self._provision_workspace(workspace=workspace, repo=repo, gate=gate)
@@ -996,7 +998,7 @@ class AgentRunner:
                 env["TZ"] = tz
             if branch:
                 env["GIT_BRANCH"] = branch
-            env.update(self._direct_credential_env(agent))
+            env.update(self._direct_credential_env(agent, roster=run_roster))
             if provision.code_repo:
                 env["CODE_REPO"] = provision.code_repo
             if provision.gate_token is not None:
@@ -1054,7 +1056,7 @@ class AgentRunner:
 
             result = assemble_container_env(
                 ContainerEnvSpec(**spec_kwargs),
-                self.roster,
+                run_roster,
                 per_container=per_container,
             )
             env = dict(result.env)
@@ -1149,6 +1151,15 @@ class AgentRunner:
     # ------------------------------------------------------------------
     # Private helpers (in call order from _run)
     # ------------------------------------------------------------------
+
+    def _roster_for_run(self) -> AgentRoster:
+        """Return one roster snapshot for all calculations in a run."""
+        if not self._uses_default_roster:
+            return cast("AgentRoster", self._roster)
+
+        from terok_executor.roster import AgentRoster as _Roster
+
+        return _Roster.load()
 
     def _ensure_images(self) -> str:
         """Ensure L0+L1 images exist, return L1 tag."""
@@ -1255,18 +1266,21 @@ class AgentRunner:
         token = self.sandbox.mint_gate_token()
         return self.sandbox.gate_url(gate_path, token), token
 
-    def _direct_credential_env(self, tool_name: str) -> dict[str, str]:
+    def _direct_credential_env(
+        self, tool_name: str, *, roster: AgentRoster | None = None
+    ) -> dict[str, str]:
         """Load the real API key for a sidecar tool and return as env dict.
 
         Unlike vault phantom-token injection (which creates phantom tokens),
         this injects the actual credential.  Safe because sidecar containers
         have no agent code that could leak it.
         """
-        spec = self.roster.get_sidecar_spec(tool_name)
+        active_roster = roster if roster is not None else self.roster
+        spec = active_roster.get_sidecar_spec(tool_name)
         # A tool's credential is stored under its default provider when it has
         # one (``gh`` → ``github``), mirroring how an agent keys to its provider;
         # a tool without a provider binding keys under its own name.
-        auth_info = self.roster.auth_providers.get(tool_name)
+        auth_info = active_roster.auth_providers.get(tool_name)
         provider_key = (auth_info.credential_provider if auth_info else "") or tool_name
         cfg = self.sandbox.config
         try:

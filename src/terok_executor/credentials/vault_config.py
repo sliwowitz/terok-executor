@@ -47,15 +47,10 @@ class ConfigPatchError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class VaultLocation:
-    """Container-side addresses of the vault in both transports.
+    """Vault addresses that the resolver returns for container clients.
 
-    One or both fields are set depending on the active transport:
-
-    - Socket mode: *socket* points at the mounted host socket; *url* points
-      at the in-container TCP→UNIX loopback bridge for HTTP-only clients.
-    - TCP mode: *url* points at ``host.containers.internal:<broker_port>``;
-      *socket* points at a local socat bridge that forwards to the same
-      broker over TCP (for clients that can only speak HTTP-over-UNIX).
+    The resolver returns both fields for every transport. The ``url`` field is the
+    loopback URL. The ``socket`` field is ``LOOPBACK_BRIDGE_SOCKET``.
     """
 
     url: str

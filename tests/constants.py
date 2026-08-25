@@ -60,6 +60,18 @@ CONTAINER_BIN_DIR = "/usr/local/bin"
 WORKSPACE_ROOT = Path("/workspace")
 """Canonical workspace root referenced in bundled instructions assertions."""
 
+# ── Provider endpoints used by roster tests ─────────────────────────────────
+
+EXAMPLE_PROVIDER_HOST = "api.example.com"
+EXAMPLE_PROVIDER_UPSTREAM = f"https://{EXAMPLE_PROVIDER_HOST}"
+"""Synthetic endpoint used by custom-provider examples and schema tests."""
+
+LEGACY_PROVIDER_UPSTREAM = "https://legacy.example.test"
+"""Lower-precedence synthetic endpoint for provider-layering tests."""
+
+CANONICAL_PROVIDER_UPSTREAM = "https://canonical.example.test"
+"""Higher-precedence synthetic endpoint for provider-layering tests."""
+
 # ── Integration tests: real podman containers ────────────────────────────────
 # Only the podman-backed suite under tests/integration/ reads these.  They
 # name the one image, the one container-name prefix, and the file modes the

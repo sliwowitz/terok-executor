@@ -264,6 +264,20 @@ class ProviderAuth:
 
 
 @dataclass(frozen=True)
+class ProviderModel:
+    """Store provider-neutral data for one model from an LLM provider."""
+
+    name: str
+    """Model name that users see, or the provider model ID by default."""
+
+    context_limit: int | None = None
+    """Maximum context-window size in tokens, if the provider specifies it."""
+
+    output_limit: int | None = None
+    """Maximum output size in tokens, if the provider specifies it."""
+
+
+@dataclass(frozen=True)
 class Provider:
     """A vault-routed upstream — an LLM endpoint or a tool API.
 
@@ -281,6 +295,15 @@ class Provider:
 
     upstream: str
     """Upstream API base URL (e.g. ``"https://api.anthropic.com"``)."""
+
+    label: str = ""
+    """Provider name that users see, or the roster entry name by default."""
+
+    default_model: str | None = None
+    """Model ID that OpenCode or Pi uses when the operator does not select one."""
+
+    models: dict[str, ProviderModel] = field(default_factory=dict)
+    """Static model data, keyed by provider model ID."""
 
     api_key_auth: ProviderAuth | None = None
     """Wire auth used when an API key is the stored credential, if supported."""
