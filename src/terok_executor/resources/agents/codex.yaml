@@ -19,8 +19,15 @@ headless:
 auto_approve:
   flags: ["--yolo"]
 
+# Resume is a subcommand in Codex — `codex resume <id>` interactively,
+# `codex exec resume <id> <prompt>` headless — so the wrapper nests it under
+# the headless subcommand instead of passing a flag.  The ID comes from a
+# SessionStart hook in Codex's system config layer (codex-system-config.toml,
+# installed below), which Codex trusts without a review prompt.
 session:
-  supports_resume: false
+  supports_resume: true
+  resume_subcommand: resume
+  session_file: codex-session.txt
 
 capabilities:
   log_format: plain
@@ -91,7 +98,9 @@ install:
         chmod +x /usr/local/bin/terok-codex-acp \
                  /usr/local/bin/setup-codex-auth.sh \
                  /usr/local/bin/terok-native-provider; \
-        ln -sf terok-native-provider /usr/local/bin/codex-provider
+        ln -sf terok-native-provider /usr/local/bin/codex-provider; \
+        mkdir -p /etc/codex; \
+        cp /tmp/terok-scripts/codex-system-config.toml /etc/codex/config.toml
   run_as_dev: |
     RUN set -eux; \
         npm install -g @openai/codex; \

@@ -118,13 +118,58 @@ class TestGenerateAgentWrapper:
             wrapper = _provider_wrapper(name)
             assert "--terok-timeout" in wrapper, f"{name} missing timeout support"
 
+    def test_all_wrappers_take_terok_flags_and_frame_help(self) -> None:
+        """Every wrapper parses --terok-new-session and routes -h/--help through the framing."""
+        for name, p in AGENTS.items():
+            wrapper = _provider_wrapper(name)
+            assert "--terok-new-session) _new_session=1" in wrapper, name
+            assert f"-h|--help) _terok_wrapper_help {p.binary} " in wrapper, name
+            assert "--terok-timeout SECS" in wrapper, name
+
+    def test_help_lists_only_flags_the_wrapper_acts_on(self) -> None:
+        """--provider / --terok-new-session appear in the header only where they do something."""
+        assert "--provider NAME" in _provider_wrapper("opencode")
+        assert "--provider NAME" not in _provider_wrapper("pi")
+        assert "--terok-new-session    start" in _provider_wrapper("vibe")
+        assert "--terok-new-session    start" not in _provider_wrapper("copilot")
+
+    def test_resume_failure_hints_instead_of_retrying(self) -> None:
+        """Session-capable wrappers end a failed resume with a hint; nothing retries or deletes."""
+        for name in ("vibe", "opencode", "pi", "codex"):
+            wrapper = _provider_wrapper(name)
+            assert '_terok_resume_hint "$_name" "$_resumed" "$_session_file"' in wrapper, name
+            assert "_terok_resume_or_fresh" not in wrapper, name
+        assert "_terok_resume_hint" not in _provider_wrapper("copilot")
+
+    def test_shared_helpers_defined_once(self) -> None:
+        """The help framing and the resume hint live once at the top of the file."""
+        all_wrappers = _all_wrappers()
+        assert all_wrappers.count("_terok_wrapper_help()") == 1
+        assert all_wrappers.count("_terok_resume_hint()") == 1
+        assert "_terok_resume_or_fresh" not in all_wrappers
+
     def test_session_resume_uses_explicit_id(self) -> None:
-        """Providers with session_file use --session/--resume with explicit ID."""
+        """Providers with session_file use --session/--resume with the recorded ID."""
         for name in ("vibe", "opencode", "pi"):
             p = AGENTS[name]
             wrapper = _provider_wrapper(name)
-            assert p.resume_flag in wrapper, f"{name} missing resume flag"
-            assert f"cat {CONTAINER_TEROK_DIR}/{p.session_file}" in wrapper
+            assert f'_resume_args+=({p.resume_flag} "$_resumed")' in wrapper, name
+            assert f'"${{_terok_session_file:-{CONTAINER_TEROK_DIR}/{p.session_file}}}"' in wrapper
+            assert '_resumed="$(cat "$_session_file")"' in wrapper
+
+    def test_codex_resumes_by_subcommand(self) -> None:
+        """Codex leads with ``resume <id>`` interactively and nests it under ``exec`` headless."""
+        wrapper = _provider_wrapper("codex")
+        p = AGENTS["codex"]
+        assert p.resume_subcommand == "resume" and p.resume_flag is None
+        assert (
+            '"${_terok_session_file:-' + f"{CONTAINER_TEROK_DIR}/codex-session.txt" + '}"'
+            in wrapper
+        )
+        assert 'set -- resume "$_resumed" "$@"' in wrapper
+        assert 'set -- "$1" resume "$_resumed" "${@:2}"' in wrapper
+        assert '[ "${1:-}" = "exec" ]' in wrapper
+        assert "_resume_args+=" not in wrapper
 
     def test_opencode_provider_flag_routes_through_opencode_provider(self) -> None:
         """`opencode --provider X` swaps the runner for opencode-provider (which
@@ -285,10 +330,11 @@ class TestGenerateAgentWrapper:
 
     def test_initial_prompt_skipped_when_session_present(self) -> None:
         """Wrappers with a session_file gate the prompt pickup on no resume."""
-        for name in ("vibe", "opencode"):
+        for name in ("vibe", "opencode", "codex"):
             p = AGENTS[name]
             wrapper = _provider_wrapper(name)
-            assert f"[ ! -s {CONTAINER_TEROK_DIR}/{p.session_file} ]" in wrapper, (
+            assert f"{CONTAINER_TEROK_DIR}/{p.session_file}" in wrapper, name
+            assert '[ ! -s "$_session_file" ]' in wrapper, (
                 f"{name} initial-prompt block should defer to session resume"
             )
 

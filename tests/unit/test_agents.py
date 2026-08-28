@@ -30,6 +30,7 @@ from tests.constants import (
     CONTAINER_CLAUDE_MEMORY_OVERRIDE,
     CONTAINER_CLAUDE_SESSION_PATH,
     CONTAINER_INSTRUCTIONS_PATH,
+    CONTAINER_TEROK_DIR,
 )
 
 
@@ -63,10 +64,26 @@ class TestGenerateClaudeWrapper:
         assert 'command claude "${_args[@]}" "$@"' in wrapper
 
     def test_wrapper_resume_from_session_file(self) -> None:
-        """Wrapper adds --resume from claude-session.txt when it exists."""
+        """Wrapper adds --resume from claude-session.txt unless --terok-new-session says not to."""
         wrapper = generate_agent_wrapper(AGENTS["claude"])
         assert "claude-session.txt" in wrapper
-        assert "--resume" in wrapper
+        assert '_args+=(--resume "$_resumed")' in wrapper
+        assert "--terok-new-session) _new_session=1" in wrapper
+        assert '[ -z "$_new_session" ] && [ -s' in wrapper
+
+    def test_wrapper_hints_instead_of_retrying(self) -> None:
+        """A failed resume ends in a hint — no timing guard, no retry, no file removal."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        assert "_terok_resume_or_fresh" not in wrapper
+        assert "_terok_resume_hint claude" in wrapper
+        assert "rm -f" not in wrapper
+
+    def test_wrapper_frames_help(self) -> None:
+        """-h/--help route through the shared help framing with Claude's flag list."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        assert "-h|--help) _terok_wrapper_help claude" in wrapper
+        for flag in ("--terok-timeout SECS", "--provider NAME", "--terok-new-session"):
+            assert flag in wrapper, flag
 
     def test_wrapper_sets_memory_override(self) -> None:
         """Wrapper exports CLAUDE_COWORK_MEMORY_PATH_OVERRIDE."""
@@ -351,6 +368,13 @@ class TestProviderShortcutWrappers:
         code = "\n".join(line for line in alias.splitlines() if not line.lstrip().startswith("#"))
         for duplicated in ("initial-prompt.txt", "--terok-timeout", "_resume_args"):
             assert duplicated not in code
+
+    def test_alias_owns_its_session_file_and_name(self) -> None:
+        """The alias hands the wrapper its own session file and display name, unexported."""
+        alias = generate_provider_shortcut("blablador")
+        assert f"_terok_session_file={CONTAINER_TEROK_DIR}/blablador-session.txt" in alias
+        assert "_terok_wrapper_name=blablador" in alias
+        assert "export _terok_" not in alias
 
     def test_every_curated_provider_gets_an_alias(self) -> None:
         """Aliases are generated from the roster, so a new provider needs no wiring."""

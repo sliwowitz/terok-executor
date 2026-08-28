@@ -70,8 +70,8 @@ def generate_all_wrappers() -> str:
 
     The output file contains a shell function per agent (``claude()``,
     ``codex()``, ``vibe()``, …), each with correct git env vars, timeout
-    support, and session-resume logic, plus the two shared helper functions
-    they call.  This lets interactive CLI users invoke any agent regardless of
+    support, and session-resume logic, plus the shared helper functions they
+    call.  This lets interactive CLI users invoke any agent regardless of
     which agent was configured as default.
 
     Each curated OpenCode provider additionally gets a one-word alias
@@ -88,8 +88,8 @@ def generate_agent_wrapper(agent: Agent) -> str:
     """Render a single agent's wrapper function, without the shared helpers.
 
     Used to inspect one agent's wrapper in isolation; the full file (with
-    the ``_terok_resume_or_fresh`` / ``_terok_trust_workspace_for_vibe``
-    helpers) is produced by
+    the ``_terok_wrapper_help`` / ``_terok_resume_hint`` /
+    ``_terok_trust_workspace_for_vibe`` helpers) is produced by
     [`generate_all_wrappers`][terok_executor.provider.wrappers.generate_all_wrappers].
     """
     ctx = _wrapper_context(agent)
@@ -121,17 +121,14 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
 
     Every shell-significant value is resolved here so the template stays a pure
     layout concern: identities are shell-quoted, the session path is resolved,
-    and the headless/interactive command strings are assembled (including the
-    stale-session resume guard and the extra-args expansion).
+    the headless/interactive command strings are assembled (including the
+    extra-args expansion), and the ``--help`` header lists exactly the terok
+    flags this agent's wrapper acts on.
     """
     session_path = f"/home/dev/.terok/{agent.session_file}" if agent.session_file else ""
     binary = agent.binary
+    is_claude = agent.name == "claude"
     extra = _extra_args_expansion(agent, session_path)
-    wrap = (
-        f"_terok_resume_or_fresh {session_path} {agent.resume_flag} "
-        if session_path and agent.resume_flag
-        else ""
-    )
     # The agent's launcher (declared in its YAML ``wrapper.launcher``) decides
     # how the command is built.  ``on_provider_select`` agents run through a
     # ``_runner`` array so a runtime selection can swap the bare binary for
@@ -149,10 +146,15 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
     else:
         provider_launcher = ""
         cmd = binary
+    # Claude's macro carries its own session file and provider routing rather
+    # than the roster-driven ones, so it is flagged explicitly here.
+    resumes = bool(agent.resume_flag or agent.resume_subcommand)
+    has_session = is_claude or bool(session_path and resumes)
     return {
         "name": agent.name,
         "binary": binary,
-        "is_claude": agent.name == "claude",
+        "is_claude": is_claude,
+        "help_flags": _help_flags(bool(provider_launcher) or is_claude, has_session),
         "is_vibe": agent.name == "vibe",
         "is_codex": agent.name == "codex",
         "is_opencode": agent.name == "opencode",
@@ -166,10 +168,33 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
         "opencode_plugin_dir": _opencode_plugin_dir(agent),
         "session_path": session_path,
         "resume_flag": agent.resume_flag or "",
+        "resume_subcommand": agent.resume_subcommand or "",
+        "headless_subcommand": agent.headless_subcommand or "",
         "seed_prefix": _seed_prefix(agent),
-        "headless_cmd": f'{wrap}timeout "$_timeout" {cmd}{extra} "$@"',
-        "interactive_cmd": f'{wrap}command {cmd}{extra} "$@"',
+        "headless_cmd": f'timeout "$_timeout" {cmd}{extra} "$@"',
+        "interactive_cmd": f'command {cmd}{extra} "$@"',
     }
+
+
+def _help_flags(has_provider_flag: bool, has_session: bool) -> str:
+    """Render the terok-flag lines the ``-h``/``--help`` header shows for one agent.
+
+    Only flags this wrapper acts on are listed: ``--provider`` needs a
+    provider launcher (or Claude's env routing), ``--terok-new-session`` a
+    recorded session to skip (by flag or by subcommand); ``--terok-timeout``
+    is universal.
+    """
+    rows = [("--terok-timeout SECS", "run without a terminal; stop the agent after SECS seconds")]
+    if has_provider_flag:
+        rows.append(
+            (
+                "--provider NAME",
+                "route the agent through the authenticated provider NAME (run: providers)",
+            )
+        )
+    if has_session:
+        rows.append(("--terok-new-session", "start a new session; do not resume the recorded one"))
+    return "\n".join(f"    {flag:<22} {text}" for flag, text in rows)
 
 
 def _shortcut_context(name: str) -> dict[str, str]:
@@ -183,13 +208,16 @@ def _shortcut_context(name: str) -> dict[str, str]:
     Git authorship is handed over explicitly rather than derived inside the
     harness wrapper: a bare ``opencode --provider blablador`` stays attributed to
     the harness, while the pinned alias keeps the per-model attribution the ACP
-    wrapper already uses.
+    wrapper already uses.  The alias also owns a session file of its own
+    (``<name>-session.txt``), so two aliases used in one task never resume each
+    other's conversation.
     """
     return {
         "name": name,
         "target": OPENCODE_HARNESS,
         "author_name": shlex.quote(_display_name(name)),
         "author_email": shlex.quote(f"noreply@{name}.localhost"),
+        "session_path": f"/home/dev/.terok/{name}-session.txt",
     }
 
 

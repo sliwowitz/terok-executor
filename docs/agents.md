@@ -192,6 +192,34 @@ name. Use the provider-neutral format for new files. For all fields, see the gen
 [Provider YAML reference](roster-reference.md#provider-yaml) and the
 [provider JSON Schema](schemas/provider.schema.json).
 
+## Wrapper flags
+
+Inside a task, each agent command (`claude`, `codex`, `opencode`, …) is a
+shell function that terok-executor generates. The wrapper sets the git
+identity and sends the task's initial prompt; where the agent supports it, the
+wrapper also resumes the recorded session and routes the provider. It reads its
+own flags too. Put them before the agent flags:
+
+| Flag | Effect | Available on |
+|------|--------|--------------|
+| `--terok-timeout SECS` | Run without a terminal; stop the agent after `SECS` seconds | every wrapper |
+| `--provider NAME` | Route the agent through the authenticated provider `NAME` (`providers` lists the ready ones) | Claude and any agent with a provider launcher (`opencode`, `codex`, `vibe`, …) |
+| `--terok-new-session` | Start a new session; do not resume the recorded one | agents that resume a session (not `copilot`) |
+
+Each wrapper accepts only the flags it acts on, so `<agent> --help` lists that
+agent's own subset around the agent's usage text. If a resumed agent exits with
+an error, the wrapper reports it and points to `--terok-new-session`. The
+wrapper never retries. To skip the wrapper, run `command <agent>`.
+
+Each agent records its last session in its own file under
+`/home/dev/.terok/` (`claude-session.txt`, `codex-session.txt`,
+`opencode-session.txt`, …), and the pinned provider aliases (`blablador`,
+`kisski`) keep their own too. So several agents in one task never resume each
+other's conversation. Codex resumes through its `resume` subcommand
+(`codex resume <id>`, headless `codex exec resume <id> …`). A `SessionStart`
+hook, installed as `/etc/codex/config.toml` — Codex's trusted system config
+layer — records the id.
+
 ## Git identity
 
 By default, agents commit under a built-in AI identity. To record the

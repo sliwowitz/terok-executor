@@ -22,7 +22,7 @@ from terok_executor.roster import (
 )
 from terok_executor.roster.loader import _load_bundled_agents
 from terok_executor.roster.schema import RawAgentYaml
-from tests.constants import CONTAINER_BIN_DIR
+from tests.constants import CONTAINER_BIN_DIR, CONTAINER_TEROK_DIR
 
 
 def _agent_provider(name: str, data: dict) -> Agent:
@@ -258,7 +258,10 @@ class TestDeserializeProvider:
         assert p.headless_subcommand == "exec"
         assert p.prompt_flag == ""
         assert p.auto_approve_flags == ("--yolo",)
-        assert p.supports_session_resume is False
+        assert p.supports_session_resume is True
+        assert p.resume_flag is None
+        assert p.resume_subcommand == "resume"
+        assert p.session_file == "codex-session.txt"
 
     def test_blablador_opencode_config(self) -> None:
         # Blablador is a provider, not an agent — its OpenCode config drives the
@@ -738,12 +741,41 @@ class TestRegistryBehavior:
                 assert isinstance(k, str), f"{name}: env key {k!r} not str"
                 assert isinstance(v, str), f"{name}: env value {v!r} not str"
 
+    def test_codex_hook_targets_the_roster_session_file(self) -> None:
+        """Codex's SessionStart hook writes the file the roster resumes from.
+
+        The hook lives in a static resource (installed as Codex's system
+        config), so nothing binds its redirect target to the roster at build
+        time — this test is that binding, keeping the two in sync by hand.
+        """
+        import tomllib
+        from importlib import resources
+
+        config = tomllib.loads(
+            (
+                resources.files("terok_executor")
+                / "resources"
+                / "scripts"
+                / "codex-system-config.toml"
+            ).read_text(encoding="utf-8")
+        )
+        command = config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        target = command.rsplit(">", 1)[1].strip()
+
+        session_file = load_roster().agents["codex"].session_file
+        assert target == f"{CONTAINER_TEROK_DIR}/{session_file}"
+
     def test_session_resume_consistency(self) -> None:
-        """Providers with session resume must have a resume_flag."""
+        """Providers with session resume must say how — a flag or a subcommand."""
         reg = load_roster()
         for name, p in reg.agents.items():
             if p.supports_session_resume:
-                assert p.resume_flag, f"{name}: supports_resume but no resume_flag"
+                assert p.resume_flag or p.resume_subcommand, (
+                    f"{name}: supports_resume but neither resume_flag nor resume_subcommand"
+                )
+                assert not (p.resume_flag and p.resume_subcommand), (
+                    f"{name}: resume_flag and resume_subcommand are mutually exclusive"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +807,21 @@ class TestStrictValidation:
     def test_typos_and_unknowns_rejected(self, bad_data: dict) -> None:
         with pytest.raises(ValidationError, match="(Extra inputs|extra_forbidden)"):
             RawAgentYaml.model_validate(bad_data)
+
+    @pytest.mark.parametrize(
+        "session",
+        [
+            pytest.param({"supports_resume": True}, id="resume-without-mechanism"),
+            pytest.param(
+                {"supports_resume": True, "resume_flag": "--resume", "resume_subcommand": "resume"},
+                id="both-flag-and-subcommand",
+            ),
+        ],
+    )
+    def test_invalid_resume_strategy_rejected(self, session: dict) -> None:
+        """A resume claim needs exactly one mechanism — flag or subcommand, never both."""
+        with pytest.raises(ValidationError, match="resume_flag|resume_subcommand"):
+            RawAgentYaml.model_validate({"binary": "x", "session": session})
 
     def test_invalid_kind_rejected(self) -> None:
         with pytest.raises(ValidationError, match="kind"):

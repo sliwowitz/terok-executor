@@ -1,6 +1,6 @@
 {#-
   Renders terok-executor.sh: one shell wrapper function per agent provider,
-  plus the two shared helper functions they call.  The Python side
+  plus the shared helper functions they call.  The Python side
   (provider/wrappers.py) prepares a per-provider context dict; this template
   owns every line of shell.
 
@@ -10,6 +10,13 @@
 -#}
 {%- macro generic_wrapper(c) -%}
 {{ c.binary }}() {
+    # A pinned provider alias (blablador, kisski, …) reaches this wrapper with
+    # its own name and session file set as plain shell variables — visible in
+    # its subshell, inherited by no child process.
+    local _name="${_terok_wrapper_name:-{{ c.binary }}}"
+{%- if c.session_path %}
+    local _session_file="${_terok_session_file:-{{ c.session_path }}}"
+{%- endif %}
 {%- if c.refuse_pattern %}
     case "${1:-}" in
         {{ c.refuse_pattern }})
@@ -18,7 +25,7 @@
             return 1 ;;
     esac
 {%- endif %}
-    local _timeout=""
+    local _timeout="" _new_session=""
     # Git authorship: this agent's own, unless a pinned provider alias
     # (blablador, kisski, …) handed us its identity so its commits stay
     # attributed to the model behind the harness rather than the harness.
@@ -34,12 +41,16 @@
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --terok-timeout) _timeout="$2"; shift 2 ;;
+            --terok-new-session) _new_session=1; shift ;;
 {%- if c.provider_launcher %}
             --provider) _provider="$2"; shift 2 ;;
 {%- endif %}
             *) break ;;
         esac
     done
+    case "${1:-}" in
+        -h|--help) _terok_wrapper_help {{ c.binary }} "$_name" {{ c.help_flags | shquote }} "$@"; return $? ;;
+    esac
 {%- if c.provider_launcher %}
     # Route the agent.  With no provider selected it runs its binary verbatim;
     # a selected provider (--provider, or the container's TEROK_PROVIDER) re-points
@@ -93,11 +104,28 @@
         ln -sf "$_plugin_src" "$_plugin_dir/terok-session.mjs"
     fi
 {%- endif %}
-{%- if c.session_path and c.resume_flag %}
+{%- if c.session_path and (c.resume_flag or c.resume_subcommand) %}
+    local _resumed=""
+{%- if c.resume_flag %}
     local _resume_args=()
-    if [ -s {{ c.session_path }} ] && \
+{%- endif %}
+    if [ -z "$_new_session" ] && [ -s "$_session_file" ] && \
        { [ -n "$_timeout" ] || [ $# -eq 0 ]; }; then
-        _resume_args+=({{ c.resume_flag }} "$(cat {{ c.session_path }})")
+        _resumed="$(cat "$_session_file")"
+{%- if c.resume_flag %}
+        _resume_args+=({{ c.resume_flag }} "$_resumed")
+{%- endif %}
+    fi
+{%- endif %}
+{%- if c.resume_subcommand %}
+    # Resume is a subcommand here: it leads an interactive launch and nests
+    # under the headless subcommand ({{ c.headless_subcommand }} … → {{ c.headless_subcommand }} {{ c.resume_subcommand }} <id> …).
+    if [ -n "$_resumed" ]; then
+        if [ "${1:-}" = "{{ c.headless_subcommand }}" ]; then
+            set -- "$1" {{ c.resume_subcommand }} "$_resumed" "${@:2}"
+        else
+            set -- {{ c.resume_subcommand }} "$_resumed" "$@"
+        fi
     fi
 {%- endif %}
 {%- if c.is_codex %}
@@ -106,7 +134,7 @@
         _instr_args+=(-c 'model_instructions_file="/home/dev/.terok/instructions.md"')
 {%- endif %}
     # Pick up the task's initial prompt as the first message (one-shot).
-    if [ -z "$_timeout" ] && [ $# -eq 0 ]{% if c.session_path %} && [ ! -s {{ c.session_path }} ]{% endif %} && [ -s /home/dev/.terok/initial-prompt.txt ]; then
+    if [ -z "$_timeout" ] && [ $# -eq 0 ]{% if c.session_path %} && [ ! -s "$_session_file" ]{% endif %} && [ -s /home/dev/.terok/initial-prompt.txt ]; then
         set -- {{ c.seed_prefix }}"$(cat /home/dev/.terok/initial-prompt.txt)"
         mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
     fi
@@ -121,7 +149,7 @@ if files:
         sid = json.load(f).get('session_id', '')
     if sid:
         print(sid)
-" > {{ c.session_path }} 2>/dev/null || true
+" > "$_session_file" 2>/dev/null || true
     }
 {%- endif %}
     if [ -n "$_timeout" ]; then
@@ -131,7 +159,7 @@ if files:
 {{ vibe_subshell_setup() }}
 {%- endif %}
 {%- if c.session_path %}
-            export TEROK_SESSION_FILE={{ c.session_path }}
+            export TEROK_SESSION_FILE="$_session_file"
 {%- endif %}
         {{ c.headless_cmd }}
 {%- if c.is_vibe and c.session_path %}
@@ -145,7 +173,7 @@ if files:
 {{ vibe_subshell_setup() }}
 {%- endif %}
 {%- if c.session_path %}
-            export TEROK_SESSION_FILE={{ c.session_path }}
+            export TEROK_SESSION_FILE="$_session_file"
 {%- endif %}
         {{ c.interactive_cmd }}
 {%- if c.is_vibe and c.session_path %}
@@ -153,6 +181,12 @@ if files:
 {%- endif %}
         )
     fi
+{%- if c.session_path and (c.resume_flag or c.resume_subcommand) %}
+    local _rc=$?
+    [ $_rc -ne 0 ] && [ $_rc -lt 124 ] && [ -n "$_resumed" ] && \
+        _terok_resume_hint "$_name" "$_resumed" "$_session_file" $_rc
+    return $_rc
+{%- endif %}
 }
 {%- endmacro -%}
 
@@ -167,9 +201,16 @@ if files:
     # The identity is exported here rather than derived inside the harness
     # wrapper, so a bare `{{ s.target }} --provider {{ s.name }}` keeps the
     # harness identity while this alias attributes commits to the model.
+    #
+    # The alias behaves as an agent of its own: it records and resumes its
+    # own session, and speaks under its own name in help and hints.  Those
+    # two are plain variables, not exports — the harness wrapper runs in
+    # this subshell and picks them up; no child process inherits them.
     (
         export TEROK_AGENT_IDENTITY_NAME={{ s.author_name }}
         export TEROK_AGENT_IDENTITY_EMAIL={{ s.author_email }}
+        _terok_wrapper_name={{ s.name }}
+        _terok_session_file={{ s.session_path }}
         {{ s.target }} --provider {{ s.name }} "$@"
     )
 }
@@ -210,17 +251,21 @@ claude() {
             return 1 ;;
     esac
 {%- endif %}
-    local _timeout=""
+    local _timeout="" _new_session=""
     # Default to the container-selected provider; an explicit --provider overrides.
     local _provider="${TEROK_PROVIDER:-}"
     # Extract terok-specific flags (must come before claude flags)
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --terok-timeout) _timeout="$2"; shift 2 ;;
+            --terok-new-session) _new_session=1; shift ;;
             --provider) _provider="$2"; shift 2 ;;
             *) break ;;
         esac
     done
+    case "${1:-}" in
+        -h|--help) _terok_wrapper_help claude claude {{ c.help_flags | shquote }} "$@"; return $? ;;
+    esac
     # Resolve a selected provider to its vault-materialized endpoint.  Claude
     # honors it as plain environment (base URL + bearer); the vault routes on
     # the token.  An unserved protocol leaves Claude on its default endpoint.
@@ -240,9 +285,12 @@ claude() {
     _args+=(--add-dir "/")
     [ -f /home/dev/.terok/instructions.md ] && \
         _args+=(--append-system-prompt "$(cat /home/dev/.terok/instructions.md)")
-    [ -s /home/dev/.terok/claude-session.txt ] && \
-       { [ -n "$_timeout" ] || [ $# -eq 0 ]; } && \
-        _args+=(--resume "$(cat /home/dev/.terok/claude-session.txt)")
+    local _resumed=""
+    if [ -z "$_new_session" ] && [ -s /home/dev/.terok/claude-session.txt ] && \
+       { [ -n "$_timeout" ] || [ $# -eq 0 ]; }; then
+        _resumed="$(cat /home/dev/.terok/claude-session.txt)"
+        _args+=(--resume "$_resumed")
+    fi
     # Pick up the task's initial prompt as the first message (one-shot).
     if [ -z "$_timeout" ] && [ $# -eq 0 ] && [ ! -s /home/dev/.terok/claude-session.txt ] && [ -s /home/dev/.terok/initial-prompt.txt ]; then
         set -- "$(cat /home/dev/.terok/initial-prompt.txt)"
@@ -253,50 +301,58 @@ claude() {
             _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
             export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
 {{ claude_provider_export(c) }}
-            _terok_resume_or_fresh /home/dev/.terok/claude-session.txt --resume timeout "$_timeout" claude "${_args[@]}" "$@"
+            timeout "$_timeout" claude "${_args[@]}" "$@"
         )
     else
         (
             _terok_apply_git_identity {{ c.author_name }} {{ c.author_email }}
             export CLAUDE_COWORK_MEMORY_PATH_OVERRIDE="/home/dev/.claude/projects/${PROJECT_ID}-workspace/memory"
 {{ claude_provider_export(c) }}
-            _terok_resume_or_fresh /home/dev/.terok/claude-session.txt --resume command claude "${_args[@]}" "$@"
+            command claude "${_args[@]}" "$@"
         )
     fi
+    local _rc=$?
+    [ $_rc -ne 0 ] && [ $_rc -lt 124 ] && [ -n "$_resumed" ] && \
+        _terok_resume_hint claude "$_resumed" /home/dev/.terok/claude-session.txt $_rc
+    return $_rc
 }
 {%- endmacro -%}
-# WORKAROUND: stale-session guard (timing-based heuristic).
-#
-# When a user starts an agent, exits immediately (no real interaction),
-# and re-runs, the captured session ID points to a conversation that was
-# never persisted.  The agent then fails with "No conversation found".
-#
-# This is a best-effort mitigation, not a proper fix: we assume that
-# any non-zero exit within 2 seconds of launch is a stale-session error
-# and retry without --resume.  This heuristic can misfire (e.g. a fast
-# config error would also trigger a retry), but the retry is harmless —
-# it just runs without resume, which is the correct fallback anyway.
-#
-# A proper fix would validate the session ID against the agent's storage
-# before injecting --resume, but that requires agent-specific probes
-# that don't exist yet.
-_terok_resume_or_fresh() {
-    local _session_file="$1" _resume_flag="$2"; shift 2
-    local _start; _start=$(date +%s)
-    "$@"; local _rc=$?
-    local _elapsed=$(( $(date +%s) - _start ))
-    if [ $_rc -ne 0 ] && [ $_elapsed -lt 2 ] && [ -s "$_session_file" ]; then
-        echo "terok: session not found (stale?), retrying without resume" >&2
-        rm -f "$_session_file"
-        local _retry=() _skip=false
-        for _a in "$@"; do
-            if $_skip; then _skip=false; continue; fi
-            if [ "$_a" = "$_resume_flag" ]; then _skip=true; continue; fi
-            _retry+=("$_a")
-        done
-        "${_retry[@]}"; _rc=$?
-    fi
+# Frame the agent's own --help with the wrapper's flags: a header before the
+# vendor text (long, and it scrolls) and a one-line reminder after it, so a
+# user who reaches for -h learns that the command is a terok wrapper either
+# way.  The usage text comes from the bare binary — launchers and provider
+# routing play no part in printing it; the name is what the user typed
+# (a provider alias speaks under its own name, not its harness's).
+_terok_wrapper_help() {
+    local _binary="$1" _name="$2" _flags="$3"; shift 3
+    printf '%s\n' \
+        "terok wraps '${_name}' in this container as a shell function." \
+        "It sets the git identity, resumes the session, sends the first prompt, and routes the provider." \
+        "Put the terok flags before the ${_name} flags:" \
+        "${_flags}" \
+        "To run ${_name} without terok, use:  command ${_name}" \
+        "For the container tips, run:  hilfe" \
+        ""
+    command "$_binary" "$@"; local _rc=$?
+    printf '\n'; printf '%s\n' \
+        "The help above belongs to ${_binary}. In this container, '${_name}' is a terok wrapper." \
+        "The terok flags are at the top. To skip terok, use:  command ${_name}."
     return $_rc
+}
+
+# The wrapper injected a resume flag from the session file and the agent
+# exited non-zero.  Whether the recorded session is gone or something
+# unrelated failed is the agent's to say — the wrapper only reports what it
+# did and how to start over.  It never retries and never touches the file.
+# Callers skip it for 124 and up: timeout's own codes and signal deaths
+# (a Ctrl-C quit) are not a failed resume.
+_terok_resume_hint() {
+    local _name="$1" _sid="$2" _file="$3" _rc="$4"
+    printf '%s\n' \
+        "terok resumed session ${_sid} for ${_name}, from ${_file}." \
+        "${_name} exited with status ${_rc}." \
+        "If the session no longer exists, start a new session:  ${_name} --terok-new-session" \
+        "To run ${_name} without terok, use:  command ${_name}" >&2
 }
 
 # Idempotently mark a container path as trusted in Vibe.
