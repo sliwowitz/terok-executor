@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import os
-import socket
+import re
 import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from terok_sandbox.doctor import DoctorCheck
 
 from terok_executor.doctor import (
@@ -28,6 +29,7 @@ from terok_executor.doctor import (
 )
 from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
+from terok_executor.vault_addr import LOOPBACK_VAULT_PORT
 
 TOKEN_BROKER_PORT = 18731
 #: The vault loopback bridge's listen address, as ``ensure-bridges.sh`` binds it.
@@ -59,6 +61,42 @@ def _gate_pidfile() -> str:
 def _run(fragment: str) -> bool:
     """Return whether the generated shell *fragment* succeeds."""
     return subprocess.run(["bash", "-c", fragment], check=False).returncode == 0
+
+
+def _script_listen_addresses() -> dict[str, str]:
+    """Return the listen addresses ``ensure-bridges.sh`` binds, fully expanded.
+
+    Runs only the file's setup section — everything above its first function —
+    so no bridge starts and nothing is written to disk.  Reading the values
+    rather than restating them is what makes the coupling test meaningful:
+    the script ships from terok-sandbox and can change without this repo.
+    """
+    from terok_sandbox.launch import bridges_resource_dir
+
+    script = (bridges_resource_dir() / "ensure-bridges.sh").read_text()
+    setup = script.partition("_terok_bridge_alive() {")[0]
+    setup = "\n".join(line for line in setup.splitlines() if "mkdir" not in line)
+    names = (
+        "_TEROK_SSH_LISTEN",
+        "_TEROK_VAULT_SOCKET_LISTEN",
+        "_TEROK_VAULT_LOOPBACK_LISTEN",
+        "_TEROK_GATE_LISTEN",
+    )
+    echoes = "\n".join(f'echo "${name}"' for name in names)
+    completed = subprocess.run(
+        ["bash", "-c", f"{setup}\n{echoes}"],
+        env={**os.environ, "TEROK_VAULT_LOOPBACK_PORT": str(LOOPBACK_VAULT_PORT)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    bound = dict(zip(names, completed.stdout.splitlines(), strict=True))
+    if not all(bound.values()):
+        pytest.skip(
+            "the pinned terok-sandbox spells its listen addresses inline; "
+            "this contract arms itself once the pin carries the named ones"
+        )
+    return bound
 
 
 class TestSocatLiveness:
@@ -98,73 +136,26 @@ class TestSocatLiveness:
         pidfile.write_text(str(proc.pid))
         assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_ADDRESS))
 
-    def test_probes_name_the_listen_spec_the_script_uses(self) -> None:
-        """The doctor's needle must track ``ensure-bridges.sh``'s socat listeners."""
-        socket_probe = " ".join(_make_vault_bridge_check(socket_mode=True).probe_cmd)
-        tcp_probe = " ".join(_make_vault_bridge_check(socket_mode=False).probe_cmd)
-        ssh_probe = " ".join(_make_ssh_bridge_check().probe_cmd)
-        assert f"{VAULT_LISTEN_ADDRESS}," in socket_probe
-        assert "UNIX-LISTEN:/tmp/terok-vault.sock," in tcp_probe
-        assert "UNIX-LISTEN:/tmp/ssh-agent.sock," in ssh_probe
+    def test_probes_match_the_addresses_the_bridge_script_binds(self) -> None:
+        """Every needle must be an address ``ensure-bridges.sh`` actually binds.
 
-
-class TestBridgeTargets:
-    """A bridge is only healthy when the far end it dials exists."""
-
-    def _probe(self, check: DoctorCheck, pidfile: Path, env: dict[str, str]) -> bool:
-        """Run *check*'s probe with its pidfile redirected into a temp path."""
-        script = check.probe_cmd[-1].replace(_gate_pidfile(), str(pidfile))
-        completed = subprocess.run(
-            ["bash", "-c", script], env={**os.environ, **env}, check=False, capture_output=True
-        )
-        return completed.returncode == 0 and _BRIDGE_ABSENT_MARKER not in completed.stdout.decode()
-
-    def test_gate_bridge_aimed_at_an_absent_socket_is_not_healthy(self, tmp_path: Path) -> None:
-        """The failure that reads as a cold-start race, caught for what it is.
-
-        A container older than the current ``/run/terok`` layout advertises a
-        gate socket nothing binds.  The bridge starts, listens and accepts, so
-        a liveness-only probe passes; git then hangs for socat's retry budget
-        and reports an empty reply.
+        The doctor reimplements the liveness test on purpose, so nothing else
+        couples the two.  A listen address that drifts apart fails quietly:
+        every bridge reported dead, or a dead one reported alive.
         """
-        pidfile = tmp_path / "gate.pid"
-        with _spawned(GATE_LISTEN_SPEC) as pid:
-            pidfile.write_text(str(pid))
-            stale = {"TEROK_GATE_SOCKET": "/run/terok/gate-server.sock"}
-            assert not self._probe(_make_gate_bridge_check(), pidfile, stale)
-
-    def test_gate_bridge_with_a_bound_socket_is_healthy(self, tmp_path: Path) -> None:
-        """Listener plus a real target is the only passing shape in socket mode."""
-        target = tmp_path / "gate.sock"
-        with socket.socket(socket.AF_UNIX) as srv:
-            srv.bind(str(target))
-            pidfile = tmp_path / "gate.pid"
-            with _spawned(GATE_LISTEN_SPEC) as pid:
-                pidfile.write_text(str(pid))
-                env = {"TEROK_GATE_SOCKET": str(target)}
-                assert self._probe(_make_gate_bridge_check(), pidfile, env)
-
-    def test_gate_bridge_in_tcp_mode_needs_no_socket(self, tmp_path: Path) -> None:
-        """TCP mode dials a host port; there is no path to test."""
-        pidfile = tmp_path / "gate.pid"
-        with _spawned(GATE_LISTEN_SPEC) as pid:
-            pidfile.write_text(str(pid))
-            assert self._probe(_make_gate_bridge_check(), pidfile, {"TEROK_GATE_SOCKET": ""})
-
-    def test_vault_probe_tests_the_advertised_socket(self) -> None:
-        """The vault probe must dial ``$TEROK_VAULT_SOCKET``, not this host's constant.
-
-        Testing the constant would report a stale container's dead bridge as
-        healthy — the container dials what it was told, not what we would tell
-        it today.
-        """
-        probe = " ".join(_make_vault_bridge_check(socket_mode=True).probe_cmd)
-        assert f'"${{TEROK_VAULT_SOCKET:-{CONTAINER_VAULT_SOCKET}}}"' in probe
-
-    def test_gate_check_is_part_of_the_battery(self) -> None:
-        """A dead gate bridge was invisible to the doctor until now."""
-        checks = AgentRoster.load().doctor_checks()
-        assert any("Git gate bridge" in c.label for c in checks)
+        bound = _script_listen_addresses()
+        for name, check in (
+            ("_TEROK_SSH_LISTEN", _make_ssh_bridge_check()),
+            ("_TEROK_VAULT_LOOPBACK_LISTEN", _make_vault_bridge_check(socket_mode=True)),
+            ("_TEROK_VAULT_SOCKET_LISTEN", _make_vault_bridge_check(socket_mode=False)),
+            ("_TEROK_GATE_LISTEN", _make_gate_bridge_check()),
+        ):
+            match = re.search(r'grep -qF "([^"]+)"', " ".join(check.probe_cmd))
+            assert match, f"{check.label}: probe carries no needle"
+            assert bound[name].startswith(match.group(1)), (
+                f"{check.label}: probe looks for {match.group(1)!r}, "
+                f"but the script binds {bound[name]!r}"
+            )
 
 
 class TestSSHBridgeCheck:

@@ -127,13 +127,16 @@ def _socat_alive(pidfile: str, listen_address: str) -> str:
     A PID file records a number, not an identity.  Container PIDs restart from
     1 on every boot, and ``/tmp`` survives a restart, so a signal probe on the
     recorded number reports whatever inherited it as a healthy bridge.  This
-    matches the address against the process's own command line instead, the
-    same test ``_terok_bridge_alive`` makes in terok-sandbox's
-    ``ensure-bridges.sh``.
+    matches the address against the process's own command line instead.
 
-    The comma that begins socat's option list terminates the match, so port
-    941 cannot pass for 9418.  The empty-PID guard keeps ``/proc//cmdline``,
-    the kernel's boot command line, out of the comparison.
+    Deliberately independent of ``_terok_bridge_alive`` in terok-sandbox's
+    ``ensure-bridges.sh``, which makes the same test: that script is baked into
+    the image, so a container built before it was fixed still carries the
+    signal probe.  A diagnostic that borrowed the check would inherit the fault
+    it exists to find.
+
+    *listen_address* carries no option list.  The comma that begins one
+    terminates the match here, so port 941 cannot pass for 9418.
     """
     return (
         f'{{ pid=$(cat {pidfile} 2>/dev/null); [ -n "$pid" ] '
@@ -173,20 +176,49 @@ def _bridge_eval(
     return _eval
 
 
-def _make_ssh_bridge_check() -> DoctorCheck:
-    """Check that the SSH signer socat bridge is alive — when the task has a signer."""
-    alive = _socat_alive(_SSH_AGENT_PIDFILE, f"UNIX-LISTEN:{_SSH_AGENT_SOCKET}")
+def _bridge_check(
+    *, label: str, pidfile: str, listen: str, socket_test: str, dead: str, absent: str
+) -> DoctorCheck:
+    """Build the health check for one socat bridge.
+
+    A bridge is healthy when the process named by its PID file is the listener
+    on *listen*, and the Unix socket it depends on is present.  *socket_test*
+    is the shell test for that socket — the one the bridge binds, or the one it
+    dials.  The second half is not optional: a bridge aimed at an absent socket
+    listens and accepts, then fails at the far end once socat's retry budget
+    runs out, which reads as a slow backend rather than a broken bridge.
+
+    Args:
+        label: Operator-facing name, reused for the healthy verdict.
+        pidfile: Where ``ensure-bridges.sh`` records this bridge.
+        listen: socat listen address, without its option list.
+        socket_test: Shell test for the Unix socket the bridge depends on.
+        dead: What a failed probe means for the operator.
+        absent: Why this bridge would legitimately not be running.
+    """
     return DoctorCheck(
         category="bridge",
-        label="SSH agent bridge (socat)",
-        probe_cmd=_guarded_probe(_SSH_AGENT_PIDFILE, f"{alive} && test -S {_SSH_AGENT_SOCKET}"),
+        label=label,
+        probe_cmd=_guarded_probe(pidfile, f"{_socat_alive(pidfile, listen)} && {socket_test}"),
         evaluate=_bridge_eval(
-            alive_detail="SSH agent bridge alive (PID + socket)",
-            dead_detail="SSH agent bridge dead — socat process or socket missing",
-            absent_detail="SSH agent bridge not started — no signer token for this task",
+            alive_detail=f"{label} alive",
+            dead_detail=dead,
+            absent_detail=absent,
         ),
-        fix_cmd=_restart_bridge(_SSH_AGENT_PIDFILE),
+        fix_cmd=_restart_bridge(pidfile),
         fix_description=_BRIDGE_FIX_DESCRIPTION,
+    )
+
+
+def _make_ssh_bridge_check() -> DoctorCheck:
+    """Check the SSH signer socat bridge — when the task has a signer."""
+    return _bridge_check(
+        label="SSH agent bridge (socat)",
+        pidfile=_SSH_AGENT_PIDFILE,
+        listen=f"UNIX-LISTEN:{_SSH_AGENT_SOCKET}",
+        socket_test=f"test -S {_SSH_AGENT_SOCKET}",
+        dead="SSH agent bridge dead — socat process or socket missing",
+        absent="SSH agent bridge not started — no signer token for this task",
     )
 
 
@@ -194,68 +226,48 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
     """Check the vault-side socat bridge for the active transport.
 
     In socket mode the bridge exposes the mounted host socket as a TCP
-    loopback so HTTP-only clients can reach it.  In TCP mode the bridge
-    exposes a local Unix socket that tunnels to the host broker over TCP
-    (for socket-only clients).
+    loopback so HTTP-only clients can reach it.  In TCP mode it exposes a
+    local Unix socket that tunnels to the host broker over TCP, for clients
+    that speak only HTTP-over-UNIX.
     """
     if socket_mode:
         label = f"Vault loopback bridge (TCP → {CONTAINER_VAULT_SOCKET})"
-        pidfile = _VAULT_LOOPBACK_PIDFILE
-        alive = _socat_alive(pidfile, f"TCP-LISTEN:{LOOPBACK_VAULT_PORT}")
-        # ``$TEROK_VAULT_SOCKET``, not the constant: the bridge dials whatever
-        # the container was told, and a container older than the current
-        # /run/terok layout was told something this host no longer binds.
-        # Testing the constant would call that healthy.
-        target = f'"${{TEROK_VAULT_SOCKET:-{CONTAINER_VAULT_SOCKET}}}"'
-        liveness = f"test -S {target} && {alive}"
-        dead_detail = "Vault loopback bridge dead — HTTP clients cannot reach the mounted socket"
-    else:
-        label = "Vault socket bridge (/tmp/terok-vault.sock → broker TCP)"
-        pidfile = _VAULT_SOCKET_PIDFILE
-        alive = _socat_alive(pidfile, f"UNIX-LISTEN:{LOOPBACK_BRIDGE_SOCKET}")
-        liveness = f"{alive} && test -S {LOOPBACK_BRIDGE_SOCKET}"
-        dead_detail = "Vault socket bridge dead — socat process or socket missing"
-
-    return DoctorCheck(
-        category="bridge",
+        return _bridge_check(
+            label=label,
+            pidfile=_VAULT_LOOPBACK_PIDFILE,
+            listen=f"TCP-LISTEN:{LOOPBACK_VAULT_PORT}",
+            # ``$TEROK_VAULT_SOCKET``, not the constant: the bridge dials what
+            # the container was told, and a container older than the current
+            # /run/terok layout was told something this host no longer binds.
+            socket_test=f'test -S "${{TEROK_VAULT_SOCKET:-{CONTAINER_VAULT_SOCKET}}}"',
+            dead="Vault loopback bridge dead — HTTP clients cannot reach the mounted socket",
+            absent=f"{label} not started — no vault-routed provider for this task",
+        )
+    label = "Vault socket bridge (/tmp/terok-vault.sock → broker TCP)"
+    return _bridge_check(
         label=label,
-        probe_cmd=_guarded_probe(pidfile, liveness),
-        evaluate=_bridge_eval(
-            alive_detail=f"{label} alive",
-            dead_detail=dead_detail,
-            absent_detail=f"{label} not started — no vault-routed provider for this task",
-        ),
-        fix_cmd=_restart_bridge(pidfile),
-        fix_description=_BRIDGE_FIX_DESCRIPTION,
+        pidfile=_VAULT_SOCKET_PIDFILE,
+        listen=f"UNIX-LISTEN:{LOOPBACK_BRIDGE_SOCKET}",
+        socket_test=f"test -S {LOOPBACK_BRIDGE_SOCKET}",
+        dead="Vault socket bridge dead — socat process or socket missing",
+        absent=f"{label} not started — no vault-routed provider for this task",
     )
 
 
 def _make_gate_bridge_check() -> DoctorCheck:
-    """Check the git-gate socat bridge and the socket it dials.
-
-    Checking the listener alone is not enough.  A bridge aimed at an absent
-    socket starts, listens and accepts; it hangs for the length of socat's
-    retry budget, and git then reports an empty reply.  TCP mode dials a host
-    port instead, where there is no socket to test.
-    """
-    alive = _socat_alive(_GATE_PIDFILE, f"TCP-LISTEN:{_GATE_LOOPBACK_PORT}")
-    # An unset TEROK_GATE_SOCKET means TCP mode; ``test -S`` on nothing would
-    # fail a healthy bridge.
-    target = '{ [ -z "${TEROK_GATE_SOCKET:-}" ] || test -S "${TEROK_GATE_SOCKET}"; }'
-    return DoctorCheck(
-        category="bridge",
+    """Check the git-gate socat bridge and the socket it dials."""
+    return _bridge_check(
         label=f"Git gate bridge (TCP {_GATE_LOOPBACK_PORT} → gate socket)",
-        probe_cmd=_guarded_probe(_GATE_PIDFILE, f"{alive} && {target}"),
-        evaluate=_bridge_eval(
-            alive_detail="Git gate bridge alive and its target exists",
-            dead_detail=(
-                "Git gate bridge dead or aimed at an absent socket — git push/fetch "
-                "will hang, then report an empty reply"
-            ),
-            absent_detail="Git gate bridge not started — no gate wired for this task",
+        pidfile=_GATE_PIDFILE,
+        listen=f"TCP-LISTEN:{_GATE_LOOPBACK_PORT}",
+        # An unset TEROK_GATE_SOCKET means TCP mode, where the far end is a
+        # host port; ``test -S`` on nothing would fail a healthy bridge.
+        socket_test='{ [ -z "${TEROK_GATE_SOCKET:-}" ] || test -S "${TEROK_GATE_SOCKET}"; }',
+        dead=(
+            "Git gate bridge dead or aimed at an absent socket — git push/fetch "
+            "will hang, then report an empty reply"
         ),
-        fix_cmd=_restart_bridge(_GATE_PIDFILE),
-        fix_description=_BRIDGE_FIX_DESCRIPTION,
+        absent="Git gate bridge not started — no gate wired for this task",
     )
 
 
