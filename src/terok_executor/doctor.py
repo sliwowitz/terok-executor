@@ -112,6 +112,23 @@ def _guarded_probe(pidfile: str, liveness: str) -> list[str]:
     ]
 
 
+def _socat_alive(pidfile: str, listen_spec: str) -> str:
+    """Shell test: the PID in *pidfile* is a live socat carrying *listen_spec*.
+
+    Mirrors ``_terok_bridge_alive`` in terok-sandbox's ``ensure-bridges.sh``.
+    A PID file records a number, not an identity, and container PIDs restart
+    from 1 on every boot while ``/tmp`` survives a restart — so a signal probe
+    on the recorded number reports whatever inherited it as a healthy bridge.
+    Matching the listen spec against ``/proc/<pid>/cmdline`` settles identity
+    and liveness in one read; the empty-PID guard keeps ``/proc//cmdline``
+    (the kernel's boot command line) out of the comparison.
+    """
+    return (
+        f'{{ pid=$(cat {pidfile} 2>/dev/null); [ -n "$pid" ] '
+        f'&& tr "\\0" " " 2>/dev/null < "/proc/$pid/cmdline" | grep -qF "{listen_spec}"; }}'
+    )
+
+
 def _bridge_eval(
     *, alive_detail: str, dead_detail: str, absent_detail: str
 ) -> Callable[[int, str, str], CheckVerdict]:
@@ -136,21 +153,20 @@ def _bridge_eval(
 
 def _make_ssh_bridge_check() -> DoctorCheck:
     """Check that the SSH signer socat bridge is alive — when the task has a signer."""
+    alive = _socat_alive(_SSH_AGENT_PIDFILE, f"UNIX-LISTEN:{_SSH_AGENT_SOCKET},")
     return DoctorCheck(
         category="bridge",
         label="SSH agent bridge (socat)",
-        probe_cmd=_guarded_probe(
-            _SSH_AGENT_PIDFILE,
-            f"kill -0 $(cat {_SSH_AGENT_PIDFILE} 2>/dev/null) 2>/dev/null"
-            f" && test -S {_SSH_AGENT_SOCKET}",
-        ),
+        probe_cmd=_guarded_probe(_SSH_AGENT_PIDFILE, f"{alive} && test -S {_SSH_AGENT_SOCKET}"),
         evaluate=_bridge_eval(
             alive_detail="SSH agent bridge alive (PID + socket)",
             dead_detail="SSH agent bridge dead — socat process or socket missing",
             absent_detail="SSH agent bridge not started — no signer token for this task",
         ),
-        fix_cmd=["bash", "-lc", "source ensure-bridges.sh"],
-        fix_description="Re-source ensure-bridges.sh to restart the socat bridge.",
+        fix_cmd=["bash", "-lc", f"rm -f {_SSH_AGENT_PIDFILE} && source ensure-bridges.sh"],
+        fix_description=(
+            "Drop the stale PID file and re-source ensure-bridges.sh to restart the bridge."
+        ),
     )
 
 
@@ -165,16 +181,14 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
     if socket_mode:
         label = f"Vault loopback bridge (TCP → {CONTAINER_VAULT_SOCKET})"
         pidfile = _VAULT_LOOPBACK_PIDFILE
-        liveness = (
-            f"test -S {CONTAINER_VAULT_SOCKET} && kill -0 $(cat {pidfile} 2>/dev/null) 2>/dev/null"
-        )
+        alive = _socat_alive(pidfile, f"TCP-LISTEN:{LOOPBACK_VAULT_PORT},")
+        liveness = f"test -S {CONTAINER_VAULT_SOCKET} && {alive}"
         dead_detail = "Vault loopback bridge dead — HTTP clients cannot reach the mounted socket"
     else:
         label = "Vault socket bridge (/tmp/terok-vault.sock → broker TCP)"
         pidfile = _VAULT_SOCKET_PIDFILE
-        liveness = (
-            f"kill -0 $(cat {pidfile} 2>/dev/null) 2>/dev/null && test -S {LOOPBACK_BRIDGE_SOCKET}"
-        )
+        alive = _socat_alive(pidfile, f"UNIX-LISTEN:{LOOPBACK_BRIDGE_SOCKET},")
+        liveness = f"{alive} && test -S {LOOPBACK_BRIDGE_SOCKET}"
         dead_detail = "Vault socket bridge dead — socat process or socket missing"
 
     return DoctorCheck(
@@ -186,8 +200,10 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
             dead_detail=dead_detail,
             absent_detail=f"{label} not started — no vault-routed provider for this task",
         ),
-        fix_cmd=["bash", "-lc", "source ensure-bridges.sh"],
-        fix_description="Re-source ensure-bridges.sh to restart the socat bridge.",
+        fix_cmd=["bash", "-lc", f"rm -f {pidfile} && source ensure-bridges.sh"],
+        fix_description=(
+            "Drop the stale PID file and re-source ensure-bridges.sh to restart the bridge."
+        ),
     )
 
 

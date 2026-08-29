@@ -5,6 +5,12 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
 from terok_sandbox.doctor import DoctorCheck
 
 from terok_executor.doctor import (
@@ -15,11 +21,76 @@ from terok_executor.doctor import (
     _make_phantom_token_checks,
     _make_ssh_bridge_check,
     _make_vault_bridge_check,
+    _socat_alive,
 )
 from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
 
 TOKEN_BROKER_PORT = 18731
+VAULT_LISTEN_SPEC = "TCP-LISTEN:9419,"
+
+
+@contextmanager
+def _spawned(*argv: str) -> Iterator[int]:
+    """Yield the PID of a live sleeper carrying *argv* on its command line."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", *argv])
+    try:
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def _run(fragment: str) -> bool:
+    """Return whether the generated shell *fragment* succeeds."""
+    return subprocess.run(["bash", "-c", fragment], check=False).returncode == 0
+
+
+class TestSocatLiveness:
+    """``_socat_alive`` must identify the bridge, not merely a live PID."""
+
+    def test_recycled_pid_is_not_the_bridge(self, tmp_path: Path) -> None:
+        """A restarted container's PID collision must not report a healthy bridge.
+
+        Container PIDs restart from 1 and ``/tmp/.terok`` survives the restart,
+        so a stale PID file names whatever inherited its number.  A signal probe
+        called that alive and the doctor reported a dead vault loopback bridge
+        as green while every URL-transport client saw ECONNREFUSED.
+        """
+        pidfile = tmp_path / "vault-loopback.pid"
+        with _spawned() as pid:
+            pidfile.write_text(str(pid))
+            assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+
+    def test_matching_command_line_is_the_bridge(self, tmp_path: Path) -> None:
+        """A process whose command line carries the listen spec is the bridge."""
+        pidfile = tmp_path / "vault-loopback.pid"
+        with _spawned("TCP-LISTEN:9419,bind=127.0.0.1,fork,reuseaddr") as pid:
+            pidfile.write_text(str(pid))
+            assert _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+
+    def test_empty_pidfile_never_reads_the_kernel_command_line(self, tmp_path: Path) -> None:
+        """An empty PID file is dead, not a match against ``/proc//cmdline``."""
+        pidfile = tmp_path / "vault-loopback.pid"
+        pidfile.write_text("")
+        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+
+    def test_exited_pid_is_dead(self, tmp_path: Path) -> None:
+        """A PID with no ``/proc`` entry left is not a bridge."""
+        proc = subprocess.Popen([sys.executable, "-c", ""])
+        proc.wait()
+        pidfile = tmp_path / "vault-loopback.pid"
+        pidfile.write_text(str(proc.pid))
+        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+
+    def test_probes_name_the_listen_spec_the_script_uses(self) -> None:
+        """The doctor's needle must track ``ensure-bridges.sh``'s socat listeners."""
+        socket_probe = " ".join(_make_vault_bridge_check(socket_mode=True).probe_cmd)
+        tcp_probe = " ".join(_make_vault_bridge_check(socket_mode=False).probe_cmd)
+        ssh_probe = " ".join(_make_ssh_bridge_check().probe_cmd)
+        assert VAULT_LISTEN_SPEC in socket_probe
+        assert "UNIX-LISTEN:/tmp/terok-vault.sock," in tcp_probe
+        assert "UNIX-LISTEN:/tmp/ssh-agent.sock," in ssh_probe
 
 
 class TestSSHBridgeCheck:

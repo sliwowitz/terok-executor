@@ -107,10 +107,14 @@ if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
   fi
 fi
 
-# Socat bridges: SSH signer + gh token broker.
-# Delegates to ensure-bridges.sh (single source of truth for both bridges).
-# shellcheck source=ensure-bridges.sh
-source ensure-bridges.sh
+# Socat bridges: SSH signer, vault, gate.  Delegates to ensure-bridges.sh, the
+# single source of truth for all of them.  That script ships with terok-sandbox
+# and is installed by L1, so a bare L0 container has no bridges — which is a
+# base image running on its own, not a failure worth aborting init over.
+if command -v ensure-bridges.sh >/dev/null 2>&1; then
+  # shellcheck source=ensure-bridges.sh
+  source ensure-bridges.sh
+fi
 
 # Export SSH_AUTH_SOCK from socket existence rather than the
 # ensure-bridges.sh internal export (which only fires on a fresh

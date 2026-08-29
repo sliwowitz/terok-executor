@@ -117,13 +117,11 @@ def shell_test_image(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # (executor's default) fails to resolve.
     (build_dir / "L0.Dockerfile").write_text(render_l0("registry.fedoraproject.org/fedora:44"))
 
-    # Stage scripts (executor's own + sandbox bridge overlays) and tmux
-    # config into the build context.  Using executor's `stage_scripts()`
-    # rather than a bare resources-tree copy is what gets the
-    # ssh-agent-bridge.sh / ensure-bridges.sh scripts in — those live in
-    # terok_sandbox, and the L0 Dockerfile's COPY lines expect them under
-    # scripts/.  Without the overlay, STEP 8 (COPY ssh-agent-bridge.sh)
-    # fails with "no such file or directory".
+    # Stage scripts and tmux config into the build context.  Using executor's
+    # `stage_scripts()` rather than a bare resources-tree copy keeps this
+    # context identical to a real build's — including the sandbox bridge
+    # overlay, which L1 (not L0) installs but which every build context
+    # carries.
     stage_scripts(build_dir / "scripts")
     stage_tmux_config(build_dir / "tmux")
 

@@ -137,10 +137,11 @@ RUN install -d -m 0755 /etc/ssh/sshd_config.d \
 
 WORKDIR /workspace
 
+# The socat bridge scripts are deliberately absent here: they ship with
+# terok-sandbox, and L0 is the layer nobody rebuilds.  L1 installs them, so a
+# sandbox upgrade reaches tasks on the rebuild operators already perform.
 COPY scripts/init-ssh-and-repo.sh /usr/local/bin/init-ssh-and-repo.sh
-COPY scripts/ssh-agent-bridge.sh /usr/local/bin/ssh-agent-bridge.sh
-COPY scripts/ensure-bridges.sh /usr/local/bin/ensure-bridges.sh
-RUN chmod +x /usr/local/bin/init-ssh-and-repo.sh /usr/local/bin/ssh-agent-bridge.sh /usr/local/bin/ensure-bridges.sh
+RUN chmod +x /usr/local/bin/init-ssh-and-repo.sh
 
 # tmux config for persistent login sessions (prefix ^a, green status bar)
 COPY tmux/container-tmux.conf /etc/tmux.conf

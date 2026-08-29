@@ -911,8 +911,9 @@ def stage_scripts(dest: Path) -> None:
     (``ensure-bridges.sh`` + ``ssh-agent-bridge.sh``).  The bridges
     live in sandbox because they encode sandbox-level concerns with
     no executor-specific logic; executor still bundles them into the
-    container image so the Dockerfile's ``COPY scripts/…`` lines keep
-    finding them at their established names.
+    build context so the L1 Dockerfiles' ``COPY scripts/…`` lines keep
+    finding them at their established names.  L1 rather than L0: the
+    bridges track sandbox releases, and L0 is the layer nobody rebuilds.
 
     Raises [`BuildError`][terok_executor.container.build.BuildError]
     when ``terok_sandbox`` is not importable — sandbox is a hard

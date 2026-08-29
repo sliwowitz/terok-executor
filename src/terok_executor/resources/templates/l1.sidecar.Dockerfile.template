@@ -10,7 +10,7 @@ FROM ${BASE_IMAGE}
 
 # Minimal extras for tool install scripts.
 # L0 already provides: git, SSH, curl, ca-certificates, locale, dev user,
-# init-ssh-and-repo.sh, ensure-bridges.sh, ssh-agent-bridge.sh.
+# init-ssh-and-repo.sh.
 {% if family == "deb" -%}
 RUN apt-get update && apt-get install -y --no-install-recommends \
       unzip \
@@ -31,6 +31,13 @@ RUN set -eux; \
     curl -fsSL https://cli.coderabbit.ai/install.sh | sh; \
     coderabbit --version
 {% endif %}
+
+# Socat bridges (SSH signer, vault, gate).  They ship with terok-sandbox rather
+# than with executor, which is why they live here instead of in L0: an L1
+# rebuild is the cadence at which a sandbox upgrade should reach running tasks.
+COPY scripts/ssh-agent-bridge.sh /usr/local/bin/ssh-agent-bridge.sh
+COPY scripts/ensure-bridges.sh /usr/local/bin/ensure-bridges.sh
+RUN chmod +x /usr/local/bin/ssh-agent-bridge.sh /usr/local/bin/ensure-bridges.sh
 
 USER dev
 ENV HOME=/home/dev
