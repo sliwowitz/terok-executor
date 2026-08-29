@@ -52,8 +52,10 @@ Protocol 3 records terok-sandbox #491, which moved each service's socket
 into its own ``/run/terok`` subdirectory and so changed the values of
 ``TEROK_VAULT_SOCKET`` / ``TEROK_SSH_SIGNER_SOCKET`` / ``TEROK_GATE_SOCKET``.
 A container stamped below that starts anyway and is warned about, never
-refused — ``terok_sandbox.supervision`` holds the matching floor as
-``MIN_RUNTIME_PROTOCOL``, so the two constants move together."""
+refused.  ``MIN_RUNTIME_PROTOCOL`` in terok-sandbox's ``supervision`` module is
+the matching floor, so the two constants move together.  Named as literals, not
+an autoref: the cross-repo inventory is published from that repo's master, and
+the symbol arrives there only once its branch merges."""
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import (

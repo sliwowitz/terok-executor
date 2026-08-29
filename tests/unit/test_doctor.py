@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -149,6 +150,68 @@ class TestSocatLiveness:
                 f"{check.label}: probe looks for {match.group(1)!r}, "
                 f"but the script binds {bound[name]!r}"
             )
+
+
+class TestBridgeTargets:
+    """A bridge is only healthy when the far end it dials exists."""
+
+    def _probe(self, check: DoctorCheck, pidfile: Path, env: dict[str, str]) -> bool:
+        """Run *check*'s probe with its pidfile redirected into a temp path."""
+        script = check.probe_cmd[-1].replace(_gate_pidfile(), str(pidfile))
+        completed = subprocess.run(
+            ["bash", "-c", script], env={**os.environ, **env}, check=False, capture_output=True
+        )
+        return completed.returncode == 0 and _BRIDGE_ABSENT_MARKER not in completed.stdout.decode()
+
+    def test_gate_bridge_aimed_at_an_absent_socket_is_not_healthy(self, tmp_path: Path) -> None:
+        """The failure that reads as a cold-start race, caught for what it is.
+
+        A container older than the current ``/run/terok`` layout advertises a
+        gate socket nothing binds.  The bridge starts, listens and accepts, so
+        a liveness-only probe passes; git then hangs for socat's retry budget
+        and reports an empty reply.
+        """
+        pidfile = tmp_path / "gate.pid"
+        with _spawned(GATE_LISTEN_SPEC) as pid:
+            pidfile.write_text(str(pid))
+            # A path under tmp_path, not the real /run/terok one: a socket that
+            # happens to exist on the host would let this pass without proving
+            # anything.
+            stale = {"TEROK_GATE_SOCKET": str(tmp_path / "absent" / "gate-server.sock")}
+            assert not self._probe(_make_gate_bridge_check(), pidfile, stale)
+
+    def test_gate_bridge_with_a_bound_socket_is_healthy(self, tmp_path: Path) -> None:
+        """Listener plus a real target is the only passing shape in socket mode."""
+        target = tmp_path / "gate.sock"
+        with socket.socket(socket.AF_UNIX) as srv:
+            srv.bind(str(target))
+            pidfile = tmp_path / "gate.pid"
+            with _spawned(GATE_LISTEN_SPEC) as pid:
+                pidfile.write_text(str(pid))
+                env = {"TEROK_GATE_SOCKET": str(target)}
+                assert self._probe(_make_gate_bridge_check(), pidfile, env)
+
+    def test_gate_bridge_in_tcp_mode_needs_no_socket(self, tmp_path: Path) -> None:
+        """TCP mode dials a host port; there is no path to test."""
+        pidfile = tmp_path / "gate.pid"
+        with _spawned(GATE_LISTEN_SPEC) as pid:
+            pidfile.write_text(str(pid))
+            assert self._probe(_make_gate_bridge_check(), pidfile, {"TEROK_GATE_SOCKET": ""})
+
+    def test_vault_probe_tests_the_advertised_socket(self) -> None:
+        """The vault probe must dial ``$TEROK_VAULT_SOCKET``, not this host's constant.
+
+        Testing the constant would report a stale container's dead bridge as
+        healthy — the container dials what it was told, not what we would tell
+        it today.
+        """
+        probe = " ".join(_make_vault_bridge_check(socket_mode=True).probe_cmd)
+        assert f'"${{TEROK_VAULT_SOCKET:-{CONTAINER_VAULT_SOCKET}}}"' in probe
+
+    def test_gate_check_is_part_of_the_battery(self) -> None:
+        """A dead gate bridge was invisible to the doctor until now."""
+        checks = AgentRoster.load().doctor_checks()
+        assert any("Git gate bridge" in c.label for c in checks)
 
 
 class TestSSHBridgeCheck:
