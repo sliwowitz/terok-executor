@@ -108,9 +108,9 @@ if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
 fi
 
 # Socat bridges: SSH signer, vault, gate.  Delegates to ensure-bridges.sh, the
-# single source of truth for all of them.  That script ships with terok-sandbox
-# and is installed by L1, so a bare L0 container has no bridges — which is a
-# base image running on its own, not a failure worth aborting init over.
+# single source of truth for all of them.  L1 installs that script, so a bare
+# L0 container has none.  That is a base image running on its own, not a
+# failure to abort init over.
 if command -v ensure-bridges.sh >/dev/null 2>&1; then
   # shellcheck source=ensure-bridges.sh
   source ensure-bridges.sh

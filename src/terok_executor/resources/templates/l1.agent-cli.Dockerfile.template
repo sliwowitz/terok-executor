@@ -65,12 +65,7 @@ RUN chmod +x /etc/profile.d/terok-env.sh; \
     cat /tmp/terok-bash-banner.sh >> "$bashrc"; \
     rm -f /tmp/terok-bash-banner.sh
 
-# Socat bridges (SSH signer, vault, gate).  They ship with terok-sandbox rather
-# than with executor, which is why they live here instead of in L0: an L1
-# rebuild is the cadence at which a sandbox upgrade should reach running tasks.
-COPY scripts/ssh-agent-bridge.sh /usr/local/bin/ssh-agent-bridge.sh
-COPY scripts/ensure-bridges.sh /usr/local/bin/ensure-bridges.sh
-RUN chmod +x /usr/local/bin/ssh-agent-bridge.sh /usr/local/bin/ensure-bridges.sh
+{{ bridge_install }}
 
 # Symlink for per-task agent wrappers (resolved at runtime via mount).
 RUN mkdir -p /usr/local/share/terok && \

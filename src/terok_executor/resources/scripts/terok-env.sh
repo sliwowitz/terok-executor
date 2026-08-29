@@ -81,10 +81,8 @@ glab() {
 [[ "$(id -u)" -ne 0 ]] && command -v socat >/dev/null 2>&1 && \
     . ensure-bridges.sh 2>/dev/null
 
-# A shell runs long after the supervisor's bind window, so a bridge target that
-# is still absent is genuinely absent — the one moment it is safe to say so.
-# Worth saying: a bridge aimed at nothing listens and accepts like a healthy
-# one, and only fails at the far end.
+# A shell runs long after the supervisor's bind window.  It is the one caller
+# that can treat an absent bridge target as real rather than as a cold start.
 if declare -F _terok_report_missing_bridge_targets >/dev/null 2>&1; then
   _terok_report_missing_bridge_targets
 fi

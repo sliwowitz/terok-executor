@@ -30,7 +30,12 @@ from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
 
 TOKEN_BROKER_PORT = 18731
-VAULT_LISTEN_SPEC = "TCP-LISTEN:9419,"
+#: The vault loopback bridge's listen address, as ``ensure-bridges.sh`` binds it.
+VAULT_LISTEN_ADDRESS = "TCP-LISTEN:9419"
+VAULT_LISTEN_SPEC = f"{VAULT_LISTEN_ADDRESS},bind=127.0.0.1,fork,reuseaddr"
+
+#: The git gate bridge's listen address, as ``ensure-bridges.sh`` binds it.
+GATE_LISTEN_SPEC = "TCP-LISTEN:9418,fork,reuseaddr"
 
 
 @contextmanager
@@ -70,20 +75,20 @@ class TestSocatLiveness:
         pidfile = tmp_path / "vault-loopback.pid"
         with _spawned() as pid:
             pidfile.write_text(str(pid))
-            assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+            assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_ADDRESS))
 
     def test_matching_command_line_is_the_bridge(self, tmp_path: Path) -> None:
         """A process whose command line carries the listen spec is the bridge."""
         pidfile = tmp_path / "vault-loopback.pid"
-        with _spawned("TCP-LISTEN:9419,bind=127.0.0.1,fork,reuseaddr") as pid:
+        with _spawned(VAULT_LISTEN_SPEC) as pid:
             pidfile.write_text(str(pid))
-            assert _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+            assert _run(_socat_alive(str(pidfile), VAULT_LISTEN_ADDRESS))
 
     def test_empty_pidfile_never_reads_the_kernel_command_line(self, tmp_path: Path) -> None:
         """An empty PID file is dead, not a match against ``/proc//cmdline``."""
         pidfile = tmp_path / "vault-loopback.pid"
         pidfile.write_text("")
-        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_ADDRESS))
 
     def test_exited_pid_is_dead(self, tmp_path: Path) -> None:
         """A PID with no ``/proc`` entry left is not a bridge."""
@@ -91,14 +96,14 @@ class TestSocatLiveness:
         proc.wait()
         pidfile = tmp_path / "vault-loopback.pid"
         pidfile.write_text(str(proc.pid))
-        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_SPEC))
+        assert not _run(_socat_alive(str(pidfile), VAULT_LISTEN_ADDRESS))
 
     def test_probes_name_the_listen_spec_the_script_uses(self) -> None:
         """The doctor's needle must track ``ensure-bridges.sh``'s socat listeners."""
         socket_probe = " ".join(_make_vault_bridge_check(socket_mode=True).probe_cmd)
         tcp_probe = " ".join(_make_vault_bridge_check(socket_mode=False).probe_cmd)
         ssh_probe = " ".join(_make_ssh_bridge_check().probe_cmd)
-        assert VAULT_LISTEN_SPEC in socket_probe
+        assert f"{VAULT_LISTEN_ADDRESS}," in socket_probe
         assert "UNIX-LISTEN:/tmp/terok-vault.sock," in tcp_probe
         assert "UNIX-LISTEN:/tmp/ssh-agent.sock," in ssh_probe
 
@@ -123,7 +128,7 @@ class TestBridgeTargets:
         and reports an empty reply.
         """
         pidfile = tmp_path / "gate.pid"
-        with _spawned("TCP-LISTEN:9418,fork,reuseaddr") as pid:
+        with _spawned(GATE_LISTEN_SPEC) as pid:
             pidfile.write_text(str(pid))
             stale = {"TEROK_GATE_SOCKET": "/run/terok/gate-server.sock"}
             assert not self._probe(_make_gate_bridge_check(), pidfile, stale)
@@ -134,7 +139,7 @@ class TestBridgeTargets:
         with socket.socket(socket.AF_UNIX) as srv:
             srv.bind(str(target))
             pidfile = tmp_path / "gate.pid"
-            with _spawned("TCP-LISTEN:9418,fork,reuseaddr") as pid:
+            with _spawned(GATE_LISTEN_SPEC) as pid:
                 pidfile.write_text(str(pid))
                 env = {"TEROK_GATE_SOCKET": str(target)}
                 assert self._probe(_make_gate_bridge_check(), pidfile, env)
@@ -142,7 +147,7 @@ class TestBridgeTargets:
     def test_gate_bridge_in_tcp_mode_needs_no_socket(self, tmp_path: Path) -> None:
         """TCP mode dials a host port; there is no path to test."""
         pidfile = tmp_path / "gate.pid"
-        with _spawned("TCP-LISTEN:9418,fork,reuseaddr") as pid:
+        with _spawned(GATE_LISTEN_SPEC) as pid:
             pidfile.write_text(str(pid))
             assert self._probe(_make_gate_bridge_check(), pidfile, {"TEROK_GATE_SOCKET": ""})
 
