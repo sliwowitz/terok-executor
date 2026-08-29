@@ -2307,8 +2307,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0a28.dev480+g6d3c4cc85"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fbridge-pid-identity#6d3c4cc855722a812553044fff597b6f137f6909" }
+version = "0.5.0a28.dev481+g31735e5ef"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fbridge-pid-identity#31735e5efa8ac3a634f68ead7fb623817c1ba289" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
