@@ -51,10 +51,9 @@ on protocol N keep running; new containers get protocol N+1.
 Protocol 3 records terok-sandbox #491, which moved each service's socket
 into its own ``/run/terok`` subdirectory and so changed the values of
 ``TEROK_VAULT_SOCKET`` / ``TEROK_SSH_SIGNER_SOCKET`` / ``TEROK_GATE_SOCKET``.
-The number is documentation, not a gate: nothing keys behaviour off it, and
-the check that catches a container older than the current layout compares
-the advertised paths themselves (``terok_sandbox.supervision``).  A number
-would only say that *something* changed; the paths say what broke."""
+A container stamped below that starts anyway and is warned about, never
+refused — ``terok_sandbox.supervision`` holds the matching floor as
+``MIN_RUNTIME_PROTOCOL``, so the two constants move together."""
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import (
