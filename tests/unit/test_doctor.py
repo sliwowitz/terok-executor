@@ -13,7 +13,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-import pytest
 from terok_sandbox.doctor import DoctorCheck
 
 from terok_executor.doctor import (
@@ -90,13 +89,7 @@ def _script_listen_addresses() -> dict[str, str]:
         text=True,
         check=True,
     )
-    bound = dict(zip(names, completed.stdout.splitlines(), strict=True))
-    if not all(bound.values()):
-        pytest.skip(
-            "the pinned terok-sandbox spells its listen addresses inline; "
-            "this contract arms itself once the pin carries the named ones"
-        )
-    return bound
+    return dict(zip(names, completed.stdout.splitlines(), strict=True))
 
 
 class TestSocatLiveness:
