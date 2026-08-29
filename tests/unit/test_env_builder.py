@@ -162,12 +162,18 @@ class TestBaseEnv:
         assert isinstance(result, ContainerEnvResult)
 
     def test_container_protocol_marker(self, base_spec, roster):
-        """Every container receives the host↔container contract version so
-        in-container scripts can adapt on an update without guessing."""
+        """Every container is stamped with the contract version it was created against.
+
+        The number is a record, not a gate — it tells an operator which
+        host↔container contract a long-lived container predates.  Protocol 3
+        marks terok-sandbox #491, which moved the ``/run/terok`` sockets into
+        per-service subdirectories and so changed the socket env vars.  The
+        equality is a tripwire: bumping it is a deliberate act.
+        """
         from terok_executor.container.env import CONTAINER_PROTOCOL
 
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
-        assert CONTAINER_PROTOCOL == 2
+        assert CONTAINER_PROTOCOL == 3
         assert result.env["TEROK_CONTAINER_PROTOCOL"] == str(CONTAINER_PROTOCOL)
 
 
