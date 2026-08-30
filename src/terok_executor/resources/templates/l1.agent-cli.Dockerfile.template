@@ -65,6 +65,8 @@ RUN chmod +x /etc/profile.d/terok-env.sh; \
     cat /tmp/terok-bash-banner.sh >> "$bashrc"; \
     rm -f /tmp/terok-bash-banner.sh
 
+{{ bridge_install }}
+
 # Symlink for per-task agent wrappers (resolved at runtime via mount).
 RUN mkdir -p /usr/local/share/terok && \
     ln -s /home/dev/.terok/terok-executor.sh /usr/local/share/terok/terok-env-wrappers.sh

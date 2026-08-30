@@ -549,6 +549,23 @@ class TestTemplateRendering:
         content = render_l0()
         assert "visudo -cf /etc/sudoers.d/dev" in content
 
+    def test_bridge_scripts_are_installed_by_l1_not_l0(self) -> None:
+        """The sandbox bridges track sandbox releases, so L1 owns them.
+
+        Baking them into L0 pinned every container to whichever terok-sandbox
+        was installed the last time the base image was rebuilt — which, for a
+        base image, is almost never.
+        """
+        l0 = render_l0()
+        assert "ensure-bridges.sh" not in l0
+        assert "ssh-agent-bridge.sh" not in l0
+        for content in (
+            render_l1("terok-l0:test", family="deb"),
+            render_l1_sidecar("terok-l0:test", family="deb", tool_name="coderabbit"),
+        ):
+            assert "COPY scripts/ensure-bridges.sh /usr/local/bin/ensure-bridges.sh" in content
+            assert "COPY scripts/ssh-agent-bridge.sh /usr/local/bin/ssh-agent-bridge.sh" in content
+
     def test_l1_is_valid_dockerfile(self) -> None:
         content = render_l1("terok-l0:test", family="deb")
         assert content.startswith("# syntax=docker")

@@ -39,15 +39,21 @@ from terok_executor.integrations.sandbox import (
 )
 from terok_executor.roster.types import EgressProjection
 
-CONTAINER_PROTOCOL = 2
+CONTAINER_PROTOCOL = 3
 """Version of the host↔container env/script contract.
 
-Emitted to every container as ``TEROK_CONTAINER_PROTOCOL``.  In-container
-scripts (``terok-env.sh`` and friends) read it to adapt to the version
-the host is shipping.  Bumped on breaking changes to the env-var or
-script-interface contract between host and container, not on every
-release.  Old containers on protocol N keep running; new containers get
-protocol N+1 and carry the matching host-side code."""
+Emitted to every container as ``TEROK_CONTAINER_PROTOCOL``, and stamped on
+each container at creation, so an operator can read off which contract a
+long-lived container was built against.  Bumped on breaking changes to the
+env-var or script-interface contract, not on every release.  Old containers
+on protocol N keep running; new containers get protocol N+1.
+
+Protocol 3 records terok-sandbox #491, which moved each service's socket
+into its own ``/run/terok`` subdirectory and so changed the values of
+``TEROK_VAULT_SOCKET`` / ``TEROK_SSH_SIGNER_SOCKET`` / ``TEROK_GATE_SOCKET``.
+A container stamped below that starts anyway and is warned about, never
+refused — [`MIN_RUNTIME_PROTOCOL`][terok_sandbox.supervision.MIN_RUNTIME_PROTOCOL]
+is the matching floor, so the two constants move together."""
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import (

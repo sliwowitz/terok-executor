@@ -794,6 +794,19 @@ def prepare_build_context(dest: Path) -> None:
 
 # ── Dockerfile rendering ──
 
+_BRIDGE_INSTALL = """\
+# Socat bridges: SSH signer, vault, gate.  They ship with terok-sandbox, so an
+# L1 rebuild is the cadence at which a sandbox upgrade reaches running tasks.
+# L0 would pin them to whenever the base image was last rebuilt.
+COPY scripts/ssh-agent-bridge.sh /usr/local/bin/ssh-agent-bridge.sh
+COPY scripts/ensure-bridges.sh /usr/local/bin/ensure-bridges.sh
+RUN chmod +x /usr/local/bin/ssh-agent-bridge.sh /usr/local/bin/ensure-bridges.sh"""
+"""Dockerfile lines that install the sandbox bridge scripts.
+
+Both L1 templates render it.  One definition, so a change cannot reach the
+agent image and miss the sidecar.
+"""
+
 
 def render_l0(base_image: str = DEFAULT_BASE_IMAGE, *, family: str | None = None) -> str:
     """Render the L0 (base dev) Dockerfile.
@@ -863,6 +876,7 @@ def render_l1(
         {
             "BASE_IMAGE": l0_image,
             "AGENT_CACHE_BUST": cache_bust,
+            "bridge_install": _BRIDGE_INSTALL,
             "family": family,
             "install_root_snippets": root_snippets,
             "install_dev_snippets": dev_snippets,
@@ -894,6 +908,7 @@ def render_l1_sidecar(
         {
             "BASE_IMAGE": l0_image,
             "TOOL_CACHE_BUST": cache_bust,
+            "bridge_install": _BRIDGE_INSTALL,
             "tool_name": tool_name,
             "family": family,
         },
@@ -911,7 +926,7 @@ def stage_scripts(dest: Path) -> None:
     (``ensure-bridges.sh`` + ``ssh-agent-bridge.sh``).  The bridges
     live in sandbox because they encode sandbox-level concerns with
     no executor-specific logic; executor still bundles them into the
-    container image so the Dockerfile's ``COPY scripts/…`` lines keep
+    build context so the L1 Dockerfiles' ``COPY scripts/…`` lines keep
     finding them at their established names.
 
     Raises [`BuildError`][terok_executor.container.build.BuildError]

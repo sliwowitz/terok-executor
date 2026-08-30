@@ -75,11 +75,23 @@ glab() {
 # Skip under root: under krun the launch goes through ``bash -lc`` which sources
 # /etc/profile (and us) BEFORE init-ssh-and-repo.sh drops privileges, so
 # starting bridges here would leave them root-owned and unreachable from the
-# later dev session (UID-mismatched kill -0 / unowned ``/tmp/*.sock``).
+# later dev session (UID-mismatched liveness checks / unowned ``/tmp/*.sock``).
 # init-ssh-and-repo.sh explicitly sources ensure-bridges.sh post-drop.
+#
+# ``$EUID`` rather than ``$(id -u)``: every shell in the container runs this,
+# so it spawns no process it can avoid.  Stderr is left alone — the script is
+# silent while the bridges are healthy, and a bridge that cannot bind has to
+# be audible.  The presence check is what ``2>/dev/null`` used to cover.
 # shellcheck source=ensure-bridges.sh
-[[ "$(id -u)" -ne 0 ]] && command -v socat >/dev/null 2>&1 && \
-    . ensure-bridges.sh 2>/dev/null
+if [[ "$EUID" -ne 0 ]] && command -v ensure-bridges.sh >/dev/null 2>&1; then
+  . ensure-bridges.sh
+fi
+
+# A shell runs long after the supervisor's bind window.  It is the one caller
+# that can treat an absent bridge target as real rather than as a cold start.
+if declare -F _terok_report_missing_bridge_targets >/dev/null 2>&1; then
+  _terok_report_missing_bridge_targets
+fi
 
 # Export SSH_AUTH_SOCK when the bridge socket exists; unset if it's gone.
 if [[ -S /tmp/ssh-agent.sock ]]; then
