@@ -624,6 +624,8 @@ def _handle_rm(*, name: str) -> None:
 
 def _handle_setup(
     *,
+    component: str | None = None,
+    show: bool = False,
     check: bool = False,
     no_sandbox: bool = False,
     no_images: bool = False,
@@ -631,17 +633,25 @@ def _handle_setup(
     family: str | None = None,
     passphrase_tier: str | None = None,
     cfg: SandboxConfig | None = None,
-) -> None:
+) -> int | None:
     """Bootstrap the full terok-executor stack on a fresh host.
 
     Installs the sandbox services (shield hooks + gate, plus
     credentials-DB provisioning) and builds the L0+L1 container
     images.  ``--check`` reports status without touching anything and
-    exits non-zero when something is missing.
+    exits non-zero when something is missing.  With a *component*
+    (``setup selinux`` / ``setup apparmor``) the interactive
+    per-component installer runs instead — the verb sandbox's hints
+    name under this frontend.
     """
+    if component is not None:
+        from .integrations.sandbox import handle_setup_component
+
+        return handle_setup_component(component, show_only=show, cfg=cfg)
+
     if check:
         _print_setup_status(base)
-        return
+        return None
 
     if not no_sandbox:
         from .sandbox import ensure_sandbox_ready
@@ -655,6 +665,7 @@ def _handle_setup(
     print("Setup complete.")
     print("Try:  terok-executor run <agent> .")
     print("      (prerequisites like SSH keys + agent auth will be offered on first run)")
+    return None
 
 
 def _handle_uninstall(
@@ -1078,6 +1089,20 @@ SETUP_COMMAND = CommandDef(
     help="Install sandbox services + container images (first-run bootstrap)",
     handler=_handle_setup,
     args=(
+        ArgDef(
+            name="component",
+            nargs="?",
+            help=(
+                "Install one hardening prerequisite interactively"
+                " (selinux | apparmor): shows the exact sudo command and"
+                " the rules before anything runs"
+            ),
+        ),
+        ArgDef(
+            name="--show",
+            action="store_true",
+            help="With a component: print the rules it would install, then exit",
+        ),
         ArgDef(
             name="--check",
             action="store_true",
