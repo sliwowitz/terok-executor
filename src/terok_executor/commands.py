@@ -645,18 +645,24 @@ def _handle_setup(
     name under this frontend.
     """
     if component is not None or show:
-        rejected = [
-            flag
-            for flag, given in (
-                ("--check", check),
-                ("--no-sandbox", no_sandbox),
-                ("--no-images", no_images),
-                ("--base", base != DEFAULT_BASE_IMAGE),
-                ("--family", family is not None),
-                ("--passphrase-tier", passphrase_tier is not None),
-            )
-            if given
-        ]
+        # Only meaningful against a named component; without one, the flow
+        # below answers the real problem ("--show needs a component").
+        rejected = (
+            []
+            if component is None
+            else [
+                flag
+                for flag, given in (
+                    ("--check", check),
+                    ("--no-sandbox", no_sandbox),
+                    ("--no-images", no_images),
+                    ("--base", base != DEFAULT_BASE_IMAGE),
+                    ("--family", family is not None),
+                    ("--passphrase-tier", passphrase_tier is not None),
+                )
+                if given
+            ]
+        )
         if rejected:
             raise SystemExit(
                 f"{', '.join(rejected)} belongs to the full setup, not to 'setup {component}'"

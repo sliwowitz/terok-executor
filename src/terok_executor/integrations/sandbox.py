@@ -127,6 +127,7 @@ __all__ = [
     "allocate_per_container_resources",
     "check_environment",
     "ensure_infra_keypair",
+    "handle_setup_component",
     "installed_versions",
     "mint_gate_token",
     "needs_setup",
