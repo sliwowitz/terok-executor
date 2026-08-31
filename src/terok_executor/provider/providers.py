@@ -249,15 +249,24 @@ class Agent:
     resume_flag: str | None
     """Flag to resume a session (e.g. ``"--resume"``, ``"--session"``)."""
 
+    resume_subcommand: str | None
+    """Subcommand that resumes a session, for CLIs that phrase it that way.
+
+    Codex: ``codex resume <id>`` interactively, ``codex exec resume <id> …``
+    headless — the wrapper leads with it, or nests it under the headless
+    subcommand.  Mutually exclusive with ``resume_flag``.
+    """
+
     continue_flag: str | None
     """Flag to continue a session (e.g. ``"--continue"``)."""
 
     session_file: str | None
     """Filename in ``/home/dev/.terok/`` for stored session ID.
 
-    Providers that capture session IDs via plugin or post-run parsing set this
-    to a filename (e.g. ``"opencode-session.txt"``).  Providers with their own
-    hook mechanism (Claude) or no session support set this to ``None``.
+    Providers that capture session IDs via plugin, post-run parsing, or a
+    hook installed in the image (Codex) set this to a filename (e.g.
+    ``"opencode-session.txt"``).  Claude's hook writes a path the wrapper
+    hard-codes, and providers without session support set this to ``None``.
     """
 
     # -- Claude-specific capabilities --

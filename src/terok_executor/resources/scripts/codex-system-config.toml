@@ -1,0 +1,11 @@
+# terok:container — installed as /etc/codex/config.toml, Codex's system config layer.
+#
+# Records the ID of every Codex thread started in this container so the terok
+# wrapper can resume it after a restart (`codex resume <id>`).  A hook declared
+# in the system layer is trusted by Codex without a review prompt, and the
+# layer is container-local — the shared ~/.codex mount stays untouched.  The
+# target file lives in the per-task agent-config mount, so IDs stay task-local.
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "python3 -c \"import json,sys; print(json.load(sys.stdin)['session_id'])\" > /home/dev/.terok/codex-session.txt"

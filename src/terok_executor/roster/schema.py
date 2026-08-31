@@ -116,9 +116,26 @@ class RawSession(StrictModel):
 
     supports_resume: bool = False
     resume_flag: str | None = None
+    resume_subcommand: str | None = None
     continue_flag: str | None = None
     session_file: str | None = None
     supports_hook: bool = False
+
+    @model_validator(mode="after")
+    def _one_resume_mechanism(self) -> RawSession:
+        """Require exactly one resume mechanism when the agent resumes.
+
+        The runtime [`Agent`][terok_executor.provider.providers.Agent] resumes
+        by a flag or by a subcommand, never both — the wrapper reads whichever
+        is set.  Reject a roster (bundled or user override) that claims resume
+        support with neither, or that declares both, before it can render an
+        ambiguous wrapper.
+        """
+        if self.resume_flag and self.resume_subcommand:
+            raise ValueError("resume_flag and resume_subcommand are mutually exclusive")
+        if self.supports_resume and not (self.resume_flag or self.resume_subcommand):
+            raise ValueError("supports_resume requires a resume_flag or a resume_subcommand")
+        return self
 
 
 class RawCapabilities(StrictModel):
@@ -649,6 +666,7 @@ class RawAgentYaml(StrictModel):
             verbose_flag=hl.verbose_flag,
             supports_session_resume=sess.supports_resume,
             resume_flag=sess.resume_flag,
+            resume_subcommand=sess.resume_subcommand,
             continue_flag=sess.continue_flag,
             session_file=sess.session_file,
             supports_session_hook=sess.supports_hook,
