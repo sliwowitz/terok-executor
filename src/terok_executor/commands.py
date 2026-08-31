@@ -645,9 +645,29 @@ def _handle_setup(
     name under this frontend.
     """
     if component is not None:
+        rejected = [
+            flag
+            for flag, given in (
+                ("--check", check),
+                ("--no-sandbox", no_sandbox),
+                ("--no-images", no_images),
+                ("--base", base != DEFAULT_BASE_IMAGE),
+                ("--family", family is not None),
+                ("--passphrase-tier", passphrase_tier is not None),
+            )
+            if given
+        ]
+        if rejected:
+            raise SystemExit(
+                f"{', '.join(rejected)} belongs to the full setup, not to 'setup {component}'"
+            )
         from .integrations.sandbox import handle_setup_component
 
         return handle_setup_component(component, show_only=show, cfg=cfg)
+    if show:
+        from .integrations.sandbox import SETUP_COMPONENTS
+
+        raise SystemExit(f"--show needs a component ({' or '.join(SETUP_COMPONENTS)})")
 
     if check:
         _print_setup_status(base)
