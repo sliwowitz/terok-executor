@@ -43,7 +43,6 @@ from terok_sandbox import (  # noqa: F401 — re-exported public API
     CONTAINER_VAULT_SOCKET,
     PHANTOM_CREDENTIALS_MARKER,
     READY_MARKER,
-    SETUP_COMPONENTS,
     ConfigScope,
     ContainerRuntime,
     CredentialDB,

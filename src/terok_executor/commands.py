@@ -644,7 +644,7 @@ def _handle_setup(
     per-component installer runs instead — the verb sandbox's hints
     name under this frontend.
     """
-    if component is not None:
+    if component is not None or show:
         rejected = [
             flag
             for flag, given in (
@@ -664,10 +664,6 @@ def _handle_setup(
         from .integrations.sandbox import handle_setup_component
 
         return handle_setup_component(component, show_only=show, cfg=cfg)
-    if show:
-        from .integrations.sandbox import SETUP_COMPONENTS
-
-        raise SystemExit(f"--show needs a component ({' or '.join(SETUP_COMPONENTS)})")
 
     if check:
         _print_setup_status(base)
