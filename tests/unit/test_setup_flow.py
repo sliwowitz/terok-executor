@@ -85,6 +85,34 @@ class TestHandleSetup:
         setup_spies["sandbox_setup"].assert_not_called()
         setup_spies["build_images"].assert_not_called()
 
+    def test_check_with_component_is_rejected(self, setup_spies) -> None:
+        """--check must never fall through to an interactive sudo prompt."""
+        with (
+            patch("terok_executor.integrations.sandbox.handle_setup_component") as component,
+            pytest.raises(SystemExit, match="--check"),
+        ):
+            _handle_setup(component="selinux", check=True)
+        component.assert_not_called()
+
+    def test_show_without_component_is_rejected(self, setup_spies) -> None:
+        with pytest.raises(SystemExit, match="needs a component"):
+            _handle_setup(show=True)
+        setup_spies["sandbox_setup"].assert_not_called()
+
+    def test_component_routes_to_the_interactive_installer(self, setup_spies) -> None:
+        """``setup selinux`` skips the bootstrap and forwards to sandbox's flow.
+
+        The passthrough is what keeps sandbox's ``terok-executor setup
+        selinux`` hint truthful under this frontend.
+        """
+        with patch(
+            "terok_executor.integrations.sandbox.handle_setup_component", return_value=1
+        ) as component:
+            assert _handle_setup(component="selinux", show=True) == 1
+        component.assert_called_once_with("selinux", show_only=True, cfg=None)
+        setup_spies["sandbox_setup"].assert_not_called()
+        setup_spies["build_images"].assert_not_called()
+
 
 # ── Uninstall flow ────────────────────────────────────────────────────
 
