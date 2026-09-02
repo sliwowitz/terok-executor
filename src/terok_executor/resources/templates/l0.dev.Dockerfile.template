@@ -46,6 +46,14 @@ RUN set -eux; \
     sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen; \
     grep -q '^en_US.UTF-8 UTF-8' /etc/locale.gen || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen; \
     locale-gen en_US.UTF-8
+
+# GitHub answers most anonymous git-over-HTTPS requests from noble's
+# git/libcurl-gnutls client with 401, while the same request over HTTP/1.1
+# (or with a token) is served.  Gate on the codename so Ubuntu 24.04 and its
+# derivatives get the workaround and nothing else does.  ``--system`` writes
+# /etc/gitconfig, which every user reads.
+RUN set -eu; . /etc/os-release; \
+    if [ "${UBUNTU_CODENAME:-}" = "noble" ]; then git config --system http.version HTTP/1.1; fi
 {%- else -%}
 # glibc-langpack-en provides en_US.UTF-8 directly — no locale-gen step needed.
 RUN dnf install -y --setopt=install_weak_deps=False \

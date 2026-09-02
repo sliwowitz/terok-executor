@@ -543,6 +543,17 @@ class TestTemplateRendering:
         assert "pam_succeed_if.so" not in deb
         assert "/etc/pam.d/sudo" not in deb
 
+    def test_l0_deb_pins_git_to_http1_on_noble_only(self) -> None:
+        # GitHub answers most anonymous git-over-HTTPS requests from noble's
+        # git/libcurl-gnutls client with 401; HTTP/1.1 is served.  The step is
+        # deb-only and gated at build time on the base's UBUNTU_CODENAME, so a
+        # Debian or 26.04 base runs the check and changes nothing.
+        deb = render_l0("ubuntu:24.04", family="deb")
+        assert '[ "${UBUNTU_CODENAME:-}" = "noble" ]' in deb
+        assert "git config --system http.version HTTP/1.1" in deb
+        rpm = render_l0("registry.fedoraproject.org/fedora:43", family="rpm")
+        assert "http.version" not in rpm
+
     def test_l0_validates_sudoers(self) -> None:
         # ``visudo -cf`` fails the build on a malformed sudoers drop-in, which
         # is much friendlier than discovering it at first sudo.
