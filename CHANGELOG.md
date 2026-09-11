@@ -1,4 +1,19 @@
 # Changelog
+## v0.4.0 — Past Prologue
+
+## What's Changed
+* fix(acp): migrate to agent-client-protocol 0.11 (ACP schema 1.16) in https://github.com/terok-ai/terok-executor/pull/460
+* fix(vault): stop flagging glab's settings-only config.yml as a leaked credential in https://github.com/terok-ai/terok-executor/pull/464
+* feat(instructions): render the bundled default per package family in https://github.com/terok-ai/terok-executor/pull/465
+* feat(gpu): device-grant selectors pass through (sandbox gpu-device-grants chain) in https://github.com/terok-ai/terok-executor/pull/479
+* feat(tmux): show the host-written review-lag warning in the container status line in https://github.com/terok-ai/terok-executor/pull/489
+* feat!: simplify custom LLM providers in https://github.com/terok-ai/terok-executor/pull/525
+* fix(l0): git over HTTP/1.1 on Ubuntu 24.04 bases in https://github.com/terok-ai/terok-executor/pull/538
+* fix: route Codex Apps authentication through vault in https://github.com/terok-ai/terok-executor/pull/544
+
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.3.1...v0.4.0
+
 ## v0.3.1 — You Exist Here
 
 * Shared credential files permissions for glab, https://github.com/terok-ai/terok-executor/pull/437
