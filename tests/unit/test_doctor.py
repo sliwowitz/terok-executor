@@ -25,11 +25,12 @@ from terok_executor.doctor import (
     _make_phantom_token_checks,
     _make_ssh_bridge_check,
     _make_vault_bridge_check,
+    _make_vault_tls_bridge_check,
     _socat_alive,
 )
 from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
-from terok_executor.vault_addr import LOOPBACK_VAULT_PORT
+from terok_executor.vault_addr import LOOPBACK_VAULT_PORT, LOOPBACK_VAULT_TLS_PORT, VAULT_TLS_CERT
 
 TOKEN_BROKER_PORT = 18731
 #: The vault loopback bridge's listen address, as ``ensure-bridges.sh`` binds it.
@@ -81,11 +82,17 @@ def _script_listen_addresses() -> dict[str, str]:
         "_TEROK_VAULT_SOCKET_LISTEN",
         "_TEROK_VAULT_LOOPBACK_LISTEN",
         "_TEROK_GATE_LISTEN",
+        "_TEROK_VAULT_TLS_LISTEN",
+        "_TEROK_VAULT_TLS_DIR",
     )
     echoes = "\n".join(f'echo "${name}"' for name in names)
     completed = subprocess.run(
         ["bash", "-c", f"{setup}\n{echoes}"],
-        env={**os.environ, "TEROK_VAULT_LOOPBACK_PORT": str(LOOPBACK_VAULT_PORT)},
+        env={
+            **os.environ,
+            "TEROK_VAULT_LOOPBACK_PORT": str(LOOPBACK_VAULT_PORT),
+            "TEROK_VAULT_TLS_PORT": str(LOOPBACK_VAULT_TLS_PORT),
+        },
         capture_output=True,
         text=True,
         check=True,
@@ -143,6 +150,7 @@ class TestSocatLiveness:
             ("_TEROK_VAULT_LOOPBACK_LISTEN", _make_vault_bridge_check(socket_mode=True)),
             ("_TEROK_VAULT_SOCKET_LISTEN", _make_vault_bridge_check(socket_mode=False)),
             ("_TEROK_GATE_LISTEN", _make_gate_bridge_check()),
+            ("_TEROK_VAULT_TLS_LISTEN", _make_vault_tls_bridge_check()),
         ):
             match = re.search(r'grep -qF "([^"]+)"', " ".join(check.probe_cmd))
             assert match, f"{check.label}: probe carries no needle"
@@ -150,6 +158,10 @@ class TestSocatLiveness:
                 f"{check.label}: probe looks for {match.group(1)!r}, "
                 f"but the script binds {bound[name]!r}"
             )
+
+    def test_certificate_path_is_the_one_the_bridge_script_makes(self) -> None:
+        """Codex is pointed at the certificate the TLS bridge actually serves."""
+        assert f"{_script_listen_addresses()['_TEROK_VAULT_TLS_DIR']}/cert.pem" == VAULT_TLS_CERT
 
 
 class TestBridgeTargets:

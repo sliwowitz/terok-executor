@@ -137,6 +137,9 @@ class ProviderBinding:
     socket_env: str = ""
     """Env var that receives the container-side vault socket path (HTTP-over-UNIX agents)."""
 
+    ca_cert_env: str = ""
+    """Env var that receives the TLS bridge's certificate (agents reaching ``{vault_tls_url}``)."""
+
     credential_file: str = ""
     """Credential file path relative to the auth mount (e.g. ``".credentials.json"``).
 

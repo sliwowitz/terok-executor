@@ -24,7 +24,9 @@ from terok_executor.credentials.vault_config import (
     _write_nofollow,  # noqa: PLC2701
 )
 
-_TEST_LOCATION = VaultLocation(url="http://vault", socket="/tmp/terok-testing/vault.sock")
+_TEST_LOCATION = VaultLocation(
+    url="http://vault", tls_url="", socket="/tmp/terok-testing/vault.sock"
+)
 
 
 class TestWriteNofollow:

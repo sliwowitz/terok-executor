@@ -8,9 +8,10 @@ and — crucially — on every task start.  Writes vault URLs / socket paths
 (not secrets) to provider config files so agents route traffic through the
 vault instead of hitting upstream directly with phantom tokens.
 
-Two template tokens are substituted into patch values:
+Three template tokens are substituted into patch values:
 
 - ``{vault_url}``    — HTTP URL the container should reach the vault on.
+- ``{vault_tls_url}`` — the same vault over TLS, for clients that refuse plain HTTP.
 - ``{vault_socket}`` — filesystem path of a Unix socket the container can
   connect to for the vault.
 
@@ -49,8 +50,9 @@ class ConfigPatchError(RuntimeError):
 class VaultLocation:
     """Vault addresses that the resolver returns for container clients.
 
-    The resolver returns both fields for every transport. The ``url`` field is the
-    loopback URL. The ``socket`` field is ``LOOPBACK_BRIDGE_SOCKET``.
+    The resolver returns every field for every transport. The ``url`` field is the
+    loopback URL, and ``tls_url`` the TLS bridge in front of it. The ``socket``
+    field is ``LOOPBACK_BRIDGE_SOCKET``.
     """
 
     url: str
@@ -58,6 +60,9 @@ class VaultLocation:
 
     socket: str
     """Filesystem path for a Unix-socket-speaking HTTP client."""
+
+    tls_url: str
+    """Base URL for a client that insists on https — the TLS bridge in front of ``url``."""
 
 
 def _credential_type_overlay(patch: dict, credential_type: str | None) -> dict:
@@ -272,11 +277,13 @@ def resolve_vault_location(token_broker_port: int | None = None) -> VaultLocatio
     from terok_executor.vault_addr import (
         LOOPBACK_BRIDGE_SOCKET,
         LOOPBACK_VAULT_PORT,
+        LOOPBACK_VAULT_TLS_PORT,
     )
 
     del token_broker_port  # both transports share the bridge-owned address
     return VaultLocation(
         url=f"http://localhost:{LOOPBACK_VAULT_PORT}",
+        tls_url=f"https://localhost:{LOOPBACK_VAULT_TLS_PORT}",
         socket=LOOPBACK_BRIDGE_SOCKET,
     )
 
@@ -366,10 +373,14 @@ def _delete_nofollow(path: Path) -> None:
 
 
 def _substitute(value: object, location: VaultLocation) -> object:
-    """Expand ``{vault_url}`` / ``{vault_socket}`` tokens in a patch value."""
+    """Expand ``{vault_url}`` / ``{vault_tls_url}`` / ``{vault_socket}`` tokens in a patch value."""
     if not isinstance(value, str):
         return value
-    return value.replace("{vault_url}", location.url).replace("{vault_socket}", location.socket)
+    return (
+        value.replace("{vault_url}", location.url)
+        .replace("{vault_tls_url}", location.tls_url)
+        .replace("{vault_socket}", location.socket)
+    )
 
 
 def _empty_metadata() -> dict:

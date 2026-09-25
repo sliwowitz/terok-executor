@@ -124,6 +124,14 @@ class VaultRoute:
     injected centrally by the env builder.
     """
 
+    ca_cert_env: str = ""
+    """Env var that receives the vault TLS bridge's certificate path.
+
+    Set when the agent reaches the vault over ``{vault_tls_url}`` and takes
+    extra trust roots from an env var (Codex reads ``CODEX_CA_CERTIFICATE``).
+    Only that agent trusts the certificate.
+    """
+
     shared_config_patch: dict | None = None
     """Optional shared config patch applied after auth (e.g. Vibe's config.toml)."""
 

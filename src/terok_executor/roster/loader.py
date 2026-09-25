@@ -850,6 +850,7 @@ def _vault_route_from_binding(
         token_env_aliases=tuple(binding.token_env_aliases),
         base_url_env=binding.base_url_env,
         socket_env=binding.socket_env,
+        ca_cert_env=binding.ca_cert_env,
         shared_config_patch=binding.config_patch,
         oauth_refresh=provider.oauth_refresh,
         shared_domain=provider.shared_domain,

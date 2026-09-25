@@ -37,7 +37,9 @@ class TestApplyTomlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
 
         _apply_toml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()
@@ -67,7 +69,9 @@ class TestApplyTomlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
 
         _apply_toml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()
@@ -88,7 +92,9 @@ class TestApplyTomlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
 
         _apply_toml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()
@@ -116,7 +122,9 @@ class TestApplyYamlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
 
         _apply_yaml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()
@@ -143,7 +151,9 @@ class TestApplyYamlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
 
         _apply_yaml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()
@@ -162,7 +172,9 @@ class TestApplyYamlPatchWarning:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
 
         _apply_yaml_patch(
-            config_path, patch_spec, VaultLocation(url="http://localhost:9999", socket="")
+            config_path,
+            patch_spec,
+            VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
         )
 
         captured = capsys.readouterr()

@@ -27,7 +27,11 @@ from terok_executor.integrations.sandbox import (
 )
 from terok_executor.roster import AgentRoster
 from terok_executor.roster.types import Provider, ProviderAuth, ProviderModel, VaultRoute
-from terok_executor.vault_addr import LOOPBACK_BRIDGE_SOCKET
+from terok_executor.vault_addr import (
+    LOOPBACK_BRIDGE_SOCKET,
+    LOOPBACK_VAULT_TLS_PORT,
+    VAULT_TLS_CERT,
+)
 from tests.constants import EXAMPLE_PROVIDER_HOST, EXAMPLE_PROVIDER_UPSTREAM
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
@@ -555,6 +559,21 @@ class TestVaultTokenInjection:
         assert result.env["CODEX_CONNECTORS_TOKEN"] == result.env["OPENAI_API_KEY"]
         assert result.env["CODEX_CONNECTORS_TOKEN"].startswith("terok-p-")
 
+    def test_codex_trusts_the_vault_tls_bridge(self, workspace, envs_dir, roster, tmp_path):
+        """A routed codex gets the TLS bridge started and its certificate as a trust root."""
+        cfg = _make_vault_db(
+            tmp_path,
+            "openai",
+            {"type": "oauth", "access_token": "oauth-token", "account_id": "account-a"},
+        )
+        spec = _spec(workspace, envs_dir, agent_name="codex")
+
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            result = assemble_container_env(spec, roster, caller_manages_vault=False)
+
+        assert result.env["TEROK_VAULT_TLS_PORT"] == str(LOOPBACK_VAULT_TLS_PORT)
+        assert result.env["CODEX_CA_CERTIFICATE"] == VAULT_TLS_CERT
+
     def test_vault_api_key_uses_default_token_env(self, workspace, envs_dir, roster, tmp_path):
         """API-key credential falls back to the ``_default`` ``token_env`` entry."""
         cfg = _make_vault_db(tmp_path)
@@ -630,6 +649,8 @@ class TestVaultTokenInjection:
         # The in-container loopback port is advertised so ensure-bridges.sh
         # stands up its TCP→UNIX bridge.
         assert result.env.get("TEROK_VAULT_LOOPBACK_PORT") == "9419"
+        # Only codex trusts the TLS bridge's certificate.
+        assert "CODEX_CA_CERTIFICATE" not in result.env
 
     def test_vault_injects_ssh_signer_token(self, workspace, envs_dir, roster, tmp_path):
         """SSH signer token injected when scope has valid keys in ssh-keys.json."""
@@ -965,8 +986,8 @@ class TestSharedConfigPatches:
         codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
         # No stored credential → falls back to the route's declared type (oauth),
         # so codex routes to the ChatGPT backend.
-        assert codex_cfg["openai_base_url"] == "http://localhost:9419/backend-api/codex"
-        assert codex_cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
+        assert codex_cfg["openai_base_url"] == "https://localhost:9420/backend-api/codex"
+        assert codex_cfg["chatgpt_base_url"] == "https://localhost:9420/backend-api/"
 
     def test_codex_api_key_credential_routes_to_v1(self, roster, tmp_path):
         """An API-key codex credential routes inference to /v1, not the ChatGPT backend."""
@@ -988,7 +1009,7 @@ class TestSharedConfigPatches:
 
         cfg = tomllib.loads((codex_dir / "config.toml").read_text())
         assert cfg["openai_base_url"] == "http://localhost:9419/v1"
-        assert cfg["chatgpt_base_url"] == "http://localhost:9419/backend-api/"
+        assert cfg["chatgpt_base_url"] == "https://localhost:9420/backend-api/"
 
     def test_credential_type_overlay_folds_per_type_keys(self):
         """The overlay merges by_credential_type[type] over toml_set; unknowns fall through."""
@@ -1136,8 +1157,8 @@ class TestSharedConfigPatches:
             {
                 "kind": "toml_top",
                 "values": {
-                    "openai_base_url": "http://localhost:9419/backend-api/codex",
-                    "chatgpt_base_url": "http://localhost:9419/backend-api/",
+                    "openai_base_url": "https://localhost:9420/backend-api/codex",
+                    "chatgpt_base_url": "https://localhost:9420/backend-api/",
                 },
             }
         ]
@@ -1184,7 +1205,7 @@ class TestSharedConfigPatches:
         config_path = codex_dir / "config.toml"
         config_path.write_text(
             'openai_base_url = "https://user.example/v1"\n'
-            'chatgpt_base_url = "http://localhost:9419/backend-api/"\n'
+            'chatgpt_base_url = "https://localhost:9420/backend-api/"\n'
         )
 
         apply_shared_config_patches(

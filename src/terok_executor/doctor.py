@@ -30,6 +30,8 @@ from .vault_addr import (
     CONTAINER_VAULT_SOCKET,
     LOOPBACK_BRIDGE_SOCKET,
     LOOPBACK_VAULT_PORT,
+    LOOPBACK_VAULT_TLS_PORT,
+    VAULT_TLS_CERT,
 )
 
 if TYPE_CHECKING:
@@ -44,6 +46,7 @@ _SSH_AGENT_PIDFILE = f"{_BRIDGE_PIDDIR}/ssh-agent.pid"
 _SSH_AGENT_SOCKET = "/tmp/ssh-agent.sock"  # nosec B108
 _VAULT_LOOPBACK_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-loopback.pid"
 _VAULT_SOCKET_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-socket.pid"
+_VAULT_TLS_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-tls.pid"
 _GATE_PIDFILE = f"{_BRIDGE_PIDDIR}/gate.pid"
 
 # The in-container port the git gate is fronted on, in both transports.
@@ -91,6 +94,7 @@ def _build_agent_doctor_checks(
     checks: list[DoctorCheck] = [
         _make_ssh_bridge_check(),
         _make_vault_bridge_check(socket_mode=socket_mode),
+        _make_vault_tls_bridge_check(),
         _make_gate_bridge_check(),
     ]
     checks.extend(_make_credential_file_checks(roster))
@@ -251,6 +255,22 @@ def _make_vault_bridge_check(*, socket_mode: bool) -> DoctorCheck:
         socket_test=f"test -S {LOOPBACK_BRIDGE_SOCKET}",
         dead="Vault socket bridge dead — socat process or socket missing",
         absent=f"{label} not started — no vault-routed provider for this task",
+    )
+
+
+def _make_vault_tls_bridge_check() -> DoctorCheck:
+    """Check the TLS bridge in front of the vault loopback, and its certificate."""
+    label = f"Vault TLS bridge (TLS {LOOPBACK_VAULT_TLS_PORT} → vault loopback)"
+    return _bridge_check(
+        label=label,
+        pidfile=_VAULT_TLS_PIDFILE,
+        listen=f"OPENSSL-LISTEN:{LOOPBACK_VAULT_TLS_PORT}",
+        socket_test=f"test -s {VAULT_TLS_CERT}",
+        dead="Vault TLS bridge dead — Codex cannot reach its ChatGPT backend",
+        absent=(
+            f"{label} not started — no vault-routed provider for this task, "
+            "or an image without openssl (rebuild it)"
+        ),
     )
 
 

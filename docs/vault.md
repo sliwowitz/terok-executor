@@ -78,7 +78,7 @@ it in different ways, depending on what their SDK supports:
 | Agent | How it reaches the token broker | Notes |
 |-------|-------------------------|-------|
 | **Claude** | `ANTHROPIC_BASE_URL=http://localhost:9419` (+ `ANTHROPIC_UNIX_SOCKET` pointing at the vault socket) | Anthropic SDK respects these env vars |
-| **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars.  `openai_base_url` is keyed by stored credential type: OAuth → `{vault_url}/backend-api/codex`, API key → `{vault_url}/v1` |
+| **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars.  `openai_base_url` is keyed by stored credential type: OAuth → `{vault_tls_url}/backend-api/codex`, API key → `{vault_url}/v1`.  `chatgpt_base_url` is `{vault_tls_url}/backend-api/` |
 | **Vibe** | `config.toml` with `api_base` (+ `api_key_env_var`) in shared `~/.vibe` mount | Mistral SDK ignores the URL path in api_base, only uses host:port. Written by the `provider.config_patch` in YAML |
 | **OpenCode / Pi** | Generic `TEROK_PROVIDER_<NAME>_*` variables | Terok creates a phantom token, a vault base URL, a label, and model data for each authenticated provider. The provider must support the agent protocol. Use `--provider <name>` to select the provider. Legacy aliases also keep their `TEROK_OC_<NAME>_*` settings. |
 | **gh** | `http_unix_socket` in `~/.config/gh/config.yml` | gh routes ALL API traffic through a Unix socket. See below. |
@@ -109,6 +109,22 @@ The config-patch mechanism writes the vault socket path into
 
 Either way gh's API traffic reaches the vault token broker, which
 substitutes the phantom token before forwarding upstream.
+
+### Codex: the TLS bridge
+
+Codex refuses a ChatGPT backend URL that is not `https`, and sends its
+model requests to that backend's origin.  terok-sandbox's
+`ensure-bridges.sh` therefore puts a TLS bridge in front of the loopback,
+on `LOOPBACK_VAULT_TLS_PORT`, whenever `TEROK_VAULT_TLS_PORT` is set.  The
+`{vault_tls_url}` template token names it.
+
+The bridge's certificate is a self-signed `localhost` leaf, made in the
+container on first use and never leaving it.  It lives as long as the
+container, so there is nothing to sync with the host or rotate.  Only
+Codex trusts it: `ca_cert_env: CODEX_CA_CERTIFICATE` hands Codex the
+certificate path as an extra trust root, and the container's trust store
+stays untouched.  The TLS adds no protection — both ends are the
+container — it only satisfies Codex.
 
 ### YAML-driven config patches
 
@@ -184,6 +200,7 @@ provider:
     _default: ANTHROPIC_API_KEY  # fallback for any non-OAuth credential
   base_url_env: ANTHROPIC_BASE_URL   # optional: env var for the vault URL
   socket_env: ANTHROPIC_UNIX_SOCKET  # optional: env var for the vault socket
+  ca_cert_env: CODEX_CA_CERTIFICATE  # optional: env var for the TLS bridge's certificate
   credential_file: .credentials.json
   credential_type: oauth
   config_patch: ...              # optional: file patch for the vault address
