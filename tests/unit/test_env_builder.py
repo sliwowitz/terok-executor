@@ -649,7 +649,8 @@ class TestVaultTokenInjection:
         # The in-container loopback port is advertised so ensure-bridges.sh
         # stands up its TCP→UNIX bridge.
         assert result.env.get("TEROK_VAULT_LOOPBACK_PORT") == "9419"
-        # Only codex trusts the TLS bridge's certificate.
+        # Only codex uses the TLS bridge: no bridge, no certificate, no trust.
+        assert "TEROK_VAULT_TLS_PORT" not in result.env
         assert "CODEX_CA_CERTIFICATE" not in result.env
 
     def test_vault_injects_ssh_signer_token(self, workspace, envs_dir, roster, tmp_path):

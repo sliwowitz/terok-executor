@@ -268,8 +268,8 @@ def _make_vault_tls_bridge_check() -> DoctorCheck:
         socket_test=f"test -s {VAULT_TLS_CERT}",
         dead="Vault TLS bridge dead — Codex cannot reach its ChatGPT backend",
         absent=(
-            f"{label} not started — no vault-routed provider for this task, "
-            "or an image without openssl (rebuild it)"
+            f"{label} not started — no vault-routed Codex in this task, "
+            "or a Codex image without openssl (rebuild it)"
         ),
     )
 

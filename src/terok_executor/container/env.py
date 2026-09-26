@@ -767,7 +767,10 @@ def _inject_vault_tokens(
         # http://localhost:9419/v1 is uniform — agents and patched
         # config files never see per-container host details.
         env[VAULT_LOOPBACK_PORT_ENV] = str(LOOPBACK_VAULT_PORT)
-        env[VAULT_TLS_PORT_ENV] = str(LOOPBACK_VAULT_TLS_PORT)
+        # The TLS bridge serves only agents that trust it; without one, the
+        # container makes no certificate and needs no openssl.
+        if any(vault_routes[name].ca_cert_env for name in routed):
+            env[VAULT_TLS_PORT_ENV] = str(LOOPBACK_VAULT_TLS_PORT)
 
     if ssh_token:
         env["TEROK_SSH_SIGNER_TOKEN"] = ssh_token

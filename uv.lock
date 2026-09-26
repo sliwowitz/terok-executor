@@ -2350,8 +2350,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.1.dev495+gab5d67753"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fvault-tls-bridge#ab5d677539eacd19494dbdab54d708c2d66a5c59" }
+version = "0.5.1.dev496+gb9ec57471"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fvault-tls-bridge#b9ec57471daebb01f16457a788aa8442a6dd629d" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },

@@ -95,7 +95,19 @@ auth:
   api_key_hint: "Get your API key at: https://platform.openai.com/api-keys"
 
 install:
+  # ``openssl`` makes the certificate for the vault's TLS bridge, which only
+  # Codex uses — so only a Codex image carries it.
   run_as_root: |
+    {% if family == "deb" %}
+    RUN set -eux; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends openssl; \
+        rm -rf /var/lib/apt/lists/*
+    {% else %}
+    RUN set -eux; \
+        dnf install -y --setopt=install_weak_deps=False openssl; \
+        dnf clean all
+    {% endif %}
     RUN set -eux; \
         cp /tmp/terok-scripts/terok-codex-acp /usr/local/bin/terok-codex-acp; \
         cp /tmp/terok-scripts/setup-codex-auth.sh /usr/local/bin/setup-codex-auth.sh; \
