@@ -196,12 +196,10 @@ class TestPatchValueTemplating:
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
 
         config_path = tmp_path / "config.toml"
+        patch_spec = {"file": "config.toml", "toml_set": {"base_url": "{{ vault_tsl_url }}"}}
+        location = VaultLocation(url="http://localhost:9999", tls_url="", socket="")
         with pytest.raises(UndefinedError, match="vault_tsl_url"):
-            _apply_toml_patch(
-                config_path,
-                {"file": "config.toml", "toml_set": {"base_url": "{{ vault_tsl_url }}"}},
-                VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
-            )
+            _apply_toml_patch(config_path, patch_spec, location)
         assert not config_path.exists()
 
 

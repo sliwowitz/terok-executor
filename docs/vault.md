@@ -116,7 +116,10 @@ Codex refuses a ChatGPT backend URL that is not `https`, and sends its
 model requests to that backend's origin.  terok-sandbox's
 `ensure-bridges.sh` therefore puts a TLS bridge in front of the loopback,
 on `LOOPBACK_VAULT_TLS_PORT`, whenever `TEROK_VAULT_TLS_PORT` is set.  The
-`{{ vault_tls_url }}` template token names it.
+executor sets it only when a routed provider binding declares `ca_cert_env`,
+so a task without Codex has no bridge, and only Codex images install the
+`openssl` that makes the certificate.  The `{{ vault_tls_url }}` template
+token names it.
 
 The bridge's certificate is a self-signed `localhost` leaf, made in the
 container on first use and never leaving it.  It lives as long as the
@@ -125,6 +128,16 @@ Codex trusts it: `ca_cert_env: CODEX_CA_CERTIFICATE` hands Codex the
 certificate path as an extra trust root, and the container's trust store
 stays untouched.  The TLS adds no protection — both ends are the
 container — it only satisfies Codex.
+
+```yaml
+# resources/agents/codex.yaml
+provider:
+  ca_cert_env: CODEX_CA_CERTIFICATE   # Codex's extra trust root: the bridge's certificate
+  config_patch:
+    file: config.toml
+    toml_set:
+      chatgpt_base_url: "{{ vault_tls_url }}/backend-api/"
+```
 
 ### YAML-driven config patches
 
@@ -200,7 +213,6 @@ provider:
     _default: ANTHROPIC_API_KEY  # fallback for any non-OAuth credential
   base_url_env: ANTHROPIC_BASE_URL   # optional: env var for the vault URL
   socket_env: ANTHROPIC_UNIX_SOCKET  # optional: env var for the vault socket
-  ca_cert_env: CODEX_CA_CERTIFICATE  # optional: env var for the TLS bridge's certificate
   credential_file: .credentials.json
   credential_type: oauth
   config_patch: ...              # optional: file patch for the vault address

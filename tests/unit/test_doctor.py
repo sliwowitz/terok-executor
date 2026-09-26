@@ -161,7 +161,34 @@ class TestSocatLiveness:
 
     def test_certificate_path_is_the_one_the_bridge_script_makes(self) -> None:
         """Codex is pointed at the certificate the TLS bridge actually serves."""
-        assert f"{_script_listen_addresses()['_TEROK_VAULT_TLS_DIR']}/cert.pem" == VAULT_TLS_CERT
+        cert_dir = _script_listen_addresses()["_TEROK_VAULT_TLS_DIR"]
+        assert f"{cert_dir}/cert.pem" == VAULT_TLS_CERT
+
+
+class TestVaultTlsBridgeAbsence:
+    """A TLS bridge the container was told to start is never an expected absence."""
+
+    @staticmethod
+    def _verdict(tmp_path: Path, env: dict[str, str]) -> str:
+        """Evaluate the TLS check against a PID file that does not exist."""
+        from terok_executor.doctor import _VAULT_TLS_PIDFILE
+
+        check = _make_vault_tls_bridge_check()
+        script = check.probe_cmd[-1].replace(_VAULT_TLS_PIDFILE, str(tmp_path / "vault-tls.pid"))
+        base = {k: v for k, v in os.environ.items() if k != "TEROK_VAULT_TLS_PORT"}
+        done = subprocess.run(
+            ["bash", "-c", script], env={**base, **env}, capture_output=True, text=True, check=False
+        )
+        return check.evaluate(done.returncode, done.stdout, done.stderr).severity
+
+    def test_unwanted_bridge_is_an_expected_absence(self, tmp_path: Path) -> None:
+        """No Codex in the task: no port advertised, nothing to report."""
+        assert self._verdict(tmp_path, {}) == "ok"
+
+    def test_wanted_but_missing_bridge_is_an_error(self, tmp_path: Path) -> None:
+        """A Codex task whose bridge never started (e.g. no openssl) fails the check."""
+        env = {"TEROK_VAULT_TLS_PORT": str(LOOPBACK_VAULT_TLS_PORT)}
+        assert self._verdict(tmp_path, env) == "error"
 
 
 class TestBridgeTargets:
