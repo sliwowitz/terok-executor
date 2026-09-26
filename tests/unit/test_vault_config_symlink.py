@@ -24,7 +24,9 @@ from terok_executor.credentials.vault_config import (
     _write_nofollow,  # noqa: PLC2701
 )
 
-_TEST_LOCATION = VaultLocation(url="http://vault", socket="/tmp/terok-testing/vault.sock")
+_TEST_LOCATION = VaultLocation(
+    url="http://vault", tls_url="", socket="/tmp/terok-testing/vault.sock"
+)
 
 
 class TestWriteNofollow:
@@ -87,7 +89,7 @@ class TestApplyPatchesSymlinkSafety:
             "file": "config.toml",
             "toml_table": "providers",
             "toml_match": {"name": "mistral"},
-            "toml_set": {"base_url": "{vault_url}"},
+            "toml_set": {"base_url": "{{ vault_url }}"},
         }
         with pytest.raises(ConfigPatchError, match="symlink"):
             _apply_toml_patch(config, patch, _TEST_LOCATION)
@@ -101,7 +103,7 @@ class TestApplyPatchesSymlinkSafety:
 
         patch = {
             "file": "config.yml",
-            "yaml_set": {"http_unix_socket": "{vault_socket}"},
+            "yaml_set": {"http_unix_socket": "{{ vault_socket }}"},
         }
         with pytest.raises(ConfigPatchError, match="symlink"):
             _apply_yaml_patch(config, patch, _TEST_LOCATION)
@@ -113,7 +115,7 @@ class TestApplyPatchesSymlinkSafety:
             "file": "config.toml",
             "toml_table": "providers",
             "toml_match": {"name": "mistral"},
-            "toml_set": {"base_url": "{vault_url}/v1"},
+            "toml_set": {"base_url": "{{ vault_url }}/v1"},
         }
         _apply_toml_patch(config, patch, _TEST_LOCATION)
         assert config.is_file() and not config.is_symlink()

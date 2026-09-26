@@ -2315,7 +2315,7 @@ requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "rich", specifier = "~=15.0" },
     { name = "ruamel-yaml", specifier = "==0.19.1" },
-    { name = "terok-sandbox", specifier = ">=0.5.0,<0.6.0" },
+    { name = "terok-sandbox", url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.1a1/terok_sandbox-0.5.1a1-py3-none-any.whl" },
     { name = "terok-util", specifier = ">=0.3.1,<0.4.0" },
     { name = "tomli-w", specifier = "~=1.2" },
 ]
@@ -2350,8 +2350,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.5.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.5.1a1"
+source = { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.1a1/terok_sandbox-0.5.1a1-py3-none-any.whl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2367,9 +2367,25 @@ dependencies = [
     { name = "terok-shield" },
     { name = "terok-util" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/8b/092c25a672df3a865e56fa1575f77ffadae8052cb9a39970c3b68f034045/terok_sandbox-0.5.0.tar.gz", hash = "sha256:570b32d3960ea3d25ad843961aebee9c54eaf8b48fa9f5b83ca0dbdffaed5c45", size = 914730, upload-time = "2026-09-11T09:07:30.653Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/b4/4b082a9ebeb607d4652e271b4802a9e07f0da5e7eb72f36a25a689677a16/terok_sandbox-0.5.0-py3-none-any.whl", hash = "sha256:60e9abe6084dec80ddaca3091a1768319979fca2c9a854ad89e24027f5d40cbb", size = 430468, upload-time = "2026-09-11T09:07:28.818Z" },
+    { url = "https://github.com/terok-ai/terok-sandbox/releases/download/v0.5.1a1/terok_sandbox-0.5.1a1-py3-none-any.whl", hash = "sha256:f6a7a71864510a764ed9339e35fe75c9125cc194f5b214c7301a093786a00933" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = "~=3.14.3" },
+    { name = "cryptography", specifier = "~=50.0" },
+    { name = "jinja2", specifier = "~=3.1" },
+    { name = "keyring", specifier = "~=25.7" },
+    { name = "packaging", specifier = "~=26.3" },
+    { name = "platformdirs", specifier = "~=4.11" },
+    { name = "prompt-toolkit", specifier = "~=3.0" },
+    { name = "pydantic", specifier = "~=2.13" },
+    { name = "ruamel-yaml", specifier = "==0.19.1" },
+    { name = "sqlcipher3", specifier = "==0.6.2" },
+    { name = "terok-clearance", specifier = ">=0.8.0,<0.9.0" },
+    { name = "terok-shield", specifier = ">=0.8.0,<0.9.0" },
+    { name = "terok-util", specifier = ">=0.3.1,<0.4.0" },
 ]
 
 [[package]]

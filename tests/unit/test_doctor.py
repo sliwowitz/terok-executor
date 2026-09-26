@@ -25,11 +25,12 @@ from terok_executor.doctor import (
     _make_phantom_token_checks,
     _make_ssh_bridge_check,
     _make_vault_bridge_check,
+    _make_vault_tls_bridge_check,
     _socat_alive,
 )
 from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET
 from terok_executor.roster import AgentRoster
-from terok_executor.vault_addr import LOOPBACK_VAULT_PORT
+from terok_executor.vault_addr import LOOPBACK_VAULT_PORT, LOOPBACK_VAULT_TLS_PORT, VAULT_TLS_CERT
 
 TOKEN_BROKER_PORT = 18731
 #: The vault loopback bridge's listen address, as ``ensure-bridges.sh`` binds it.
@@ -81,11 +82,17 @@ def _script_listen_addresses() -> dict[str, str]:
         "_TEROK_VAULT_SOCKET_LISTEN",
         "_TEROK_VAULT_LOOPBACK_LISTEN",
         "_TEROK_GATE_LISTEN",
+        "_TEROK_VAULT_TLS_LISTEN",
+        "_TEROK_VAULT_TLS_DIR",
     )
     echoes = "\n".join(f'echo "${name}"' for name in names)
     completed = subprocess.run(
         ["bash", "-c", f"{setup}\n{echoes}"],
-        env={**os.environ, "TEROK_VAULT_LOOPBACK_PORT": str(LOOPBACK_VAULT_PORT)},
+        env={
+            **os.environ,
+            "TEROK_VAULT_LOOPBACK_PORT": str(LOOPBACK_VAULT_PORT),
+            "TEROK_VAULT_TLS_PORT": str(LOOPBACK_VAULT_TLS_PORT),
+        },
         capture_output=True,
         text=True,
         check=True,
@@ -143,6 +150,7 @@ class TestSocatLiveness:
             ("_TEROK_VAULT_LOOPBACK_LISTEN", _make_vault_bridge_check(socket_mode=True)),
             ("_TEROK_VAULT_SOCKET_LISTEN", _make_vault_bridge_check(socket_mode=False)),
             ("_TEROK_GATE_LISTEN", _make_gate_bridge_check()),
+            ("_TEROK_VAULT_TLS_LISTEN", _make_vault_tls_bridge_check()),
         ):
             match = re.search(r'grep -qF "([^"]+)"', " ".join(check.probe_cmd))
             assert match, f"{check.label}: probe carries no needle"
@@ -150,6 +158,37 @@ class TestSocatLiveness:
                 f"{check.label}: probe looks for {match.group(1)!r}, "
                 f"but the script binds {bound[name]!r}"
             )
+
+    def test_certificate_path_is_the_one_the_bridge_script_makes(self) -> None:
+        """Codex is pointed at the certificate the TLS bridge actually serves."""
+        cert_dir = _script_listen_addresses()["_TEROK_VAULT_TLS_DIR"]
+        assert f"{cert_dir}/cert.pem" == VAULT_TLS_CERT
+
+
+class TestVaultTlsBridgeAbsence:
+    """A TLS bridge the container was told to start is never an expected absence."""
+
+    @staticmethod
+    def _verdict(tmp_path: Path, env: dict[str, str]) -> str:
+        """Evaluate the TLS check against a PID file that does not exist."""
+        from terok_executor.doctor import _VAULT_TLS_PIDFILE
+
+        check = _make_vault_tls_bridge_check()
+        script = check.probe_cmd[-1].replace(_VAULT_TLS_PIDFILE, str(tmp_path / "vault-tls.pid"))
+        base = {k: v for k, v in os.environ.items() if k != "TEROK_VAULT_TLS_PORT"}
+        done = subprocess.run(
+            ["bash", "-c", script], env={**base, **env}, capture_output=True, text=True, check=False
+        )
+        return check.evaluate(done.returncode, done.stdout, done.stderr).severity
+
+    def test_unwanted_bridge_is_an_expected_absence(self, tmp_path: Path) -> None:
+        """No Codex in the task: no port advertised, nothing to report."""
+        assert self._verdict(tmp_path, {}) == "ok"
+
+    def test_wanted_but_missing_bridge_is_an_error(self, tmp_path: Path) -> None:
+        """A Codex task whose bridge never started (e.g. no openssl) fails the check."""
+        env = {"TEROK_VAULT_TLS_PORT": str(LOOPBACK_VAULT_TLS_PORT)}
+        assert self._verdict(tmp_path, env) == "error"
 
 
 class TestBridgeTargets:

@@ -706,7 +706,13 @@ def _inject_vault_tokens(
     # endpoint + a socat-fronted Unix socket.  Agents don't decide per-route
     # any more — addressing is centralised.
     from terok_executor.credentials.vault_config import resolve_vault_location
-    from terok_executor.vault_addr import LOOPBACK_VAULT_PORT, VAULT_LOOPBACK_PORT_ENV
+    from terok_executor.vault_addr import (
+        LOOPBACK_VAULT_PORT,
+        LOOPBACK_VAULT_TLS_PORT,
+        VAULT_LOOPBACK_PORT_ENV,
+        VAULT_TLS_CERT,
+        VAULT_TLS_PORT_ENV,
+    )
 
     location = resolve_vault_location(token_broker_port=port)
     host_tcp = f"host.containers.internal:{port}" if port else None
@@ -724,6 +730,8 @@ def _inject_vault_tokens(
 
         if route.socket_env:
             env[route.socket_env] = location.socket
+        if route.ca_cert_env:
+            env[route.ca_cert_env] = VAULT_TLS_CERT
         if route.base_url_env:
             env[route.base_url_env] = location.url
 
@@ -759,6 +767,10 @@ def _inject_vault_tokens(
         # http://localhost:9419/v1 is uniform — agents and patched
         # config files never see per-container host details.
         env[VAULT_LOOPBACK_PORT_ENV] = str(LOOPBACK_VAULT_PORT)
+        # The TLS bridge serves only agents that trust it; without one, the
+        # container makes no certificate and needs no openssl.
+        if any(vault_routes[name].ca_cert_env for name in routed):
+            env[VAULT_TLS_PORT_ENV] = str(LOOPBACK_VAULT_TLS_PORT)
 
     if ssh_token:
         env["TEROK_SSH_SIGNER_TOKEN"] = ssh_token

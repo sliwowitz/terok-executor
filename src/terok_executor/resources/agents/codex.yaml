@@ -59,15 +59,19 @@ provider:
   # (a subscription token can't use ``/v1`` — no api.responses.write scope → 401
   # → the blocked auth.openai.com refresh) and an API-key container on ``/v1``.
   # ``chatgpt_base_url`` (common) routes the auth-manager's account calls.
+  # Codex refuses a ChatGPT backend that is not https, and sends its model
+  # requests to that backend's origin, so both ChatGPT-side URLs go through the
+  # vault's TLS bridge; ``ca_cert_env`` makes Codex, and only Codex, trust it.
+  ca_cert_env: CODEX_CA_CERTIFICATE
   config_patch:
     file: config.toml
     toml_set:
-      chatgpt_base_url: "{vault_url}/backend-api/"
+      chatgpt_base_url: "{{ vault_tls_url }}/backend-api/"
     by_credential_type:
       oauth:
-        openai_base_url: "{vault_url}/backend-api/codex"
+        openai_base_url: "{{ vault_tls_url }}/backend-api/codex"
       api_key:
-        openai_base_url: "{vault_url}/v1"
+        openai_base_url: "{{ vault_url }}/v1"
   # Codex itself reads its bearer from ``auth.json`` + the patched
   # ``config.toml``, not from env.  This phantom env var is emitted for
   # env-var-only consumers (e.g. Pi) so any other agent in the same
@@ -91,7 +95,19 @@ auth:
   api_key_hint: "Get your API key at: https://platform.openai.com/api-keys"
 
 install:
+  # ``openssl`` makes the certificate for the vault's TLS bridge, which only
+  # Codex uses — so only a Codex image carries it.
   run_as_root: |
+    {% if family == "deb" %}
+    RUN set -eux; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends openssl; \
+        rm -rf /var/lib/apt/lists/*
+    {% else %}
+    RUN set -eux; \
+        dnf install -y --setopt=install_weak_deps=False openssl; \
+        dnf clean all
+    {% endif %}
     RUN set -eux; \
         cp /tmp/terok-scripts/terok-codex-acp /usr/local/bin/terok-codex-acp; \
         cp /tmp/terok-scripts/setup-codex-auth.sh /usr/local/bin/setup-codex-auth.sh; \

@@ -61,7 +61,7 @@ provider:
     # provider falls back to ``api_key_env_var=""``, vibe reads no env, and
     # sends requests without an Authorization header (vault returns 401).
     toml_set:
-      api_base: "{vault_url}/v1"
+      api_base: "{{ vault_url }}/v1"
       api_key_env_var: MISTRAL_API_KEY
 
 auth:

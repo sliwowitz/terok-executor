@@ -39,3 +39,15 @@ Sits next to the gate bridge on 9418; picked once, hardcoded everywhere.
 
 VAULT_LOOPBACK_PORT_ENV = "TEROK_VAULT_LOOPBACK_PORT"
 """Env var name the bridge script reads to find the loopback port."""
+
+LOOPBACK_VAULT_TLS_PORT = 9420
+"""TCP port the in-container TLS bridge listens on, in front of the loopback."""
+
+VAULT_TLS_PORT_ENV = "TEROK_VAULT_TLS_PORT"
+"""Env var name the bridge script reads to find the TLS port."""
+
+VAULT_TLS_CERT = "/tmp/.terok/vault-tls/cert.pem"  # nosec B108 — container-only path
+"""The TLS bridge's self-signed certificate, made in the container by the bridge script.
+
+A client that should trust the TLS bridge is pointed at this file; nothing else trusts it.
+"""

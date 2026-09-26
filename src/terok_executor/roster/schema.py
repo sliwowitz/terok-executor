@@ -552,6 +552,7 @@ class RawProviderBinding(StrictModel):
     token_env_aliases: list[str] = Field(default_factory=list)
     base_url_env: str = ""
     socket_env: str = ""
+    ca_cert_env: str = ""
     credential_file: str = ""
     credential_file_writable: bool = Field(
         default=False,
@@ -573,6 +574,7 @@ class RawProviderBinding(StrictModel):
             token_env_aliases=tuple(self.token_env_aliases),
             base_url_env=self.base_url_env,
             socket_env=self.socket_env,
+            ca_cert_env=self.ca_cert_env,
             credential_file=self.credential_file,
             credential_type=self.credential_type,
             config_patch=self.config_patch,
