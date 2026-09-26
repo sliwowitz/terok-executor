@@ -66,12 +66,12 @@ provider:
   config_patch:
     file: config.toml
     toml_set:
-      chatgpt_base_url: "{vault_tls_url}/backend-api/"
+      chatgpt_base_url: "{{ vault_tls_url }}/backend-api/"
     by_credential_type:
       oauth:
-        openai_base_url: "{vault_tls_url}/backend-api/codex"
+        openai_base_url: "{{ vault_tls_url }}/backend-api/codex"
       api_key:
-        openai_base_url: "{vault_url}/v1"
+        openai_base_url: "{{ vault_url }}/v1"
   # Codex itself reads its bearer from ``auth.json`` + the patched
   # ``config.toml``, not from env.  This phantom env var is emitted for
   # env-var-only consumers (e.g. Pi) so any other agent in the same

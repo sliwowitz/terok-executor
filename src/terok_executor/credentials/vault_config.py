@@ -8,12 +8,14 @@ and — crucially — on every task start.  Writes vault URLs / socket paths
 (not secrets) to provider config files so agents route traffic through the
 vault instead of hitting upstream directly with phantom tokens.
 
-Three template tokens are substituted into patch values:
+Patch values are Jinja templates over three variables:
 
-- ``{vault_url}``    — HTTP URL the container should reach the vault on.
-- ``{vault_tls_url}`` — the same vault over TLS, for clients that refuse plain HTTP.
-- ``{vault_socket}`` — filesystem path of a Unix socket the container can
+- ``{{ vault_url }}``     — HTTP URL the container should reach the vault on.
+- ``{{ vault_tls_url }}`` — the same vault over TLS, for clients that refuse plain HTTP.
+- ``{{ vault_socket }}``  — filesystem path of a Unix socket the container can
   connect to for the vault.
+
+Any other name fails the patch rather than landing in the config verbatim.
 
 The concrete values are mode-dependent (socket vs TCP transport) and
 resolved centrally — agent YAMLs only need to reference the tokens.
@@ -27,10 +29,13 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from jinja2 import Environment
+
     from terok_executor.roster.loader import AgentRoster
 
 _logger = logging.getLogger(__name__)
@@ -372,14 +377,24 @@ def _delete_nofollow(path: Path) -> None:
         raise ConfigPatchError(f"refusing to delete directory at {path}") from exc
 
 
+@lru_cache(maxsize=1)
+def _patch_env() -> Environment:
+    """Jinja environment for patch values; an unknown name is an error, never empty text."""
+    from jinja2 import Environment, StrictUndefined
+
+    return Environment(undefined=StrictUndefined, autoescape=False)  # nosec B701 — config values, not HTML
+
+
 def _substitute(value: object, location: VaultLocation) -> object:
-    """Expand ``{vault_url}`` / ``{vault_tls_url}`` / ``{vault_socket}`` tokens in a patch value."""
+    """Render a string patch value against the vault's container-side addresses."""
     if not isinstance(value, str):
         return value
     return (
-        value.replace("{vault_url}", location.url)
-        .replace("{vault_tls_url}", location.tls_url)
-        .replace("{vault_socket}", location.socket)
+        _patch_env()
+        .from_string(value)
+        .render(
+            vault_url=location.url, vault_tls_url=location.tls_url, vault_socket=location.socket
+        )
     )
 
 

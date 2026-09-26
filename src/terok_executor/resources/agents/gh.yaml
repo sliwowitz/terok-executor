@@ -17,7 +17,7 @@ provider:
     _default: GH_TOKEN
   config_patch:
     file: config.yml
-    yaml_set: {http_unix_socket: "{vault_socket}"}
+    yaml_set: {http_unix_socket: "{{ vault_socket }}"}
 
 auth:
   host_dir: _gh-config

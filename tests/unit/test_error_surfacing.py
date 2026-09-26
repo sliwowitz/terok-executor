@@ -31,7 +31,7 @@ class TestApplyTomlPatchWarning:
             "file": "config.toml",
             "toml_table": "servers",
             "toml_match": {"name": "proxy"},
-            "toml_set": {"api_base": "{vault_url}/v1"},
+            "toml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
@@ -63,7 +63,7 @@ class TestApplyTomlPatchWarning:
             "file": "nonexistent.toml",
             "toml_table": "servers",
             "toml_match": {"name": "proxy"},
-            "toml_set": {"api_base": "{vault_url}/v1"},
+            "toml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
@@ -86,7 +86,7 @@ class TestApplyTomlPatchWarning:
             "file": "config.toml",
             "toml_table": "servers",
             "toml_match": {"name": "proxy"},
-            "toml_set": {"api_base": "{vault_url}/v1"},
+            "toml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
@@ -116,7 +116,7 @@ class TestApplyYamlPatchWarning:
 
         patch_spec = {
             "file": "config.yaml",
-            "yaml_set": {"api_base": "{vault_url}/v1"},
+            "yaml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
@@ -145,7 +145,7 @@ class TestApplyYamlPatchWarning:
         config_path = tmp_path / "nonexistent.yaml"
         patch_spec = {
             "file": "nonexistent.yaml",
-            "yaml_set": {"api_base": "{vault_url}/v1"},
+            "yaml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
@@ -166,7 +166,7 @@ class TestApplyYamlPatchWarning:
 
         patch_spec = {
             "file": "config.yaml",
-            "yaml_set": {"api_base": "{vault_url}/v1"},
+            "yaml_set": {"api_base": "{{ vault_url }}/v1"},
         }
 
         from terok_executor.credentials.vault_config import VaultLocation, _apply_yaml_patch
@@ -184,6 +184,25 @@ class TestApplyYamlPatchWarning:
 # ---------------------------------------------------------------------------
 # roster: _load_bundled_agents warns on parse failure
 # ---------------------------------------------------------------------------
+
+
+class TestPatchValueTemplating:
+    """Patch values are strict Jinja: a name that is not a vault address fails loud."""
+
+    def test_unknown_name_fails_instead_of_landing_in_the_config(self, tmp_path: Path) -> None:
+        """A mistyped token raises rather than writing literal text into the agent config."""
+        from jinja2 import UndefinedError
+
+        from terok_executor.credentials.vault_config import VaultLocation, _apply_toml_patch
+
+        config_path = tmp_path / "config.toml"
+        with pytest.raises(UndefinedError, match="vault_tsl_url"):
+            _apply_toml_patch(
+                config_path,
+                {"file": "config.toml", "toml_set": {"base_url": "{{ vault_tsl_url }}"}},
+                VaultLocation(url="http://localhost:9999", tls_url="", socket=""),
+            )
+        assert not config_path.exists()
 
 
 class TestLoadBundledAgentsWarning:

@@ -127,7 +127,7 @@ class VaultRoute:
     ca_cert_env: str = ""
     """Env var that receives the vault TLS bridge's certificate path.
 
-    Set when the agent reaches the vault over ``{vault_tls_url}`` and takes
+    Set when the agent reaches the vault over ``{{ vault_tls_url }}`` and takes
     extra trust roots from an env var (Codex reads ``CODEX_CA_CERTIFICATE``).
     Only that agent trusts the certificate.
     """
