@@ -26,113 +26,28 @@ from terok_util import ArgDef, CommandDef
 from .container.build import DEFAULT_BASE_IMAGE
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from terok_executor.integrations.sandbox import SandboxConfig
 
 
 # ── Handlers ──
 
 
-def _setup_verdict_or_exit(*, skip: bool) -> None:
-    """Cheap stamp-based gate that runs before live preflight.
-
-    Reads [`terok_sandbox.needs_setup`][terok_sandbox.needs_setup] and bounces the user with
-    a structured exit code when the install is missing or stale:
-
-    - ``OK`` → return; live preflight proceeds.
-    - ``FIRST_RUN`` / ``STALE_AFTER_UPDATE`` / ``STAMP_CORRUPT`` →
-      ``raise SystemExit(3)`` after printing a one-line fix hint
-      that points the user at ``terok-executor setup``.
-    - ``STALE_AFTER_DOWNGRADE`` → ``raise SystemExit(4)`` after a
-      multi-line warning naming the downgraded package(s).
-      Downgrades aren't tested; refuse rather than risk inconsistent
-      state from older code reading newer schemas.
-
-    The ``skip`` flag ( ``--no-preflight``) waives this gate too —
-    the user's escape hatch is one knob, not two.  Sub-millisecond
-    cost on the OK path so wiring it in front of live preflight
-    doesn't change perceived startup latency.
-    """
-    if skip:
-        return
-
+def _setup_verdict_or_exit(*, cfg: SandboxConfig | None = None, live: bool = False) -> None:
+    """Require owned/downward setup, with exit 3 for repairs and 4 for downgrades."""
     import sys
 
-    from terok_executor.integrations.sandbox import (
-        SetupVerdict,
-        installed_versions,
-        needs_setup,
-        read_stamp,
-        stamp_path,
-    )
+    from terok_util import SetupDowngradeError, SetupRequiredError, require_setup
 
-    verdict = needs_setup()
-    if verdict is SetupVerdict.OK:
-        return
-
-    if verdict is SetupVerdict.STALE_AFTER_DOWNGRADE:
-        downgraded = _name_downgraded_packages(stamp_path(), read_stamp, installed_versions)
-        names = ", ".join(downgraded) or "one or more packages"
-        print(
-            f"terok-executor: refusing to run — downgrade detected ({names}).\n"
-            "  Downgrades aren't supported; older code may not read newer state correctly.\n"
-            "  Either upgrade back to the stamped version, or "
-            "remove the stamp at your own risk:\n"
-            f"    rm {stamp_path()}",
-            file=sys.stderr,
-        )
-        raise SystemExit(4)
-
-    # FIRST_RUN, STALE_AFTER_UPDATE, STAMP_CORRUPT all collapse to "run setup".
-    nudge = {
-        SetupVerdict.FIRST_RUN: "no setup stamp found — terok-executor hasn't been initialised",
-        SetupVerdict.STALE_AFTER_UPDATE: (
-            "package versions changed since the last setup — re-run to apply"
-        ),
-        SetupVerdict.STAMP_CORRUPT: "setup stamp is unreadable — re-run setup to refresh it",
-    }[verdict]
-    print(
-        f"terok-executor: {nudge}.\n"
-        "  Fix:    terok-executor setup\n"
-        "  Or:     terok-executor run --no-preflight ...   (skip the gate)",
-        file=sys.stderr,
-    )
-    raise SystemExit(3)
-
-
-def _name_downgraded_packages(
-    path: Path,
-    read_stamp_fn: Callable[[Path], dict[str, str]],
-    installed_fn: Callable[[], dict[str, str]],
-) -> list[str]:
-    """Return ``[pkg]`` whose installed version is < stamped, or missing entirely.
-
-    Best-effort: if the stamp can't be re-read (race with a parallel
-    setup overwrite) we return an empty list so the caller falls back
-    to a generic "downgrade detected" message instead of crashing.
-    """
-    from packaging.version import InvalidVersion, Version
+    from .sandbox import check_setup
 
     try:
-        stamped = read_stamp_fn(path)
-    except Exception:  # noqa: BLE001 — diagnostic helper, never the source of truth
-        return []
-    installed = installed_fn()
-
-    out: list[str] = []
-    for pkg, stamp_ver in stamped.items():
-        if pkg not in installed:
-            out.append(f"{pkg} (uninstalled)")
-            continue
-        cur = installed[pkg]
-        try:
-            if Version(cur) < Version(stamp_ver):
-                out.append(f"{pkg} {stamp_ver} → {cur}")
-        except InvalidVersion:
-            if cur < stamp_ver:
-                out.append(f"{pkg} {stamp_ver} → {cur}")
-    return out
+        require_setup(check_setup(cfg, live=live))
+    except SetupDowngradeError as exc:
+        print(f"terok-executor: refusing to run — {exc}", file=sys.stderr)
+        raise SystemExit(4) from exc
+    except SetupRequiredError as exc:
+        print(f"terok-executor: {exc}\n  Fix: terok-executor setup", file=sys.stderr)
+        raise SystemExit(3) from exc
 
 
 def _preflight_or_exit(
@@ -237,7 +152,7 @@ def _handle_run(
         print(
             "Warning: --gpu is deprecated and will be removed in terok-executor 0.6.0; use --gpus all"
         )
-    _setup_verdict_or_exit(skip=no_preflight)
+    _setup_verdict_or_exit(cfg=cfg, live=True)
     if not _preflight_or_exit(
         agent, base=base, family=family, assume_yes=yes, skip_preflight=no_preflight
     ):
@@ -329,7 +244,7 @@ def _handle_run_tool(
     cfg: SandboxConfig | None = None,
 ) -> None:
     """Run a tool in a sidecar container."""
-    _setup_verdict_or_exit(skip=no_preflight)
+    _setup_verdict_or_exit(cfg=cfg, live=True)
     if not _preflight_or_exit(
         tool, base=base, family=family, assume_yes=yes, skip_preflight=no_preflight
     ):
@@ -573,10 +488,15 @@ def _handle_show_config(*, cfg: SandboxConfig | None = None) -> None:
 
 def _handle_start(*, name: str) -> None:
     """Start a stopped container, re-establishing its host scaffolding."""
+    _setup_verdict_or_exit(live=True)
+    from terok_util import SetupRequiredError
+
     from terok_executor.integrations.sandbox import PodmanRuntime, Sandbox
 
     try:
         Sandbox(runtime=PodmanRuntime()).start(name)
+    except SetupRequiredError:
+        raise
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
     print(f"Started: {name}")
@@ -667,14 +587,24 @@ def _handle_setup(
             raise SystemExit(
                 f"{', '.join(rejected)} belongs to the full setup, not to 'setup {component}'"
             )
-        from .integrations.sandbox import handle_setup_component
+        from terok_util import require_no_downgrade
 
+        from .integrations.sandbox import handle_setup_component
+        from .sandbox import check_setup
+
+        if not show:
+            require_no_downgrade(check_setup(cfg))
         return handle_setup_component(component, show_only=show, cfg=cfg)
 
     if check:
-        _print_setup_status(base)
+        _print_setup_status(base, cfg=cfg)
         return None
 
+    from terok_util import require_no_downgrade
+
+    from .sandbox import check_setup
+
+    require_no_downgrade(check_setup(cfg))
     if not no_sandbox:
         from .sandbox import ensure_sandbox_ready
 
@@ -704,6 +634,14 @@ def _handle_uninstall(
     ``--keep-images`` preserves the image cache so a re-install skips
     the slow rebuild step.
     """
+    from terok_util import require_no_downgrade
+
+    from .integrations.sandbox import SandboxConfig
+    from .sandbox import _receipt, check_setup
+
+    cfg = cfg or SandboxConfig()
+    require_no_downgrade(check_setup(cfg))
+    _receipt(cfg).clear()
     if not keep_images:
         _remove_images(base)
     if not no_sandbox:
@@ -757,9 +695,12 @@ def _remove_images(base: str) -> None:
     print(f"Removed image cache for base: {base}")
 
 
-def _print_setup_status(base: str) -> None:
+def _print_setup_status(base: str, *, cfg: SandboxConfig | None = None) -> None:
     """Render the ``setup --check`` report — per-phase readiness, no fixes."""
+    from terok_util import SetupStatus
+
     from .preflight import Preflight
+    from .sandbox import check_setup
 
     pf = Preflight(provider="claude", base_image=base)
     checks = [
@@ -769,6 +710,10 @@ def _print_setup_status(base: str) -> None:
     ]
     print("\nterok-executor status:\n")
     ok = True
+    for check in check_setup(cfg):
+        ready = check.status is SetupStatus.READY
+        print(f"  {check.owner}/{check.component}: {check.status} {check.diagnostic}")
+        ok = ok and ready
     for r in checks:
         marker = "ok" if r.ok else "FAIL"
         print(f"  {r.name:<22} {marker} ({r.message})")
@@ -877,7 +822,7 @@ RUN_COMMAND = CommandDef(
             name="--no-preflight",
             action="store_true",
             dest="no_preflight",
-            help="Skip prerequisite checks entirely (caller manages setup)",
+            help="Skip interactive prerequisite checks (setup readiness remains mandatory)",
         ),
     ),
 )
@@ -940,7 +885,7 @@ RUN_TOOL_COMMAND = CommandDef(
             name="--no-preflight",
             action="store_true",
             dest="no_preflight",
-            help="Skip prerequisite checks entirely (caller manages setup)",
+            help="Skip interactive prerequisite checks (setup readiness remains mandatory)",
         ),
         ArgDef(
             name="--debug",

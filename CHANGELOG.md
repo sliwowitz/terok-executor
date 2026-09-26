@@ -1,4 +1,10 @@
 # Changelog
+
+## Unreleased (0.5.0)
+
+- Own executor setup receipts and compose readiness checks downward.
+- Resolve host tools from the current launch environment.
+
 ## v0.4.0 — Past Prologue
 
 ## What's Changed

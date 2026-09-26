@@ -30,6 +30,7 @@ real config over real tmp directories, not a mock.
 
 from __future__ import annotations
 
+import os
 import shutil
 import socket
 from collections.abc import Callable, Iterator
@@ -38,9 +39,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from terok_util import namespace_state_dir, require_setup
 from terok_util.matrix import binary_on_path, check_capability_contract
 
-from terok_executor.integrations.sandbox import RunSpec, Sandbox, SandboxConfig, VolumeSpec
+from terok_executor.integrations.sandbox import (
+    CredentialDB,
+    RunSpec,
+    Sandbox,
+    SandboxConfig,
+    VolumeSpec,
+)
 from terok_executor.roster import AgentRoster
 from tests.constants import (
     CONTAINER_KEEPALIVE_COMMAND,
@@ -168,7 +176,9 @@ class ExecutorEnv:
 
 
 @pytest.fixture
-def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
+def executor_env(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[ExecutorEnv]:
     """Yield a fully tmp-rooted [`ExecutorEnv`][tests.integration.conftest.ExecutorEnv].
 
     The vault DB is a real SQLCipher file opened with a throwaway passphrase
@@ -179,9 +189,13 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
     Secret Service.  ``SandboxConfig`` is patched only where the env
     assembler constructs one implicitly — see the module docstring.
     """
+    from terok_sandbox.setup import check_artifacts, setup_receipt
+    from terok_sandbox.supervisor.install import install_supervisor_hooks
+
     env = ExecutorEnv(
         cfg=SandboxConfig(
             state_dir=tmp_path / "state",
+            runtime_dir=tmp_path_factory.mktemp("executor-runtime"),
             vault_dir=tmp_path / "vault",
             config_dir=tmp_path / "config",
             credentials_use_keyring=False,
@@ -195,6 +209,22 @@ def executor_env(tmp_path: Path) -> Iterator[ExecutorEnv]:
     env.task_dir.mkdir(parents=True, exist_ok=True)
     env.workspace_dir.mkdir(parents=True, exist_ok=True)
     env.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Every launcher shares real, verified sandbox artifacts without full
+    # setup's cleanup of operator services. Only copied containers config changes.
+    cfg = env.cfg
+    host_config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    isolated_config = cfg.config_dir / "xdg"
+    if (host_config / "containers").is_dir():
+        shutil.copytree(host_config / "containers", isolated_config / "containers")
+    # Keep the existing Shield install discoverable after redirecting config.
+    monkeypatch.setenv("TEROK_ROOT", str(namespace_state_dir()))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated_config))
+    install_supervisor_hooks(root=cfg.state_dir)
+    if not cfg.db_path.exists():
+        CredentialDB(cfg.db_path, passphrase=INTEGRATION_VAULT_PASSPHRASE).close()
+    require_setup(check_artifacts(cfg, live=True))
+    setup_receipt(cfg).write()
 
     with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=env.cfg):
         yield env

@@ -21,7 +21,6 @@ configuration in a long-running process.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
-from terok_util import podman_userns_args
+from terok_util import find_host_tool, podman_userns_args
 
 from terok_executor.integrations.sandbox import (
     CODEX_SHARED_OAUTH_MARKER,
@@ -837,7 +836,7 @@ def _run_auth_container(
 
 def _check_podman() -> None:
     """Verify podman is available."""
-    if shutil.which("podman") is None:
+    if find_host_tool("podman") is None:
         raise SystemExit("podman not found; please install podman")
 
 

@@ -25,10 +25,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, cast
 
+from terok_util import require_setup
+
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
 from terok_executor.paths import container_state_dir
 from terok_executor.roster.types import EgressProjection
+from terok_executor.sandbox import check_setup
 
 from .build import BuildError, ImageBuilder
 
@@ -359,9 +362,6 @@ class AgentRunner:
         See [`run_headless`][terok_executor.container.runner.AgentRunner.run_headless]
         for the *project_id* / *task_id* / *dossier_path* semantics.
         """
-        if port is None:
-            with self.runtime.reserve_port() as reservation:
-                port = reservation.port
         return self._run(
             agent="claude",  # toad uses claude as default
             repo=repo,
@@ -593,6 +593,7 @@ class AgentRunner:
         except ValueError as exc:
             raise BuildError(str(exc)) from exc
 
+        self._require_host_setup()
         cfg = self.sandbox.config
 
         # Per-container socket dir / TCP ports.  Allocated here so the
@@ -952,6 +953,10 @@ class AgentRunner:
 
         from .env import ContainerEnvSpec, assemble_container_env
 
+        self._require_host_setup()
+        if mode == "web" and port is None:
+            with self.runtime.reserve_port() as reservation:
+                port = reservation.port
         run_roster = self._roster_for_run()
         is_tool = mode == "tool"
         task_id = _generate_task_id()
@@ -1151,6 +1156,11 @@ class AgentRunner:
     # ------------------------------------------------------------------
     # Private helpers (in call order from _run)
     # ------------------------------------------------------------------
+
+    def _require_host_setup(self) -> None:
+        """Validate before constructing Sandbox, whose constructor may allocate ports."""
+        cfg = self._sandbox.config if self._sandbox is not None else self._cfg
+        require_setup(check_setup(cfg, live=True))
 
     def _roster_for_run(self) -> AgentRoster:
         """Return one roster snapshot for all calculations in a run."""

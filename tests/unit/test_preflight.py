@@ -27,7 +27,7 @@ def _pf(**overrides) -> Preflight:
 
 
 @patch("terok_executor.preflight.subprocess.run")
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/podman")
 def test_podman_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Podman found and responds → ok."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"5.0.0\n", stderr=b"")
@@ -37,7 +37,7 @@ def test_podman_ok(_which: MagicMock, mock_run: MagicMock) -> None:
 
 
 @patch("terok_executor.preflight.subprocess.run")
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/podman")
 def test_podman_below_floor_warns_but_passes(_which: MagicMock, mock_run: MagicMock) -> None:
     """A pre-4.3 podman passes with a degraded-behavior warning, not a FAIL."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"3.4.4\n", stderr=b"")
@@ -48,7 +48,7 @@ def test_podman_below_floor_warns_but_passes(_which: MagicMock, mock_run: MagicM
 
 
 @patch("terok_executor.preflight.subprocess.run")
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/podman")
 def test_podman_floor_boundary_is_plain_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Podman 4.3 itself is the tested floor — no warning."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"4.3.0\n", stderr=b"")
@@ -58,7 +58,7 @@ def test_podman_floor_boundary_is_plain_ok(_which: MagicMock, mock_run: MagicMoc
 
 
 @patch("terok_executor.preflight.subprocess.run")
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/podman")
 def test_podman_unparseable_version_is_plain_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     """Garbage version output counts as modern — the binary already responded."""
     mock_run.return_value = MagicMock(returncode=0, stdout=b"weird\n", stderr=b"")
@@ -67,7 +67,7 @@ def test_podman_unparseable_version_is_plain_ok(_which: MagicMock, mock_run: Mag
     assert r.message == "ok"
 
 
-@patch("terok_executor.preflight.shutil.which", return_value=None)
+@patch("terok_executor.preflight.find_host_tool", return_value=None)
 def test_podman_missing(_which: MagicMock) -> None:
     """Podman not on PATH → fail."""
     r = _pf().check_podman()
@@ -76,7 +76,7 @@ def test_podman_missing(_which: MagicMock) -> None:
 
 
 @patch("terok_executor.preflight.subprocess.run")
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/podman")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/podman")
 def test_podman_present_but_nonzero_exit(_which: MagicMock, mock_run: MagicMock) -> None:
     """``podman version`` exits non-zero → fail with stderr detail.
 
@@ -132,13 +132,13 @@ def test_sandbox_services_disabled_is_ready(mock_env: MagicMock) -> None:
 # ── check_git ────────────────────────────────────────────────────────
 
 
-@patch("terok_executor.preflight.shutil.which", return_value="/usr/bin/git")
+@patch("terok_executor.preflight.find_host_tool", return_value="/usr/bin/git")
 def test_git_present(_which: MagicMock) -> None:
     """git on PATH → ok."""
     assert _pf().check_git().ok is True
 
 
-@patch("terok_executor.preflight.shutil.which", return_value=None)
+@patch("terok_executor.preflight.find_host_tool", return_value=None)
 def test_git_missing_returns_consequence(_which: MagicMock) -> None:
     """git missing → fail, message names the consequence."""
     r = _pf().check_git()
