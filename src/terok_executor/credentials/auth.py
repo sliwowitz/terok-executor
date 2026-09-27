@@ -669,17 +669,22 @@ class AuthSession:
     def cleanup(self) -> None:
         """Release the temp dir and force-remove any lingering container.
 
-        Idempotent.  ``__exit__`` calls this automatically.
+        Idempotent. Container removal is best-effort; local cleanup runs even
+        when Podman cannot start. ``__exit__`` calls this automatically.
         """
-        subprocess.run(
-            [require_host_tool("podman"), "rm", "-f", self.container_name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if self._tmpdir is not None:
-            self._tmpdir.cleanup()
-            self._tmpdir = None
+        try:
+            subprocess.run(
+                [require_host_tool("podman"), "rm", "-f", self.container_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            pass
+        finally:
+            if self._tmpdir is not None:
+                self._tmpdir.cleanup()
+                self._tmpdir = None
 
     def __enter__(self) -> AuthSession:
         """Return self; the heavy lifting already happened in the factory."""

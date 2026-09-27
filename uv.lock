@@ -2346,8 +2346,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.6.0a2.dev501+g1d5979498"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fhost-tool-completeness#1d5979498cafe4bf7416d521a6a681b6bd4be602" }
+version = "0.6.0a2.dev502+g6d97c273e"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fhost-tool-completeness#6d97c273e1c575ee7db28f983977ffd06cde1f13" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },

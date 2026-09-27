@@ -123,5 +123,6 @@ def test_acp_wrapper_selects_host_podman(
     monkeypatch.setenv("PATH", "")
     assert asyncio.run(roster.warm("claude")) == ()
     proxy = ACPProxy(roster=roster)
+    bind = proxy._bind("claude", "test-model")
     with pytest.raises(AgentBindError, match="podman"):
-        asyncio.run(proxy._bind("claude", "test-model"))
+        asyncio.run(bind)
