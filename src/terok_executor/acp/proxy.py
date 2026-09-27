@@ -624,8 +624,8 @@ class ACPProxy:
         the option they live in belongs to the backend and is only named in
         that reply.
         """
-        command, *args = self._roster.wrapper_argv(agent_id)
         try:
+            command, *args = self._roster.wrapper_argv(agent_id)
             backend, _proc = await self._backend_stack.enter_async_context(
                 spawn_agent_process(self, command, *args)
             )

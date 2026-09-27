@@ -20,6 +20,8 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from terok_util import require_host_tool
+
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import SandboxConfig
 
@@ -92,7 +94,7 @@ def _copy_tree(src: Path, dst: Path) -> None:
     """
     try:
         subprocess.run(
-            ["cp", "--reflink=auto", "-a", f"{src}/.", str(dst)],
+            [require_host_tool("cp"), "--reflink=auto", "-a", f"{src}/.", str(dst)],
             check=True,
             capture_output=True,
             timeout=300,
@@ -106,7 +108,15 @@ def _rewrite_origin(workspace_path: Path, url: str) -> None:
     """Rewrite the git origin remote to *url* (best-effort)."""
     try:
         subprocess.run(
-            ["git", "-C", str(workspace_path), "remote", "set-url", "origin", url],
+            [
+                require_host_tool("git"),
+                "-C",
+                str(workspace_path),
+                "remote",
+                "set-url",
+                "origin",
+                url,
+            ],
             check=True,
             capture_output=True,
             timeout=10,

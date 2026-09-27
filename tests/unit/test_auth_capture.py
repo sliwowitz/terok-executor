@@ -1318,12 +1318,11 @@ class TestAuthenticateOauthGate:
 
 
 @pytest.fixture
-def podman_free(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+def podman_free(monkeypatch: pytest.MonkeyPatch, fake_podman: Path) -> list[list[str]]:
     """Neutralise the auth module's raw podman subprocess calls.
 
     ``prepare_oauth_session`` pre-cleans a stale auth container and
-    ``AuthSession.cleanup`` force-removes it on exit — both via bare
-    ``subprocess.run(["podman", …])``.  Unit tests must not depend on a
+    ``AuthSession.cleanup`` force-removes it on exit. Unit tests must not depend on a
     host podman (CI runners happen to ship one; dev containers don't),
     and must never reach a real one: the pre-clean would ``podman rm -f``
     a genuine ``host-auth-claude`` container if the operator had one.
@@ -1375,7 +1374,8 @@ class TestPrepareOauthSession:
             with prepare_oauth_session(
                 self._provider(), None, mounts_dir=tmp_path, image="terok-l1:test"
             ) as session:
-                assert session.argv[0] == "podman"
+                assert Path(session.argv[0]).is_absolute()
+                assert Path(session.argv[0]).name == "podman"
                 assert "terok-l1:test" in session.argv
                 assert session.argv[-1] == "claude"
                 mount_arg = f"{session.auth_dir}:/home/dev/.claude:Z"
@@ -1396,7 +1396,7 @@ class TestPrepareOauthSession:
                 assert "Claude" in session.title
                 assert "myproj" in session.title
                 assert "Banner line one." in session.banner
-                assert "$ podman run" in session.banner
+                assert f"$ {session.argv[0]} run" in session.banner
 
     def test_capture_delegates_to_capture_credentials(
         self, tmp_path: Path, podman_free: list[list[str]]

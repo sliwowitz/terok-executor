@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, cast
 
-from terok_util import require_setup
+from terok_util import require_host_tool, require_setup
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
@@ -766,7 +766,7 @@ class AgentRunner:
 
         try:
             proc = subprocess.run(
-                ["podman", "wait", container_name],
+                [require_host_tool("podman"), "wait", container_name],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -842,8 +842,8 @@ class AgentRunner:
         """
         import subprocess
 
-        cmd = _build_logs_cmd(container_name, timestamps=timestamps)
         try:
+            cmd = _build_logs_cmd(container_name, timestamps=timestamps)
             with dest.open("wb") as f:
                 proc = subprocess.run(
                     cmd,
@@ -1365,7 +1365,7 @@ class AgentRunner:
 
         try:
             proc = subprocess.Popen(
-                ["podman", "logs", "-f", cname],
+                [require_host_tool("podman"), "logs", "-f", cname],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -1385,7 +1385,9 @@ class AgentRunner:
 
         # Retrieve exit code from the container itself
         try:
-            result = subprocess.run(["podman", "wait", cname], capture_output=True, timeout=10)
+            result = subprocess.run(
+                [require_host_tool("podman"), "wait", cname], capture_output=True, timeout=10
+            )
             exit_code = int(result.stdout.decode().strip()) if result.stdout else 1
         except (subprocess.TimeoutExpired, ValueError, FileNotFoundError) as exc:
             print(
@@ -1416,7 +1418,7 @@ def _build_logs_cmd(
     [`AgentRunner.capture_logs`][terok_executor.container.runner.AgentRunner.capture_logs], [`AgentRunner.stream_logs_process`][terok_executor.container.runner.AgentRunner.stream_logs_process])
     agree on flag order and naming.
     """
-    cmd = ["podman", "logs"]
+    cmd = [require_host_tool("podman"), "logs"]
     if follow:
         cmd.append("-f")
     if timestamps:

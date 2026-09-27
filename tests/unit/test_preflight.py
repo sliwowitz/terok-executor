@@ -34,6 +34,7 @@ def test_podman_ok(_which: MagicMock, mock_run: MagicMock) -> None:
     r = _pf().check_podman()
     assert r.ok is True
     assert r.message == "ok"
+    assert mock_run.call_args.args[0][0] == _which.return_value
 
 
 @patch("terok_executor.preflight.subprocess.run")
@@ -270,6 +271,7 @@ def test_ssh_key_absent(mock_db_cls: MagicMock) -> None:
 
 
 @patch("terok_executor.preflight.subprocess.run")
+@pytest.mark.usefixtures("fake_podman")
 def test_images_exist(mock_run: MagicMock) -> None:
     """Image exists → ok."""
     mock_run.return_value = MagicMock(returncode=0)
@@ -277,6 +279,7 @@ def test_images_exist(mock_run: MagicMock) -> None:
 
 
 @patch("terok_executor.preflight.subprocess.run")
+@pytest.mark.usefixtures("fake_podman")
 def test_images_missing(mock_run: MagicMock) -> None:
     """Image doesn't exist → fail."""
     mock_run.return_value = MagicMock(returncode=1)

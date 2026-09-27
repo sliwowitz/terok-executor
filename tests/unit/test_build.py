@@ -38,6 +38,8 @@ from terok_executor.container.build import (
     stage_toad_agents,
 )
 
+pytestmark = pytest.mark.usefixtures("fake_podman")
+
 # ---------------------------------------------------------------------------
 # Image naming
 # ---------------------------------------------------------------------------
@@ -202,7 +204,7 @@ class TestBuildProjectImage:
     builds share.  Exercises flag assembly and BuildError translation.
     """
 
-    def test_minimal_invocation(self, tmp_path: Path) -> None:
+    def test_minimal_invocation(self, tmp_path: Path, fake_podman: Path) -> None:
         from unittest.mock import patch
 
         from terok_executor.container.build import build_project_image
@@ -216,7 +218,7 @@ class TestBuildProjectImage:
                 target_tag="proj:tag",
             )
         cmd = run_mock.call_args[0][0]
-        assert cmd[:3] == ["podman", "build", "-f"]
+        assert cmd[:3] == [str(fake_podman), "build", "-f"]
         assert cmd[-1] == str(tmp_path)
         assert "-t" in cmd and "proj:tag" in cmd
 
@@ -352,7 +354,7 @@ class TestBuildBaseImages:
         assert result.l0.startswith("terok-l0:")
         assert result.l1.startswith("terok-l1-cli:")
 
-    def test_builds_when_images_missing(self, tmp_path: Path) -> None:
+    def test_builds_when_images_missing(self, tmp_path: Path, fake_podman: Path) -> None:
         from unittest.mock import patch
 
         build_dir = tmp_path / "ctx"
@@ -367,10 +369,10 @@ class TestBuildBaseImages:
         assert mock_run.call_count == 2
         l0_cmd = mock_run.call_args_list[0][0][0]
         l1_cmd = mock_run.call_args_list[1][0][0]
-        assert l0_cmd[0] == "podman"
+        assert l0_cmd[0] == str(fake_podman)
         assert "-t" in l0_cmd
         assert result.l0 in l0_cmd
-        assert l1_cmd[0] == "podman"
+        assert l1_cmd[0] == str(fake_podman)
         assert result.l1 in l1_cmd
 
     def test_rebuild_forces_build(self, tmp_path: Path) -> None:
@@ -394,6 +396,10 @@ class TestBuildBaseImages:
         with (
             patch("terok_executor.container.build._check_podman"),
             patch("terok_executor.container.build._image_exists", return_value=False),
+            patch(
+                "terok_executor.container.build.podman_pull_always_args",
+                return_value=["--pull=always"],
+            ),
             patch("subprocess.run") as mock_run,
         ):
             build_base_images(full_rebuild=True, build_dir=build_dir)
@@ -1164,7 +1170,8 @@ class TestDefaultAliasTagging:
         # No ``podman build`` runs (cache hit), but the alias is tagged.
         assert mock_run.call_count == 1
         tag_cmd = mock_run.call_args_list[0][0][0]
-        assert tag_cmd[:2] == ["podman", "tag"]
+        assert Path(tag_cmd[0]).is_absolute()
+        assert tag_cmd[1] == "tag"
         assert tag_cmd[2] == result.l1
         assert tag_cmd[3] == default_alias
 

@@ -22,7 +22,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_util import ArgDef, CommandDef, setup_lock
+from terok_util import ArgDef, CommandDef, require_host_tool, setup_lock
 
 from .container.build import DEFAULT_BASE_IMAGE
 
@@ -101,7 +101,7 @@ def _resolve_host_git_identity() -> tuple[str | None, str | None]:
     for key, target in (("user.name", "name"), ("user.email", "email")):
         try:
             result = subprocess.run(
-                ["git", "config", "--global", key],
+                [require_host_tool("git"), "config", "--global", key],
                 capture_output=True,
                 timeout=5,
             )
@@ -683,7 +683,7 @@ def _remove_images(base: str) -> None:
     try:
         subprocess.run(
             [
-                "podman",
+                require_host_tool("podman"),
                 "image",
                 "rm",
                 "--force",

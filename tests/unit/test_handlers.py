@@ -11,6 +11,7 @@ podman / vault / OAuth stack.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -143,13 +144,13 @@ def test_build_images_with_banner_routes_through_image_builder(
 # ── _remove_images ──────────────────────────────────────────
 
 
-def test_remove_images_uses_image_builder_tags() -> None:
+def test_remove_images_uses_image_builder_tags(fake_podman: Path) -> None:
     """``_remove_images`` resolves L0 / L1 tags via ``ImageBuilder``."""
     with mock.patch("subprocess.run") as run:
         _remove_images("fedora:44")
     run.assert_called_once()
     argv = run.call_args.args[0]
-    assert argv[:4] == ["podman", "image", "rm", "--force"]
+    assert argv[:4] == [str(fake_podman), "image", "rm", "--force"]
     # L0 / L1 tags come from the ImageBuilder properties.
     assert "terok-l0:fedora-44" in argv
     assert "terok-l1-cli:fedora-44" in argv

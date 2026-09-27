@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import BaseLoader, Environment
-from terok_util import find_host_tool, podman_pull_always_args
+from terok_util import find_host_tool, podman_pull_always_args, require_host_tool
 
 # ── Vocabulary ──
 
@@ -521,8 +521,9 @@ def build_project_image(
         cmd += podman_pull_always_args()
     cmd.append(str(context_dir))
 
-    print("$", shlex.join(cmd))
     try:
+        cmd[0] = require_host_tool("podman")
+        print("$", shlex.join(cmd))
         subprocess.run(cmd, check=True)
     except FileNotFoundError as exc:
         raise BuildError("podman not found; please install podman") from exc
@@ -539,8 +540,9 @@ def _tag_image(source: str, alias: str) -> None:
     (and therefore no ``-t`` tagging) runs.
     """
     cmd = ["podman", "tag", source, alias]
-    print("$", shlex.join(cmd))
     try:
+        cmd[0] = require_host_tool("podman")
+        print("$", shlex.join(cmd))
         subprocess.run(cmd, check=True)
     except FileNotFoundError as exc:
         raise BuildError("podman not found; please install podman") from exc
@@ -1296,7 +1298,7 @@ def _check_podman() -> None:
 def _image_exists(image: str) -> bool:
     """Check if a container image exists locally."""
     result = subprocess.run(
-        ["podman", "image", "exists", image],
+        [require_host_tool("podman"), "image", "exists", image],
         capture_output=True,
     )
     return result.returncode == 0
@@ -1315,7 +1317,7 @@ def image_agents(image: str) -> set[str]:
     try:
         result = subprocess.run(
             [
-                "podman",
+                require_host_tool("podman"),
                 "image",
                 "inspect",
                 image,

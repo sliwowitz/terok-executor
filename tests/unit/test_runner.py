@@ -17,6 +17,8 @@ from terok_executor.integrations.sandbox import (
     CONTAINER_RUNTIME_DIR,
 )
 
+pytestmark = pytest.mark.usefixtures("fake_podman")
+
 
 class TestResolveRepo:
     """Verify repo argument classification."""
@@ -1189,16 +1191,15 @@ class TestLaunchPreparedSupervisorWiring:
 class TestWaitForExit:
     """Verify task-level wait facade."""
 
-    def test_returns_container_exit_code(self) -> None:
+    def test_returns_container_exit_code(self, fake_podman: Path) -> None:
         """Happy path: ``podman wait`` reports the container's exit code."""
         runner = AgentRunner(sandbox=_mock_sandbox())
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="0\n", stderr="")
         with patch("subprocess.run", return_value=completed) as run_mock:
             assert runner.wait_for_exit("terok-x") == 0
         run_mock.assert_called_once()
-        # Call shape: ["podman", "wait", "terok-x"] with timeout=None
         args, kwargs = run_mock.call_args
-        assert args[0] == ["podman", "wait", "terok-x"]
+        assert args[0] == [str(fake_podman), "wait", "terok-x"]
         assert kwargs["timeout"] is None
 
     def test_returns_exit_code_124_distinctly(self) -> None:
@@ -1251,7 +1252,7 @@ class TestWaitForExit:
 class TestLogs:
     """Task-level log retrieval for the 'just show me what ran' case."""
 
-    def test_one_shot_returns_combined_output(self) -> None:
+    def test_one_shot_returns_combined_output(self, fake_podman: Path) -> None:
         runner = AgentRunner(sandbox=_mock_sandbox())
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="hello\n", stderr="")
         with patch("subprocess.run", return_value=completed) as run_mock:
@@ -1259,7 +1260,7 @@ class TestLogs:
         assert "hello" in out
         args, _ = run_mock.call_args
         assert args[0] == [
-            "podman",
+            str(fake_podman),
             "logs",
             "--timestamps",
             "--tail",
@@ -1320,14 +1321,14 @@ class TestCaptureLogs:
 class TestStreamLogsProcess:
     """Streaming path: hand the caller a ``Popen`` they can select() on."""
 
-    def test_returns_popen_with_stdout_pipe(self) -> None:
+    def test_returns_popen_with_stdout_pipe(self, fake_podman: Path) -> None:
         runner = AgentRunner(sandbox=_mock_sandbox())
         fake_proc = Mock(spec=subprocess.Popen)
         with patch("subprocess.Popen", return_value=fake_proc) as popen_mock:
             proc = runner.stream_logs_process("terok-x", follow=True, tail=100)
         assert proc is fake_proc
         args, kwargs = popen_mock.call_args
-        assert args[0] == ["podman", "logs", "-f", "--tail", "100", "terok-x"]
+        assert args[0] == [str(fake_podman), "logs", "-f", "--tail", "100", "terok-x"]
         assert kwargs["stdout"] is subprocess.PIPE
         assert kwargs["stderr"] is subprocess.PIPE
 
@@ -1349,12 +1350,12 @@ class TestStreamLogsProcess:
 class TestBuildLogsCmd:
     """Flag assembly helper — shared between all three log entry points."""
 
-    def test_all_flags(self) -> None:
+    def test_all_flags(self, fake_podman: Path) -> None:
         from terok_executor.container.runner import _build_logs_cmd
 
         cmd = _build_logs_cmd("terok-x", follow=True, tail=10, timestamps=True, since="30m")
         assert cmd == [
-            "podman",
+            str(fake_podman),
             "logs",
             "-f",
             "--timestamps",
@@ -1365,10 +1366,10 @@ class TestBuildLogsCmd:
             "terok-x",
         ]
 
-    def test_defaults_produce_minimal_cmd(self) -> None:
+    def test_defaults_produce_minimal_cmd(self, fake_podman: Path) -> None:
         from terok_executor.container.runner import _build_logs_cmd
 
-        assert _build_logs_cmd("terok-x") == ["podman", "logs", "terok-x"]
+        assert _build_logs_cmd("terok-x") == [str(fake_podman), "logs", "terok-x"]
 
 
 class TestGateIntegration:

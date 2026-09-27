@@ -24,7 +24,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from terok_util import find_host_tool
+from terok_util import find_host_tool, require_host_tool
 
 MIN_PODMAN_VERSION = (4, 3)
 """Oldest podman the launch path is tested against.
@@ -221,11 +221,11 @@ class Preflight:
         blocking would kill unofficial use on frozen-distro hosts — but
         the result message carries the warning instead of a bare "ok".
         """
-        if not find_host_tool("podman"):
+        if not (podman := find_host_tool("podman")):
             return CheckResult("podman", False, "not found on PATH")
         try:
             result = subprocess.run(
-                ["podman", "version", "--format", "{{.Client.Version}}"],
+                [podman, "version", "--format", "{{.Client.Version}}"],
                 capture_output=True,
                 timeout=10,
             )
@@ -292,7 +292,7 @@ class Preflight:
         tag = ImageBuilder(self.base_image).l1_tag()
         try:
             result = subprocess.run(
-                ["podman", "image", "exists", tag],
+                [require_host_tool("podman"), "image", "exists", tag],
                 capture_output=True,
                 timeout=10,
             )

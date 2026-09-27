@@ -26,6 +26,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from terok_util import require_host_tool
+
 from terok_executor.container.build import AGENTS_LABEL
 from terok_executor.integrations.sandbox import SandboxConfig
 
@@ -220,7 +222,7 @@ class ACPRoster:
         key = self._cache_key(agent_id)
         try:
             models = await self._probe(agent_id)
-        except ProbeError as exc:
+        except (ProbeError, FileNotFoundError) as exc:
             _logger.warning("ACP probe failed for agent %r: %s", agent_id, exc)
             return ()
         self._cache.put(key, models)
@@ -253,7 +255,13 @@ class ACPRoster:
         (which is why this method lives on the roster, not on the proxy
         or probe).
         """
-        return ["podman", "exec", "-i", self._container_name, f"terok-{agent_id}-acp"]
+        return [
+            require_host_tool("podman"),
+            "exec",
+            "-i",
+            self._container_name,
+            f"terok-{agent_id}-acp",
+        ]
 
     # ── Lower-level operations ───────────────────────────────────────
 

@@ -37,6 +37,17 @@ TEST_VAULT_PASSPHRASE = "unit-test-passphrase"  # nosec: B105 — fixture, not a
 """Passphrase used everywhere a unit test seeds or opens the vault DB."""
 
 
+@pytest.fixture
+def fake_podman(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Provide discoverable Podman without reaching the operator's runtime."""
+    executable = tmp_path / "host-bin" / "podman"
+    executable.parent.mkdir()
+    executable.write_text("#!/bin/sh\nexit 99\n")
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(executable.parent), prepend=":")
+    return executable
+
+
 # Terok-specific env vars that override path resolution.  The autouse
 # isolation fixture clears them before applying its own isolated values;
 # most paths then fall through the tmp-rooted ``HOME`` / ``XDG_*`` chain.
