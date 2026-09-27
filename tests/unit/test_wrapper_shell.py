@@ -25,7 +25,9 @@ from tests.constants import CONTAINER_TEROK_DIR, CONTAINER_TEROK_SHARE_DIR
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
 
-_STUB = """#!/usr/bin/env bash
+_HOST_TOOLS = ("bash", "cat", "env", "tee", "timeout")
+
+_STUB = """#!__BASH__
 printf 'ARGV:%s\\n' "$*" | tee -a "$STUB_LOG"
 echo "VENDOR USAGE"
 env  # so a leaked (exported) shell variable would show in the launched process
@@ -42,6 +44,10 @@ class Harness:
         self.home = tmp_path / "home"
         for d in (self.terok_dir, self.bin, self.home):
             d.mkdir()
+        for name in _HOST_TOOLS:
+            executable = shutil.which(name)
+            assert executable is not None, f"{name} is required"
+            (self.bin / name).symlink_to(executable)
         self.log = tmp_path / "stub.log"
         # The share dir is re-rooted to a directory that does not exist, which
         # skips the optional git-identity / plugin sources; the identity helper
@@ -57,7 +63,7 @@ class Harness:
     def stub(self, name: str) -> None:
         """Put a recording stub named *name* on the harness PATH."""
         path = self.bin / name
-        path.write_text(_STUB)
+        path.write_text(_STUB.replace("__BASH__", str(self.bin / "bash")))
         path.chmod(0o755)
 
     def session(self, filename: str, session_id: str) -> Path:
@@ -70,10 +76,8 @@ class Harness:
         """Invoke *argv* through the sourced wrappers; the stub exits with *rc*."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("TEROK_", "CLAUDE"))}
         env.update(
-            # Hermetic PATH: the stubs plus coreutils only, so the container's
-            # real launchers (opencode-provider, codex-provider, …) in
-            # /usr/local/bin cannot shadow a stub the wrapper execs.
-            PATH=f"{self.bin}:/usr/bin:/bin",
+            # Only selected host tools and test stubs, never real agent launchers.
+            PATH=str(self.bin),
             HOME=str(self.home),
             STUB_LOG=str(self.log),
             STUB_RC=str(rc),
@@ -96,6 +100,30 @@ class Harness:
 def harness(tmp_path: Path) -> Harness:
     """Fresh wrapper harness per test."""
     return Harness(tmp_path)
+
+
+def test_harness_uses_non_fhs_tools_without_host_launchers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-FHS host supplies tools, but its agent launchers remain outside the harness."""
+    host_bin = tmp_path / "host-tools"
+    host_bin.mkdir()
+    for name in _HOST_TOOLS:
+        executable = shutil.which(name)
+        assert executable is not None
+        (host_bin / name).symlink_to(executable)
+    (host_bin / "opencode-provider").symlink_to(host_bin / "bash")
+    monkeypatch.setenv("PATH", str(host_bin))
+
+    sandbox = Harness(tmp_path)
+    sandbox.stub("claude")
+    sandbox.session("claude-session.txt", "abc")
+    result = sandbox.run("claude", "--terok-timeout", "5")
+
+    assert result.returncode == 0, result.stderr
+    assert sandbox.calls == ["ARGV:--add-dir / --resume abc"]
+    assert (sandbox.bin / "bash").readlink() == host_bin / "bash"
+    assert sandbox.run("command", "-v", "opencode-provider").returncode == 1
 
 
 class TestHelpFraming:

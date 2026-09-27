@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import BaseLoader, Environment
-from terok_util import podman_pull_always_args
+from terok_util import find_host_tool, podman_pull_always_args
 
 # ── Vocabulary ──
 
@@ -1289,7 +1289,7 @@ def _clean_packaging_artifacts(dest: Path) -> None:
 
 def _check_podman() -> None:
     """Raise [`BuildError`][terok_executor.container.build.BuildError] if podman is not on PATH."""
-    if shutil.which("podman") is None:
+    if find_host_tool("podman") is None:
         raise BuildError("podman not found; please install podman")
 
 

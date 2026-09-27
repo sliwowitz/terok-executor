@@ -121,7 +121,7 @@ if TYPE_CHECKING:
         EgressProjection as EgressProjection,
         providers_config_dir as providers_config_dir,
     )
-    from .sandbox import ensure_sandbox_ready as ensure_sandbox_ready
+    from .sandbox import check_setup as check_setup, ensure_sandbox_ready as ensure_sandbox_ready
     from .storage import (
         SharedMountStorageInfo as SharedMountStorageInfo,
         TaskStorageInfo as TaskStorageInfo,
@@ -191,6 +191,7 @@ _LAZY: dict[str, str] = {
     "TaskStorageInfo": ".storage",
     # Sandbox bootstrap composition
     "ensure_sandbox_ready": ".sandbox",
+    "check_setup": ".sandbox",
     # Krun (KVM-microVM) provisioning + runtime factory
     "KrunHost": ".krun",
     "KrunHostKeypair": ".krun",

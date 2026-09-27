@@ -1,4 +1,11 @@
 # Changelog
+
+## Unreleased (0.5.0)
+
+- Own executor setup receipts and compose readiness checks downward.
+- Resolve host tools from the current launch environment.
+- Serialize setup and uninstall with the other packages.
+
 ## v0.4.0 — Past Prologue
 
 ## What's Changed
@@ -70,4 +77,3 @@ Hotfix for supervisor restart [#406](https://github.com/terok-ai/terok-executor/
 
 
 **Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.0.148...v0.1.0
-

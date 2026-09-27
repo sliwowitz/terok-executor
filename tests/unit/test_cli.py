@@ -392,3 +392,17 @@ class TestLockedVaultHint:
         assert rc == 2
         assert "no SQLCipher passphrase available" in err
         assert "terok-executor vault unlock" in err
+
+
+@pytest.mark.parametrize("downgrade", [False, True])
+def test_setup_errors_keep_structured_exit_codes(downgrade: bool) -> None:
+    """Setup/uninstall and late library faults receive the same CLI exit contract."""
+    from terok_util import SetupDowngradeError, SetupRequiredError
+
+    error = SetupDowngradeError if downgrade else SetupRequiredError
+    with patch("terok_executor.cli.CommandTree") as tree:
+        tree.dispatch.side_effect = error("setup diagnostic")
+        _, err, rc = _run_cli("agents", "list")
+    assert rc == (4 if downgrade else 3)
+    assert "setup diagnostic" in err
+    assert ("terok-executor setup" in err) is not downgrade

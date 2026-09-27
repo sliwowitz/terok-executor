@@ -158,14 +158,16 @@ def test_remove_images_uses_image_builder_tags() -> None:
 # ── lifecycle verbs: start / stop / rm ──────────────────────
 
 
-def test_handle_start_delegates_to_sandbox_start() -> None:
+@mock.patch("terok_executor.commands._setup_verdict_or_exit")
+def test_handle_start_delegates_to_sandbox_start(_setup) -> None:
     """``start`` routes through the facade so host scaffolding is rebuilt."""
     with mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls:
         _handle_start(name="ctr")
     sandbox_cls.return_value.start.assert_called_once_with("ctr")
 
 
-def test_handle_start_maps_runtime_error_to_exit() -> None:
+@mock.patch("terok_executor.commands._setup_verdict_or_exit")
+def test_handle_start_maps_runtime_error_to_exit(_setup) -> None:
     """A failed podman start surfaces as a clean SystemExit, not a traceback."""
     with mock.patch("terok_executor.integrations.sandbox.Sandbox") as sandbox_cls:
         sandbox_cls.return_value.start.side_effect = RuntimeError("no such container")

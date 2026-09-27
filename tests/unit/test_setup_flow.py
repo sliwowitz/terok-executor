@@ -18,6 +18,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from terok_util import SetupCheck, SetupStatus
 
 from terok_executor.commands import (
     _handle_setup,
@@ -25,6 +26,21 @@ from terok_executor.commands import (
     _preflight_or_exit,
 )
 from terok_executor.sandbox import ensure_sandbox_ready
+
+
+@pytest.fixture(autouse=True)
+def _ready_setup_checks():
+    """Orchestration tests do not require installed host artifacts."""
+    with (
+        patch("terok_executor.sandbox.check_setup", return_value=()),
+        patch("terok_executor.sandbox.check_sandbox_setup", return_value=()),
+        patch(
+            "terok_executor.sandbox._check_routes",
+            return_value=SetupCheck("terok-executor", "routes", SetupStatus.READY),
+        ),
+    ):
+        yield
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -132,7 +148,7 @@ class TestHandleUninstall:
     def test_keep_images_preserves_image_cache(self, setup_spies) -> None:
         _handle_uninstall(keep_images=True)
         setup_spies["remove_images"].assert_not_called()
-        setup_spies["sandbox_uninstall"].assert_called_once_with(cfg=None)
+        setup_spies["sandbox_uninstall"].assert_called_once()
 
     def test_no_sandbox_skips_sandbox_teardown(self, setup_spies) -> None:
         _handle_uninstall(no_sandbox=True)

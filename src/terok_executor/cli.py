@@ -27,7 +27,7 @@ import os
 import sys
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 
-from terok_util import CommandTree
+from terok_util import CommandTree, SetupDowngradeError, SetupRequiredError
 
 from . import _ensure_bootstrapped
 from ._tree import COMMANDS
@@ -109,6 +109,12 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             CommandTree.dispatch(args)
+        except SetupRequiredError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            if isinstance(exc, SetupDowngradeError):
+                raise SystemExit(4) from exc
+            print("hint: run `terok-executor setup`", file=sys.stderr)
+            raise SystemExit(3) from exc
         except NoPassphraseError as exc:
             # sandbox#278 stripped CLI-hint text from the library raise
             # sites so they stay diagnostic-only.  Standalone runs have no

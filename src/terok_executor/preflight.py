@@ -19,11 +19,12 @@ in production; tests construct it with defaults and call individual
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from terok_util import find_host_tool
 
 MIN_PODMAN_VERSION = (4, 3)
 """Oldest podman the launch path is tested against.
@@ -220,7 +221,7 @@ class Preflight:
         blocking would kill unofficial use on frozen-distro hosts — but
         the result message carries the warning instead of a bare "ok".
         """
-        if not shutil.which("podman"):
+        if not find_host_tool("podman"):
             return CheckResult("podman", False, "not found on PATH")
         try:
             result = subprocess.run(
@@ -254,7 +255,7 @@ class Preflight:
         A missing git therefore degrades the workflow (no in-container
         ``git push``) but never blocks a launch.
         """
-        if not shutil.which("git"):
+        if not find_host_tool("git"):
             return CheckResult("git", False, "not found on PATH — git gate disabled")
         return CheckResult("git", True, "ok")
 

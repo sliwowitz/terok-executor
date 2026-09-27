@@ -441,7 +441,7 @@ class TestBuildBaseImages:
         from unittest.mock import patch
 
         with (
-            patch("shutil.which", return_value=None),
+            patch("terok_executor.container.build.find_host_tool", return_value=None),
             pytest.raises(BuildError, match="podman not found"),
         ):
             build_base_images()

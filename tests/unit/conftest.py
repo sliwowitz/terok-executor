@@ -155,3 +155,10 @@ def _stub_credential_db_passphrase() -> Iterator[None]:
         patch("terok_sandbox.vault.store.db.open_credential_db", new=_open_module),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _ready_runner_setup() -> Iterator[None]:
+    """Unrelated runner tests do not need a real provisioned host."""
+    with patch("terok_executor.container.runner.check_setup", return_value=()):
+        yield

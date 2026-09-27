@@ -172,6 +172,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.container.runner"
 depends_on = [
+    "terok_executor.sandbox",
     "terok_executor._util",
     "terok_executor.container.build",
     "terok_executor.container.cache",
@@ -233,6 +234,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.sandbox"
 depends_on = [
+    "terok_executor.paths",
     "terok_executor.integrations.sandbox", "terok_executor.roster",
 ]
 
