@@ -20,6 +20,7 @@ import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
@@ -40,9 +41,13 @@ _PROVIDER_ENV_PREFIXES = ("TEROK_OC_", "TEROK_PROVIDER_")
 
 
 def _run_pi_extension(
-    env: dict[str, str], discovered_models: list[dict[str, object]] | None = None
+    tmp_path: Path,
+    env: dict[str, str],
+    discovered_models: list[dict[str, object]] | None = None,
 ) -> dict:
     """Execute the staged Pi extension under Node and return its registrations."""
+    node_env = {"PATH": os.environ["PATH"], "NODE_NO_WARNINGS": "1"} | env
+    _require_node_typescript(tmp_path, node_env)
     extension = Path(_scripts_pkg.__file__).parent / "pi-vault-routes.ts"
     discovery_payload = json.dumps({"data": discovered_models or []})
     source = f"""
@@ -64,15 +69,35 @@ def _run_pi_extension(
             check=True,
             capture_output=True,
             text=True,
-            env={"PATH": os.environ["PATH"], "NODE_NO_WARNINGS": "1"} | env,
+            env=node_env,
+        )
+    except subprocess.CalledProcessError as exc:
+        exc.add_note(exc.stderr)
+        raise
+    return json.loads(completed.stdout)
+
+
+def _require_node_typescript(tmp_path: Path, env: dict[str, str]) -> None:
+    """Probe actual type stripping, including builds without the optional parser."""
+    probe = tmp_path / "node-typescript-probe.ts"
+    probe.write_text("const value: number = 1;\n")
+    try:
+        subprocess.run(
+            ["node", "--experimental-strip-types", str(probe)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
         )
     except FileNotFoundError:
         pytest.skip("Node is unavailable for the staged Pi extension test")
     except subprocess.CalledProcessError as exc:
-        if "experimental-strip-types" in exc.stderr and "bad option" in exc.stderr:
-            pytest.skip("Node 22+ is required to execute the staged TypeScript directly")
+        if "ERR_NO_TYPESCRIPT" in exc.stderr or (
+            "experimental-strip-types" in exc.stderr and "bad option" in exc.stderr
+        ):
+            pytest.skip("Node's built-in TypeScript support is unavailable")
+        exc.add_note(exc.stderr)
         raise
-    return json.loads(completed.stdout)
 
 
 def _load_script(filename: str, module_name: str) -> ModuleType:
@@ -121,6 +146,48 @@ def _c_settings(args: list[str]) -> dict[str, str]:
     """Collapse a ``-c key=value -c …`` list into a ``{key: value}`` map."""
     assert all(flag == "-c" for flag in args[::2]), args
     return dict(pair.split("=", 1) for pair in args[1::2])
+
+
+class TestPiNodeCapability:
+    """Missing type stripping is a reported skip; runtime failures remain failures."""
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            "node: bad option: --experimental-strip-types",
+            "Error [ERR_NO_TYPESCRIPT]: Node.js is not compiled with TypeScript support",
+        ],
+    )
+    def test_unsupported_type_stripping_skips_before_loading_extension(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str
+    ) -> None:
+        """Older Node and distro builds without Amaro cannot run the typed probe."""
+        run = Mock(side_effect=subprocess.CalledProcessError(1, "node", stderr=stderr))
+        monkeypatch.setattr(subprocess, "run", run)
+
+        with pytest.raises(pytest.skip.Exception, match="TypeScript support is unavailable"):
+            _run_pi_extension(tmp_path, {})
+
+        run.assert_called_once()
+        probe = Path(run.call_args.args[0][-1])
+        assert probe.parent == tmp_path
+        assert probe.suffix == ".ts"
+        assert ": number" in probe.read_text()
+
+    @pytest.mark.parametrize("stage", ["probe", "extension"])
+    def test_unexpected_failures_keep_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+    ) -> None:
+        """A genuine probe or extension bug stays a failure with its Node diagnostic."""
+        error = subprocess.CalledProcessError(1, "node", stderr="SyntaxError: broken script")
+        results = [error] if stage == "probe" else [subprocess.CompletedProcess("node", 0), error]
+        monkeypatch.setattr(subprocess, "run", Mock(side_effect=results))
+
+        with pytest.raises(subprocess.CalledProcessError) as raised:
+            _run_pi_extension(tmp_path, {})
+
+        assert raised.value is error
+        assert error.__notes__ == [error.stderr]
 
 
 class TestCodexDelivery:
@@ -533,9 +600,10 @@ class TestProviderModelMetadata:
             "noninteger": {},
         }
 
-    def test_pi_skips_discovery_and_preserves_declared_context(self) -> None:
+    def test_pi_skips_discovery_and_preserves_declared_context(self, tmp_path: Path) -> None:
         """Pi receives a declared 120k context and defaults only its unknown output."""
         result = _run_pi_extension(
+            tmp_path,
             {
                 "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
                 "TEROK_PROVIDER_EXAMPLE_TOKEN": "tok",
@@ -549,7 +617,7 @@ class TestProviderModelMetadata:
                         }
                     }
                 ),
-            }
+            },
         )
 
         assert result["fetchCalls"] == 0
@@ -581,9 +649,10 @@ class TestProviderModelMetadata:
             }
         ]
 
-    def test_pi_prefers_default_model_after_discovery(self) -> None:
+    def test_pi_prefers_default_model_after_discovery(self, tmp_path: Path) -> None:
         """The declared default leads a model list discovered from the endpoint."""
         result = _run_pi_extension(
+            tmp_path,
             {
                 "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
                 "TEROK_PROVIDER_EXAMPLE_DEFAULT_MODEL": _EXAMPLE_MODEL,
@@ -680,14 +749,15 @@ class TestProviderModelMetadata:
         expected_permission = {"*": "allow"} if drift == "permission" else user_permission
         assert content["permission"] == expected_permission
 
-    def test_pi_rejects_array_model_metadata(self) -> None:
+    def test_pi_rejects_array_model_metadata(self, tmp_path: Path) -> None:
         """Array metadata does not register a declared model or suppress discovery."""
         result = _run_pi_extension(
+            tmp_path,
             {
                 "TEROK_PROVIDER_EXAMPLE_BASE_OPENAI_CHAT": _EXAMPLE_CHAT_BASE,
                 "TEROK_PROVIDER_EXAMPLE_TOKEN": "tok",
                 "TEROK_PROVIDER_EXAMPLE_MODELS": json.dumps({_EXAMPLE_MODEL: []}),
-            }
+            },
         )
 
         assert result["fetchCalls"] == 1
