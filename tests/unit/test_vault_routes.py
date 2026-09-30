@@ -633,7 +633,7 @@ class TestVaultCommandsOverlay:
     """Executor's ``VAULT_COMMANDS`` extends sandbox's vault subtree.
 
     Sandbox owns the verb registry and argparse schema (``unlock`` /
-    ``lock`` / ``passphrase {seal,to-keyring,reveal,acknowledge,
+    ``lock`` / ``passphrase {seal,to-desktop-keyring,reveal,acknowledge,
     destroy}``).  Executor appends two file-level verbs (``routes`` /
     ``clean``); every sandbox verb flows through unchanged so new
     sandbox commands reach ``terok-executor vault …`` zero-edit.

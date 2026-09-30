@@ -285,6 +285,27 @@ class TestSharedDirArgs:
         assert "shared_mount" not in call_kwargs.kwargs
 
 
+class TestPassphraseTerminology:
+    """The executor exposes the desktop-keyring and session-cache vocabulary."""
+
+    def test_setup_help_names_logical_passphrase_tiers(self) -> None:
+        """Desktop storage and the temporary cache are separate choices."""
+        out, _, rc = _run_cli("setup", "--help")
+        assert rc == 0
+        help_text = "".join(out.split())
+        assert "desktop-keyring" in help_text
+        assert "session-cache" in help_text
+        assert "kernel-keyring" not in help_text
+        assert "|keyring|" not in help_text
+
+    def test_vault_help_names_desktop_transfer(self) -> None:
+        """The imported sandbox tree exposes the explicit desktop-transfer verb only."""
+        out, _, rc = _run_cli("vault", "passphrase", "--help")
+        assert rc == 0
+        assert "to-desktop-keyring" in out
+        assert "to-keyring" not in out
+
+
 class TestShowConfigAndOverrides:
     """``show-config`` verb + top-level ``--config`` / ``--raw`` overrides."""
 
@@ -327,6 +348,8 @@ class TestShowConfigAndOverrides:
         assert rc == 0
         # --raw points TEROK_CONFIG_FILE at /dev/null → sandbox defaults
         assert "services_mode: socket" in out
+        assert "credentials_use_desktop_keyring: true" in out
+        assert "credentials_use_keyring" not in out
 
     def test_show_config_orchestrator_injected_cfg_wins(self) -> None:
         """When a higher-layer orchestrator passes ``cfg=...`` directly, it's used verbatim."""

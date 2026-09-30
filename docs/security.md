@@ -52,7 +52,7 @@ terok-executor vault status      # lock state, passphrase chain, stored secrets
 terok-executor vault unlock      # provision the credential-DB passphrase for this session
 terok-executor vault lock        # clear every stored copy of the passphrase
 terok-executor vault list        # inventory stored credentials
-terok-executor vault passphrase  # manage where the passphrase lives (seal, to-keyring, …)
+terok-executor vault passphrase  # manage passphrase storage (seal, to-desktop-keyring, …)
 terok-executor vault routes      # regenerate routes.json from the YAML roster
 terok-executor vault clean       # remove leaked credential files from mounts
 ```

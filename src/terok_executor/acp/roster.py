@@ -68,8 +68,8 @@ def list_authenticated_agents(
     cfg = SandboxConfig()
     # ``db_path`` override exists for tests + multi-instance hosts; the
     # cfg still owns the tier policy so this caller never has to know
-    # about the chain mechanism (systemd-creds / keyring /
-    # kernel-keyring / passphrase-command).
+    # about the chain mechanism (systemd-creds / desktop keyring /
+    # session cache / passphrase-command).
     db = cfg.open_credential_db(db_path)
     try:
         return list(db.list_credentials(scope))
