@@ -185,7 +185,7 @@ def executor_env(
     (the operator's own passphrase chain is never consulted, and their vault
     is never opened).  The passphrase rides the ``passphrase_command`` tier —
     sandbox removed the plaintext config tier in terok-sandbox#461 — with the
-    keyring tier switched off so nothing above it can reach the operator's
+    desktop keyring tier switched off so nothing above it can reach the operator's
     Secret Service.  ``SandboxConfig`` is patched only where the env
     assembler constructs one implicitly — see the module docstring.
     """
@@ -198,7 +198,7 @@ def executor_env(
             runtime_dir=tmp_path_factory.mktemp("executor-runtime"),
             vault_dir=tmp_path / "vault",
             config_dir=tmp_path / "config",
-            credentials_use_keyring=False,
+            credentials_use_desktop_keyring=False,
             credentials_passphrase_command=f"printf %s {INTEGRATION_VAULT_PASSPHRASE}",
         ),
         mounts_dir=tmp_path / "mounts",

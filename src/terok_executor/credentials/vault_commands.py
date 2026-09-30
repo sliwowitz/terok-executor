@@ -207,7 +207,7 @@ def _build_sandbox_tree() -> CommandTree:
     """Extend sandbox's full command tree with executor-only vault verbs.
 
     Sandbox owns the verb set (``vault unlock`` / ``vault lock`` /
-    ``vault passphrase {seal,to-keyring,reveal,acknowledge,destroy}``)
+    ``vault passphrase {seal,to-desktop-keyring,reveal,acknowledge,destroy}``)
     plus argparse schema.  Executor adds two file-level verbs that
     don't make sense in sandbox itself because they depend on the
     executor's YAML roster + mounts layout: ``vault routes`` and
