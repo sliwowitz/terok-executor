@@ -15,8 +15,32 @@
 # Unrestricted mode: claude-agent-acp reads /etc/claude-code/managed-settings.json
 # (enterprise managed settings, highest precedence).  Written once by
 # init-ssh-and-repo.sh at container startup — no per-invocation action needed.
+#
+# Readiness: the same pre-flight as the claude() shell wrapper, so an ACP client
+# (Toad in the container, or one bound through terok's ACP proxy) cannot bypass
+# it.  This adapter honours no provider selection — it always drives Claude on
+# its default endpoint — so only the default provider's check applies.  That
+# check covers routing too: when terok flags the stored Claude login as an OAuth
+# login it does not route to Claude, the launch is refused here whatever
+# TEROK_PROVIDER says, since no selection can stand in for it on this path.
 
 set -euo pipefail
+
+# The check is rendered per task into the agent wrappers from Claude's roster
+# binding, so this launcher (copied verbatim into the image) borrows it rather
+# than naming a provider: a user agent override that re-binds Claude's default
+# would otherwise be refused here while the shell wrapper launches.  Without a
+# credential Claude falls into its first-run login, which the egress firewall
+# refuses (the provider's hosts are reserved for the vault): the client would
+# see a bare ConnectionRefused.  Wrappers that predate the check, or a container
+# without them, skip it; the firewall stays the enforcement either way.
+# stderr only: stdout carries the ACP protocol.
+if [[ -r /usr/local/share/terok/terok-env-wrappers.sh ]]; then
+    . /usr/local/share/terok/terok-env-wrappers.sh
+fi
+if declare -F _terok_claude_ready >/dev/null; then
+    _terok_claude_ready || exit 1
+fi
 
 _AGENT_NAME="Claude"
 _AGENT_EMAIL="noreply@anthropic.com"
