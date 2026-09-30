@@ -59,6 +59,42 @@ IDENTITY_NAME_ENV = "TEROK_AGENT_IDENTITY_NAME"
 IDENTITY_EMAIL_ENV = "TEROK_AGENT_IDENTITY_EMAIL"
 """Env var a provider alias sets to override the harness wrapper's git author email."""
 
+CLAUDE_OAUTH_UNROUTED_ENV = "TEROK_CLAUDE_OAUTH_UNROUTED"
+"""Env var that marks Claude's default endpoint as having no route for the stored Claude login.
+
+terok sets it, to
+[`CLAUDE_OAUTH_UNROUTED_ON`][terok_executor.provider.wrappers.CLAUDE_OAUTH_UNROUTED_ON],
+in one case only: the vault holds a Claude OAuth login that terok's
+configuration neither routes to Claude (``allow_oauth``) nor exposes to it
+(``expose_oauth_token``), terok's "skipped" mode.  Never in the routed or the
+exposed mode: there Claude's default endpoint reaches the provider, through the
+vault or directly with the real token.
+
+In the skipped mode terok removes Claude's own route to the provider but keeps
+the login's ``TEROK_PROVIDER_<NAME>_*`` handle, on purpose: OpenCode, Pi and
+Toad reach the provider through the vault with it.  The handle alone would
+therefore pass Claude's readiness check, and Claude would start on its default
+endpoint, go straight to the provider's hosts and meet the egress firewall's
+bare refusal.  With the variable on, the ``claude`` wrapper and the
+``terok-claude-acp`` launcher refuse a launch on that endpoint up front
+instead, naming the cause and the remedies.  A provider selected in the shell
+(``--provider`` or ``TEROK_PROVIDER``) that serves Claude's protocol still
+routes the launch, Claude's default provider included: the wrapper sends
+Claude through that provider's vault handle, not straight to its hosts.  The
+ACP launcher honours no selection, so it refuses whenever the variable is on.
+Only Claude's entry points read it; any other value, or none, leaves them as
+they were."""
+
+CLAUDE_OAUTH_UNROUTED_ON = "1"
+"""The value that turns Claude's routing refusal on.
+
+The other half of the
+[`CLAUDE_OAUTH_UNROUTED_ENV`][terok_executor.provider.wrappers.CLAUDE_OAUTH_UNROUTED_ENV]
+contract: terok sets the variable to this value rather than spelling it, and
+the rendered check compares against it, so the two cannot drift apart.  The
+check compares strings, so any other spelling, such as ``true``, leaves
+Claude's entry points as they were."""
+
 _TEMPLATE_NAME = "agent-wrappers.sh.j2"
 
 
@@ -91,6 +127,9 @@ def generate_agent_wrapper(agent: Agent) -> str:
     the ``_terok_record_agent`` / ``_terok_wrapper_help`` / ``_terok_resume_hint`` /
     ``_terok_trust_workspace_for_vibe`` helpers) is produced by
     [`generate_all_wrappers`][terok_executor.provider.wrappers.generate_all_wrappers].
+    Claude's render also carries ``_terok_claude_ready`` and
+    ``_terok_claude_routed``, the default-provider pre-flight that belongs to
+    it alone (its ACP launcher calls it too).
     """
     ctx = _wrapper_context(agent)
     # Jinja resolves macros dynamically, so the template module's macro
@@ -150,17 +189,20 @@ def _wrapper_context(agent: Agent) -> dict[str, object]:
     # than the roster-driven ones, so it is flagged explicitly here.
     resumes = bool(agent.resume_flag or agent.resume_subcommand)
     has_session = is_claude or bool(session_path and resumes)
+    # A wrapper routes a runtime-selected provider either through a launcher or,
+    # for Claude, by exporting the provider's endpoint as plain environment.
+    routes_provider = bool(provider_launcher) or is_claude
     return {
         "name": agent.name,
         "binary": binary,
         "is_claude": is_claude,
-        "help_flags": _help_flags(bool(provider_launcher) or is_claude, has_session),
+        "help_flags": _help_flags(routes_provider, has_session),
         "is_vibe": agent.name == "vibe",
         "is_codex": agent.name == "codex",
         "is_opencode": agent.name == "opencode",
         "provider_launcher": provider_launcher,
         **_claude_provider_context(agent),
-        **_readiness_guard_context(agent, provider_launcher),
+        **_readiness_guard_context(agent, routes_provider),
         "author_name": shlex.quote(agent.git_author_name),
         "author_email": shlex.quote(agent.git_author_email),
         "refuse_pattern": "|".join(agent.refuse_subcommands),
@@ -254,27 +296,79 @@ def _claude_provider_context(agent: Agent) -> dict[str, str]:
     }
 
 
-def _readiness_guard_context(agent: Agent, provider_launcher: str) -> dict[str, object]:
+def _readiness_guard_context(agent: Agent, routes_provider: bool) -> dict[str, object]:
     """Resolve whether this wrapper pre-flights provider readiness, and against whom.
 
-    A native, protocol-routed agent (codex, vibe) launches its bare binary on
-    the default path, trusting a vault-materialized credential to be there. When
-    no provider serving its wire protocol was authenticated at container-creation
-    time, that credential is absent and the agent dies with an opaque parse error
-    (codex: ``EOF while parsing a value at line 1 column 0``). The guard checks
-    the effective provider's ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>`` handle —
-    the same startup snapshot ``hilfe`` and ``providers`` read — and refuses with
-    an actionable message instead.
+    A native, protocol-routed agent (claude, codex, vibe) launches on its
+    default provider's path, trusting a vault-materialized credential to be
+    there. When no provider serving its wire protocol was authenticated at
+    container-creation time, that credential is absent and the agent fails
+    opaquely. Codex dies with a parse error (``EOF while parsing a value at
+    line 1 column 0``). Claude falls into its first-run login, and the egress
+    firewall refuses that login: it reserves the provider's hosts for the vault.
+    The user then sees a bare ``ConnectionRefused``
+    ([terok-ai/terok#1273](https://github.com/terok-ai/terok/issues/1273)).
+    The guard checks the effective provider's
+    ``TEROK_PROVIDER_<NAME>_BASE_<PROTOCOL>`` handle — the same startup snapshot
+    ``hilfe`` and ``providers`` read — and refuses with an actionable message
+    instead.
 
-    Truthy only for agents that both route through a launcher and carry a fixed
+    Claude's guard also refuses a *selected* provider that holds no credential
+    in the task, rather than let Claude's fallback swap in the default — that
+    would send the session to a provider nobody picked.  Its refusal names the
+    ``terok auth`` entry for that provider, hence *auth_entries* (see
+    ``_provider_auth_entries`` below).
+
+    A handle proves a stored login, not a route from Claude's default
+    endpoint: terok keeps the handle of a Claude OAuth login it neither routes
+    to Claude nor exposes to it, for the task's other agents, and flags the
+    case in
+    [`CLAUDE_OAUTH_UNROUTED_ENV`][terok_executor.provider.wrappers.CLAUDE_OAUTH_UNROUTED_ENV].
+    Claude's default-endpoint check reads that flag too, by the name
+    *oauth_unrouted_env* carries and against the value *oauth_unrouted_on*
+    carries, so the shell spells neither half of the contract.
+
+    Truthy only for agents whose wrapper routes a provider (*routes_provider*:
+    through a launcher, or Claude's environment routing) and that carry a fixed
     protocol + default provider to check; harnesses (opencode, pi, no default)
     and bindingless CLIs (copilot) opt out and render no guard.
     """
     binding = agent.provider_binding
     default = binding.default if binding else None
-    if not (provider_launcher and default and agent.protocol):
-        return {"readiness_guard": False, "default_provider": ""}
-    return {"readiness_guard": True, "default_provider": default}
+    if not (routes_provider and default and agent.protocol):
+        return {
+            "readiness_guard": False,
+            "default_provider": "",
+            "auth_entries": [],
+            "oauth_unrouted_env": "",
+            "oauth_unrouted_on": "",
+        }
+    return {
+        "readiness_guard": True,
+        "default_provider": default,
+        "auth_entries": _provider_auth_entries(),
+        "oauth_unrouted_env": CLAUDE_OAUTH_UNROUTED_ENV,
+        "oauth_unrouted_on": CLAUDE_OAUTH_UNROUTED_ON,
+    }
+
+
+def _provider_auth_entries() -> list[tuple[str, str]]:
+    """Pair each agent-bound provider with the ``terok auth`` entry that authenticates it.
+
+    The roster stores a bound provider's credential under the binding agent's
+    own auth entry (``terok auth claude`` authenticates ``anthropic``); every
+    other provider is authenticated under its own name.  A refusal naming
+    ``terok auth anthropic`` would send the user to a command that does not
+    exist, so the bound pairs are spelled out for the wrapper, which falls back
+    to the provider's own name for the rest.  Read from the live registry, so a
+    user override that re-binds an agent's default is followed.
+    """
+    pairs: list[tuple[str, str]] = []
+    for agent in AGENTS.values():
+        binding = agent.provider_binding
+        if binding is not None and binding.default and binding.default != agent.name:
+            pairs.append((binding.default, agent.name))
+    return sorted(pairs)
 
 
 def _extra_args_expansion(agent: Agent, session_path: str) -> str:

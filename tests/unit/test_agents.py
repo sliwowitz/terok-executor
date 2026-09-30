@@ -6,11 +6,15 @@
 from __future__ import annotations
 
 import json
+import shlex
 import tempfile
 import unittest.mock
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import pytest
+
+from terok_executor.provider import wrappers as wrappers_module
 from terok_executor.provider.agents import (
     AgentConfigSpec,
     _inject_opencode_instructions,
@@ -19,6 +23,8 @@ from terok_executor.provider.agents import (
 )
 from terok_executor.provider.providers import AGENTS, OPENCODE_PROVIDERS
 from terok_executor.provider.wrappers import (
+    CLAUDE_OAUTH_UNROUTED_ENV,
+    CLAUDE_OAUTH_UNROUTED_ON,
     IDENTITY_EMAIL_ENV,
     IDENTITY_NAME_ENV,
     OPENCODE_HARNESS,
@@ -165,13 +171,118 @@ class TestRuntimeProviderWrappers:
         assert 'local _handle="TEROK_PROVIDER_${_eff^^}_BASE_OPENAI_CHAT"' in wrapper
         assert "vibe has no authenticated openai-chat provider" in wrapper
 
+    def test_claude_preflight_refuses_without_an_authenticated_default(self) -> None:
+        """Claude checks its default provider's vault handle before launch, so an
+        unauthenticated task fails naming ``terok auth claude`` instead of a bare
+        ConnectionRefused from its firewall-blocked first-run login (terok#1273).
+        The check is a helper of its own, which the ACP launcher calls too."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        helper = wrapper[wrapper.index("_terok_claude_ready() {") : wrapper.index("claude() {")]
+        assert "local _eff=anthropic" in helper
+        assert 'local _handle="TEROK_PROVIDER_${_eff^^}_BASE_ANTHROPIC_MESSAGES"' in helper
+        assert 'if [ -z "${!_handle:-}" ]; then' in helper
+        assert "claude has no authenticated anthropic-messages provider" in helper
+        assert "Authenticate one on the host:  terok auth claude" in helper
+        assert "In-container login is blocked by the egress firewall." in helper
+        assert "_terok_claude_ready selectable || return 1" in wrapper
+
+    def test_claude_preflight_checks_the_endpoint_it_will_use(self) -> None:
+        """A selected provider is checked for a credential of its own (a token in
+        the snapshot); only without a selection that routes — none, or one that
+        falls back — is the default checked.  Both checks sit after ``--help``
+        and before the one-shot initial-prompt pickup, so neither help nor a
+        refusal consumes the prompt."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        launch = wrapper[wrapper.index("claude() {") :]
+        selection = launch.index('if [ -z "$_prov_token" ]; then')
+        default = launch.index('if [ -z "$_prov_base" ]; then')
+        assert launch.index("-h|--help)") < launch.index('local _prov_base=""') < selection
+        assert selection < default < launch.index("initial-prompt.txt")
+
+    def test_claude_refusal_names_each_bound_providers_auth_entry(self) -> None:
+        """A provider an agent binds is authenticated under that agent's entry,
+        so the selection refusal maps it there (``anthropic`` → ``terok auth
+        claude``); any other provider is named as-is."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        bound = {
+            agent.provider_binding.default: agent.name
+            for agent in AGENTS.values()
+            if agent.provider_binding
+            and agent.provider_binding.default
+            and agent.provider_binding.default != agent.name
+        }
+        assert bound["anthropic"] == "claude"
+        for provider, entry in bound.items():
+            assert f"{provider}) _auth={entry} ;;" in wrapper, provider
+        assert 'local _auth="${_provider,,}"' in wrapper
+        assert 'echo "  Authenticate it on the host:  terok auth $_auth" >&2' in wrapper
+
+    def test_claude_default_check_reads_the_exported_routing_flag(self) -> None:
+        """A handle proves a stored login, not a route from Claude's default
+        endpoint, so the default-path check goes on to the routing check once
+        the handle is there, passing on whether its caller can select.  That
+        check reads the flag by the exported name and compares it against the
+        exported value, the two halves terok sets."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        ready = wrapper[
+            wrapper.index("_terok_claude_ready() {") : wrapper.index("_terok_claude_routed() {")
+        ]
+        routed = wrapper[wrapper.index("_terok_claude_routed() {") : wrapper.index("claude() {")]
+        assert ready.index('if [ -z "${!_handle:-}" ]; then') < ready.index(
+            '_terok_claude_routed "$_eff" "${1:-}"'
+        )
+        assert f"local _flag={shlex.quote(CLAUDE_OAUTH_UNROUTED_ENV)}" in routed
+        on = shlex.quote(CLAUDE_OAUTH_UNROUTED_ON)
+        assert f'[ "${{!_flag:-}}" = {on} ] || return 0' in routed
+
+    def test_claude_routing_check_renders_the_exported_name_and_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The template spells neither half of the flag: it renders the name and
+        the on-value the wrappers module exports, so a change to either constant
+        reaches the shell, and terok, which reads the same constants, stays in
+        step with it."""
+        monkeypatch.setattr(wrappers_module, "CLAUDE_OAUTH_UNROUTED_ENV", "SENTINEL_UNROUTED")
+        monkeypatch.setattr(wrappers_module, "CLAUDE_OAUTH_UNROUTED_ON", "sentinel-on")
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        routed = wrapper[wrapper.index("_terok_claude_routed() {") : wrapper.index("claude() {")]
+        assert "local _flag=SENTINEL_UNROUTED" in routed
+        assert '[ "${!_flag:-}" = sentinel-on ] || return 0' in routed
+        assert CLAUDE_OAUTH_UNROUTED_ENV not in wrapper
+
+    def test_claude_routing_check_guards_the_default_endpoint_alone(self) -> None:
+        """A routing selection, Claude's default provider named by hand
+        included, goes through the selected provider's vault handle, so
+        ``claude()`` reaches the routing check only through the default-path
+        pre-flight, and tells it that a selection is open to the user."""
+        wrapper = generate_agent_wrapper(AGENTS["claude"])
+        launch = wrapper[wrapper.index("claude() {") :]
+        assert "_terok_claude_routed" not in launch
+        fallback = launch.index('if [ -z "$_prov_base" ]; then')
+        assert fallback < launch.index("_terok_claude_ready selectable || return 1")
+
+    def test_routing_flag_is_read_by_claude_alone(self) -> None:
+        """No other agent's wrapper, provider alias or shared helper reads the
+        flag: the stored login stays usable to OpenCode, Pi and the rest."""
+        claude = generate_agent_wrapper(AGENTS["claude"])
+        assert CLAUDE_OAUTH_UNROUTED_ENV in claude
+        for name, agent in AGENTS.items():
+            if name != "claude":
+                assert CLAUDE_OAUTH_UNROUTED_ENV not in generate_agent_wrapper(agent), name
+        for name in OPENCODE_PROVIDERS:
+            assert CLAUDE_OAUTH_UNROUTED_ENV not in generate_provider_shortcut(name), name
+        assert generate_all_wrappers().count(CLAUDE_OAUTH_UNROUTED_ENV) == claude.count(
+            CLAUDE_OAUTH_UNROUTED_ENV
+        )
+
     def test_preflight_guard_scoped_to_native_protocol_agents(self) -> None:
-        """The guard is emitted only for native, protocol-routed CLIs (codex, vibe).
-        Harnesses select a provider at runtime and bindingless CLIs have no default
-        to check, so they must not carry it."""
-        for name in ("opencode", "pi", "copilot", "claude"):
+        """The guard is emitted only for native, protocol-routed CLIs (claude, codex,
+        vibe).  Harnesses select a provider at runtime and bindingless CLIs have no
+        default to check, so they must not carry it."""
+        for name in ("opencode", "pi", "copilot"):
             wrapper = generate_agent_wrapper(AGENTS[name])
             assert 'local _handle="TEROK_PROVIDER_' not in wrapper, name
+            assert "_terok_claude_ready" not in wrapper, name
 
 
 class TestWriteSessionHook:

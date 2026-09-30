@@ -17,6 +17,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 #: Verb modules that must stay unimported unless their verb is invoked.
 _VERB_MODULES = [
     "terok_executor.commands",
@@ -91,6 +93,46 @@ def test_acp_host_names_import_without_loading_acp() -> None:
         assert callable(list_authenticated_agents)
         leaked = sorted(m for m in sys.modules if m == "acp" or m.startswith("acp."))
         assert not leaked, f"acp eagerly imported: {leaked}"
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_OAUTH_UNROUTED_ENV", "CLAUDE_OAUTH_UNROUTED_ON"])
+def test_wrapper_env_contract_resolves_from_the_wrappers_without_bootstrap(name: str) -> None:
+    """terok reads the unrouted-OAuth flag's name and value through its executor adapter.
+
+    Each must resolve from the module whose template renders the check, so the
+    variable terok sets, and the value it sets it to, are the ones the shell
+    reads.  Equal strings cannot show that (CPython interns identifier-like
+    constants, so two modules' copies are even the same object); the module
+    loading on first access can, because a bare ``import terok_executor``
+    leaves it unloaded.  Resolving a plain string must load neither the roster
+    nor the sandbox stack.
+    """
+    script = textwrap.dedent(
+        f"""
+        import sys
+
+        import terok_executor
+
+        defining = "terok_executor.provider.wrappers"
+        assert defining not in sys.modules, "a bare import already loaded the wrappers"
+        value = terok_executor.{name}
+        assert defining in sys.modules, "{name} did not resolve from the wrappers"
+        assert value == getattr(sys.modules[defining], "{name}")
+        loaded = sorted(
+            m
+            for m in sys.modules
+            if m == "terok_executor.roster" or m == "terok_sandbox" or m.startswith("terok_sandbox.")
+        )
+        assert not loaded, f"resolving {name} loaded: {{loaded}}"
         """
     )
     result = subprocess.run(

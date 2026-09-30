@@ -301,6 +301,11 @@ feature mode changes.
 - **Claude**: OAuth logins do not support full routing. You can either expose the
   real token to the agent to get the full Claude CLI user experience, or route
   what's officially routable, but miss out on some subscription features.
+  When terok's configuration does neither (its default), Claude's default
+  endpoint has no route for the OAuth login, and a launch there is refused up
+  front. A provider selected in the shell, Claude's default provider included,
+  still routes Claude through the vault (see
+  [Wrapper flags](agents.md#wrapper-flags)).
 - **Codex**: ChatGPT/backend-api and realtime websocket traffic are routed
   through the token broker, but any newly added Codex-specific upstream
   surfaces still need explicit vault route coverage.
