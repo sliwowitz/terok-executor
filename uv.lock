@@ -2294,7 +2294,7 @@ requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "rich", specifier = "~=15.0" },
     { name = "ruamel-yaml", specifier = "==0.19.1" },
-    { name = "terok-sandbox", specifier = ">=0.6.0,<0.7.0" },
+    { name = "terok-sandbox", git = "https://github.com/terok-ai/terok-sandbox.git?rev=refs%2Fpull%2F549%2Fhead" },
     { name = "terok-util", specifier = ">=0.4.0,<0.5.0" },
     { name = "tomli-w", specifier = "~=1.2" },
 ]
@@ -2329,8 +2329,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.6.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.6.1.dev1+g31502ab33"
+source = { git = "https://github.com/terok-ai/terok-sandbox.git?rev=refs%2Fpull%2F549%2Fhead#31502ab33d0d9eff99f7877a45197436605d0434" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2346,23 +2346,15 @@ dependencies = [
     { name = "terok-shield" },
     { name = "terok-util" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/ce/c9728f90071d3ffdfab98d157e9fc00f9f0d1a3ed0dbd150460c096e10e3/terok_sandbox-0.6.0.tar.gz", hash = "sha256:eab96e0932296a60bd005e7e2f86e8acdfd1ed9c7130d52c8715e10c8bd483b9", size = 943426, upload-time = "2026-09-29T06:41:14.778Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ff/9c/2d8bb42a2a7c296ecd600321bb2d288e9d0594f3439e9b7107123d62891c/terok_sandbox-0.6.0-py3-none-any.whl", hash = "sha256:aa5b3e6d33c0b6d3244c79845ff932ba23d52560f91bae9ad792bde1f5c10549", size = 431520, upload-time = "2026-09-29T06:41:12.74Z" },
-]
 
 [[package]]
 name = "terok-shield"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.1.dev1+g109fca1a5"
+source = { git = "https://github.com/terok-ai/terok-shield.git?rev=refs%2Fpull%2F448%2Fhead#109fca1a5650a1a5906df89bf202fd852bbdc360" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "terok-util" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/fb/e21e40e934a059ea7d29237147cefded6365ddb3e2cc27abcb15b90d3635/terok_shield-0.9.0.tar.gz", hash = "sha256:d60b045c9483266ecc3cecff184daf3f5e47db33b075ce3922c7077a7230a4cd", size = 464470, upload-time = "2026-09-29T06:33:04.597Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/67/388e9686f11239e08cfd7adf8b1b03c288e752f57819abc6fb65d124aedc/terok_shield-0.9.0-py3-none-any.whl", hash = "sha256:8acee6519066c1c827069b265ec08b24c28014b462cc8eb1a3624930d8230a77", size = 171127, upload-time = "2026-09-29T06:33:03.173Z" },
 ]
 
 [[package]]

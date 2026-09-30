@@ -73,7 +73,7 @@ class RawImageSection(BaseModel):
 class ExecutorConfigView(SandboxConfigView):
     """The slice of ``config.yml`` executor owns + sandbox owns (transitively).
 
-    Inherits all eight sandbox-owned sections from
+    Inherits every sandbox-owned section from
     [`SandboxConfigView`][terok_sandbox.config_schema.SandboxConfigView] and adds
     the executor-owned ``image:`` section.  ``extra="allow"`` keeps the
     view tolerant of foreign top-level keys (terok's ``tui:`` /
