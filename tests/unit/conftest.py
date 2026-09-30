@@ -115,7 +115,6 @@ def _isolate_user_paths(
     from terok_util.paths import _reset_config_caches_for_tests
 
     _reset_config_caches_for_tests()
-    _cfg._credentials_section.cache_clear()
     _cfg._shield_section.cache_clear()
     _port_registry._service_ports = None
 

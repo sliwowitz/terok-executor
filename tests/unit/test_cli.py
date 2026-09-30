@@ -292,29 +292,32 @@ class TestShowConfigAndOverrides:
     def _isolate_section_caches(self) -> None:
         """Reset the per-process lru_caches so TEROK_CONFIG_FILE changes take effect.
 
-        ``_credentials_section`` / ``_shield_section`` are ``@lru_cache``-decorated
-        in ``terok_sandbox.config`` — they hold whichever section was read first,
-        ignoring later env changes.  Same pattern existing sandbox tests use
-        (``test_credential_encryption.py``).
+        ``_shield_section`` is ``@lru_cache``-decorated in
+        ``terok_sandbox.config`` and holds whichever section was read first,
+        ignoring later env changes. Credentials policy is read fresh.
         """
         from terok_sandbox import config as _cfg
         from terok_util.paths import _reset_config_caches_for_tests
 
         _reset_config_caches_for_tests()
-        _cfg._credentials_section.cache_clear()
         _cfg._shield_section.cache_clear()
 
     def test_show_config_never_leaks_a_leftover_plaintext_passphrase(self, tmp_path: Path) -> None:
-        """A stale ``credentials.passphrase`` key (tier removed in sandbox) stays off stdout."""
+        """Removed plaintext policy fails closed without echoing its secret in diagnostics."""
         cfg_path = tmp_path / "config.yml"
         cfg_path.write_text(
             "services:\n  mode: tcp\ncredentials:\n  passphrase: secret-pw\n",
             encoding="utf-8",
         )
-        out, _, rc = _run_cli("--config", str(cfg_path), "show-config")
-        assert rc == 0
-        assert "services_mode: tcp" in out
-        assert "secret-pw" not in out
+        stdout, stderr = StringIO(), StringIO()
+        with (
+            patch("sys.argv", ["terok-executor", "--config", str(cfg_path), "show-config"]),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+            pytest.raises(RuntimeError, match="credentials configuration") as error,
+        ):
+            main()
+        assert "secret-pw" not in stdout.getvalue() + stderr.getvalue() + str(error.value)
 
     def test_raw_flag_bypasses_config_file(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "config.yml"
