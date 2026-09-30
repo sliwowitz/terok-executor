@@ -311,9 +311,15 @@ class TestShowConfigAndOverrides:
             "services:\n  mode: tcp\ncredentials:\n  passphrase: secret-pw\n",
             encoding="utf-8",
         )
-        with pytest.raises(RuntimeError, match="Cannot read or validate credentials") as error:
-            _run_cli("--config", str(cfg_path), "show-config")
-        assert "secret-pw" not in str(error.value)
+        stdout, stderr = StringIO(), StringIO()
+        with (
+            patch("sys.argv", ["terok-executor", "--config", str(cfg_path), "show-config"]),
+            patch("sys.stdout", stdout),
+            patch("sys.stderr", stderr),
+            pytest.raises(RuntimeError, match="credentials configuration") as error,
+        ):
+            main()
+        assert "secret-pw" not in stdout.getvalue() + stderr.getvalue() + str(error.value)
 
     def test_raw_flag_bypasses_config_file(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "config.yml"
