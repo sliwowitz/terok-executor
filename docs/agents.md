@@ -17,13 +17,14 @@
 
 Curated OpenAI-compatible endpoints driven through the OpenCode
 harness — authenticated with their own API key, launched with a
-one-word command (`blablador`, `kisski`, `openrouter`):
+one-word command (`blablador`, `kisski`, `openrouter`, `opper`):
 
 | Provider | Auth | Description |
 |----------|------|-------------|
 | Blablador | API key | Helmholtz Blablador |
 | KISSKI | API key | KISSKI AcademicCloud (GWDG) |
 | OpenRouter | API key | OpenRouter model aggregator |
+| Opper | API key | Opper EU-hosted AI gateway |
 
 ### Tools
 
@@ -86,7 +87,7 @@ Codex also has a headless device-code variant for hosts without a
 browser callback: `terok-executor auth codex --device-auth`.
 
 **Interactive API key prompt** (Vibe, Blablador, KISSKI, OpenRouter,
-glab, CodeRabbit, SonarCloud) — prompts for a key on the terminal.
+Opper, glab, CodeRabbit, SonarCloud) — prompts for a key on the terminal.
 No container needed.
 
 ```bash

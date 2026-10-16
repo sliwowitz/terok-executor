@@ -415,6 +415,12 @@ class TestExtractCredential:
         result = extract_credential("openrouter", tmp_path)
         assert result["key"] == "sk-or-test"
 
+    def test_dispatches_to_opper(self, tmp_path: Path) -> None:
+        """extract_credential('opper', ...) reads config.json like its OpenCode siblings."""
+        (tmp_path / "config.json").write_text(json.dumps({"api_key": "op-test"}))
+        result = extract_credential("opper", tmp_path)
+        assert result["key"] == "op-test"
+
 
 class TestVendorFormatDrift:
     """Verify the Pydantic schema surfaces vendor-format drift clearly.

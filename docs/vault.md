@@ -229,9 +229,9 @@ the `terok-executor vault routes` command also update the file.
 
 ### Agent-specific settings not in YAML
 
-- **OpenCode base URL override**: For Blablador, KISSKI, and OpenRouter,
-  the environment builder sets `TEROK_OC_<NAME>_BASE_URL` when the vault
-  is active. This is computed at container launch, not declared in YAML.
+- **OpenCode base URL override**: For Blablador, KISSKI, OpenRouter, and
+  Opper, the environment builder sets `TEROK_OC_<NAME>_BASE_URL` when the
+  vault is active. This is computed at container launch, not declared in YAML.
 
 - **glab env vars**: `GITLAB_API_HOST` and `API_PROTOCOL=http` are injected
   by the environment builder for glab specifically. glab has no YAML field
@@ -256,8 +256,8 @@ DB.  Codex additionally offers a headless device-code variant
 (`--device-auth`).
 
 **2. API key -- interactive prompt** (Vibe, Blablador, KISSKI, OpenRouter,
-custom API-key providers, glab, CodeRabbit, SonarCloud): Terok asks for an API
-key in the terminal. You do not need a container.
+Opper, custom API-key providers, glab, CodeRabbit, SonarCloud): Terok asks for
+an API key in the terminal. You do not need a container.
 
 **3. API key -- non-interactive** (any provider with an auth flow):
 `terok-executor auth <provider> --api-key <key>`
@@ -291,6 +291,7 @@ feature mode changes.
 | gh         | `hosts.yml`         | token (oauth_token)           |
 | glab       | `config.yml`        | token (per-host)              |
 | OpenRouter | —                   | API key via prompt/`--api-key` |
+| Opper      | `config.json`       | key (api_key)                 |
 | CodeRabbit | —                   | API key via prompt/`--api-key` |
 | SonarCloud | —                   | API key via prompt/`--api-key` |
 

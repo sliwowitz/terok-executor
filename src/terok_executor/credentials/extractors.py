@@ -220,6 +220,7 @@ EXTRACTORS: dict[str, tuple] = {
     "blablador": (extract_json_api_key, "config.json"),
     "kisski": (extract_json_api_key, "config.json"),
     "openrouter": (extract_json_api_key, "config.json"),
+    "opper": (extract_json_api_key, "config.json"),
 }
 """Maps provider name → ``(extractor_fn, *extra_args)``."""
 

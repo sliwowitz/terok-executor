@@ -490,6 +490,7 @@ class TestLoadRegistry:
         assert any(k.startswith("TEROK_OC_BLABLADOR_") for k in env)
         assert any(k.startswith("TEROK_OC_KISSKI_") for k in env)
         assert any(k.startswith("TEROK_OC_OPENROUTER_") for k in env)
+        assert any(k.startswith("TEROK_OC_OPPER_") for k in env)
 
 
 # ---------------------------------------------------------------------------

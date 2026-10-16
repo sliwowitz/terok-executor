@@ -53,6 +53,7 @@ _EXPECTED_PROVIDERS = {
     "openrouter",
     "blablador",
     "kisski",
+    "opper",
 }
 
 

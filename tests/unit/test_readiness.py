@@ -74,9 +74,9 @@ AGENT_FACTS = _facts(AGENT_PROTOCOLS)
 
 # The baked protocol → candidate-providers universe (mirrors the real roster).
 AGENT_UNIVERSE = {
-    "anthropic-messages": ["anthropic", "openrouter"],
+    "anthropic-messages": ["anthropic", "openrouter", "opper"],
     "openai-responses": ["openai"],
-    "openai-chat": ["blablador", "kisski", "mistral", "openai", "openrouter"],
+    "openai-chat": ["blablador", "kisski", "mistral", "openai", "openrouter", "opper"],
 }
 
 # A realistic in-container environment: anthropic (anthropic-messages),
@@ -118,6 +118,19 @@ class TestBuildManifest:
         assert _pair(manifest, "codex", "openai")["ready"] is True
         # vibe speaks openai-chat → only openrouter serves it here.
         assert _pair(manifest, "vibe", "openrouter")["ready"] is True
+
+    def test_opper_serves_both_chat_and_messages(self, generator: ModuleType) -> None:
+        """Opper's dual-protocol serves: openai-chat agents and claude both reach it."""
+        env = {
+            **AUTHED_ENV,
+            "TEROK_PROVIDER_OPPER_TOKEN": "terok-p-ddd",
+            "TEROK_PROVIDER_OPPER_BASE_OPENAI_CHAT": f"{_LOOPBACK}/v3/compat",
+            "TEROK_PROVIDER_OPPER_BASE_ANTHROPIC_MESSAGES": f"{_LOOPBACK}/v3/compat",
+        }
+        manifest = generator.build_manifest(set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, env)
+        assert _pair(manifest, "vibe", "opper")["ready"] is True
+        assert _pair(manifest, "claude", "opper")["ready"] is True
+        assert _pair(manifest, "codex", "opper")["ready"] is False
 
     def test_harness_agents_surface_paired_with_openai_chat_providers(
         self, generator: ModuleType
@@ -294,7 +307,14 @@ class TestProtocolRollup:
             set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, AUTHED_ENV
         )
         chat = self._row(manifest, "openai-chat")
-        assert chat["candidates"] == ["blablador", "kisski", "mistral", "openai", "openrouter"]
+        assert chat["candidates"] == [
+            "blablador",
+            "kisski",
+            "mistral",
+            "openai",
+            "openrouter",
+            "opper",
+        ]
         # Of those, only openai + openrouter are authenticated in AUTHED_ENV.
         assert chat["authenticated"] == ["openai", "openrouter"]
 

@@ -71,7 +71,7 @@ hardening guarantees.
 | Codex | OAuth*, API key | OpenAI Codex CLI |
 | Vibe | API key | Mistral Vibe |
 | Copilot | — | GitHub Copilot (no vault route yet) |
-| OpenCode | — (uses provider keys) | Harness that drives any OpenAI-compatible provider — curated configs for Helmholtz Blablador, KISSKI AcademicCloud, and OpenRouter (each authenticated with its own API key) |
+| OpenCode | — (uses provider keys) | Harness that drives any OpenAI-compatible provider — curated configs for Helmholtz Blablador, KISSKI AcademicCloud, OpenRouter, and Opper (each authenticated with its own API key) |
 | Pi | — (uses provider keys) | Multi-provider harness; routes through the phantom tokens of co-installed providers |
 | gh | OAuth, API key | GitHub CLI |
 | glab | API key | GitLab CLI |

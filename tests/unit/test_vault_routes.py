@@ -68,6 +68,15 @@ class TestVaultRoutesParsed:
             assert route is not None, f"{name} missing vault route"
             assert route.credential_type == "api_key"
 
+    def test_opper_route_exists(self) -> None:
+        """Opper routes both OpenAI-chat and Anthropic-messages under one EU gateway."""
+        route = AgentRoster.shared().vault_routes.get("opper")
+        assert route is not None
+        assert route.upstream == "https://api.opper.ai"
+        assert route.auth_header == "Authorization"
+        assert route.auth_prefix == "Bearer "
+        assert route.token_env["_default"] == "OPPER_API_KEY"
+
     def test_copilot_has_no_route(self) -> None:
         """Copilot binds no provider (tier-3, no base URL support)."""
         # No route is keyed under any copilot-ish name, and copilot has no binding.
@@ -104,6 +113,7 @@ class TestSharedDomain:
             "blablador",
             "kisski",
             "openrouter",
+            "opper",
         ):
             route = roster.vault_routes[name]
             assert route.shared_domain is False, f"{name} should not be shared_domain"

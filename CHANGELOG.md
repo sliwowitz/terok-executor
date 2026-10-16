@@ -2,6 +2,7 @@
 
 ## Unreleased (0.5.0)
 
+- Add Opper (opper.ai) as a commercial LLM provider, driven through OpenCode.
 - Own executor setup receipts and compose readiness checks downward.
 - Resolve host tools from the current launch environment.
 - Serialize setup and uninstall with the other packages.

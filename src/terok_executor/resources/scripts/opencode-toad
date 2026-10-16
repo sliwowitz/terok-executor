@@ -26,6 +26,7 @@ _PROG_TO_ACP = {
     "blablatoad": "blablador-acp",
     "kisskitoad": "kisski-acp",
     "openroutertoad": "openrouter-acp",
+    "oppertoad": "opper-acp",
 }
 
 

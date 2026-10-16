@@ -777,6 +777,19 @@ class TestVaultTokenInjection:
         # The curated OpenCode base URL picks up the same /api/v1, not a bare /v1.
         assert env["TEROK_OC_OPENROUTER_BASE_URL"].endswith("/api/v1")
 
+    def test_vault_materializes_opper_provider_handle(self, workspace, envs_dir, roster, tmp_path):
+        """Opper's single /v3/compat base feeds both served protocols and OpenCode."""
+        cfg = _make_vault_db(tmp_path, cred_name="opper")
+        spec = _spec(workspace, envs_dir)
+        with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+            env = assemble_container_env(spec, roster, caller_manages_vault=False).env
+
+        assert env["TEROK_PROVIDER_OPPER_TOKEN"].startswith("terok-p-")
+        # Opper serves every compat surface from /v3/compat.
+        assert env["TEROK_PROVIDER_OPPER_BASE_OPENAI_CHAT"].endswith("/v3/compat")
+        assert env["TEROK_PROVIDER_OPPER_BASE_ANTHROPIC_MESSAGES"].endswith("/v3/compat")
+        assert env["TEROK_OC_OPPER_BASE_URL"].endswith("/v3/compat")
+
     def test_new_provider_refreshes_routes_and_projects_model_metadata(
         self, workspace, envs_dir, roster, tmp_path
     ):

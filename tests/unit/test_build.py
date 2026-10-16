@@ -1072,7 +1072,7 @@ class TestStageProviderProtocols:
         stage_provider_protocols(dest, ("claude", "vibe"))
         baked = json.loads(dest.read_text())
         # claude → anthropic-messages, vibe → openai-chat; each lists its servers.
-        assert baked["anthropic-messages"] == ["anthropic", "openrouter"]
+        assert baked["anthropic-messages"] == ["anthropic", "openrouter", "opper"]
         assert "mistral" in baked["openai-chat"] and "openrouter" in baked["openai-chat"]
         # openai-responses isn't spoken by the selection → not advertised.
         assert "openai-responses" not in baked
