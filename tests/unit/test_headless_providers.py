@@ -190,17 +190,9 @@ class TestGenerateAgentWrapper:
         oc = _provider_wrapper("opencode")
         assert 'local _provider="${TEROK_PROVIDER:-}"' in oc
 
-    def test_vibe_wrapper_has_lazy_model_sync(self) -> None:
-        """Vibe wrapper includes lazy Mistral model sync with mtime check."""
-        wrapper = _provider_wrapper("vibe")
-        assert "vibe-model-sync" in wrapper
-        assert "mmin +1440" in wrapper
-
-    def test_non_vibe_wrappers_lack_model_sync(self) -> None:
-        """Only vibe gets the model sync block."""
+    def test_wrappers_do_not_run_legacy_model_sync(self) -> None:
+        """Model discovery belongs to the agent, not a shell-only cache writer."""
         for name in AGENTS:
-            if name == "vibe":
-                continue
             wrapper = _provider_wrapper(name)
             assert "vibe-model-sync" not in wrapper, f"{name} should not have model sync"
 

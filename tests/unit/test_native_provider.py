@@ -218,18 +218,23 @@ class TestCodexDelivery:
 class TestVibeDelivery:
     """``_deliver_vibe`` renders a ``VIBE_PROVIDERS`` env entry; no file is written."""
 
-    def test_repoints_active_provider_via_env(self, np: ModuleType) -> None:
-        """A single JSON providers entry aims the active provider through the vault."""
-        args, env = np._deliver_vibe(
-            "openrouter", _OPENAI_CHAT_BASE, "TEROK_PROVIDER_OPENROUTER_TOKEN"
-        )
+    @pytest.mark.parametrize(
+        ("provider", "backend"), [("mistral", "mistral"), ("openrouter", "generic")]
+    )
+    def test_repoints_active_provider_via_env(
+        self, np: ModuleType, provider: str, backend: str
+    ) -> None:
+        """Vault routing retains native discovery only for the Mistral provider."""
+        token_var = f"TEROK_PROVIDER_{provider.upper()}_TOKEN"
+        args, env = np._deliver_vibe(provider, _OPENAI_CHAT_BASE, token_var)
         assert args == []
         entry = json.loads(env["VIBE_PROVIDERS"])
         assert entry == [
             {
                 "name": "mistral",  # active-provider name is preserved
                 "api_base": _OPENAI_CHAT_BASE,
-                "api_key_env_var": "TEROK_PROVIDER_OPENROUTER_TOKEN",
+                "api_key_env_var": token_var,
+                "backend": backend,
             }
         ]
 

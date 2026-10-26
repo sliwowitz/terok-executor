@@ -636,11 +636,14 @@ class TestTemplateRendering:
         content = render_l1("terok-l0:test", family="deb", agents=("claude",))
         assert "claude.ai/install" in content
         assert "mistral-vibe" not in content
+        assert "VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG" not in content
 
     @pytest.mark.parametrize("family", ["deb", "rpm"])
     def test_l1_installs_vibe_with_user_owned_uv(self, family: str) -> None:
         """Vibe's updater must find a writable uv tool, independent of system Python."""
         content = render_l1("terok-l0:test", family=family, agents=("vibe",))
+        assert "ENV VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=true" in content
+        assert "vibe-model-sync" not in content
         python_install = "uv python install cpython-3.14"
         vibe_install = "uv tool install --python cpython-3.14+gil mistral-vibe"
         before_install, _, after_install = content.partition(python_install)
@@ -921,12 +924,13 @@ class TestStageScripts:
         stage_scripts(dest)
         assert (dest / "terok-agents.py").is_file()
 
-    def test_stages_auth_and_sync(self, tmp_path: Path) -> None:
+    def test_stages_auth_without_legacy_model_sync(self, tmp_path: Path) -> None:
+        """The unused Mistral model cache writer is no longer shipped."""
         dest = tmp_path / "scripts"
         stage_scripts(dest)
         assert (dest / "setup-codex-auth.sh").is_file()
-        assert (dest / "mistral-model-sync.py").is_file()
-        assert (dest / "vibe-model-sync.sh").is_file()
+        assert not (dest / "mistral-model-sync.py").exists()
+        assert not (dest / "vibe-model-sync.sh").exists()
 
     def test_stages_vibe_updater_for_dev(self, tmp_path: Path) -> None:
         """The root-only bulk updater targets dev's uv environment, not root's."""

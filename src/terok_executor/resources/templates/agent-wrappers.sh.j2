@@ -79,15 +79,6 @@
 {%- endif %}
     [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
         . /usr/local/share/terok/terok-env-git-identity.sh
-{%- if c.is_vibe %}
-    # Lazy Mistral model sync (pure-bash mtime check, avoids Python startup)
-    if command -v vibe-model-sync >/dev/null 2>&1; then
-        local _mc=$HOME/.vibe/mistral-models.txt
-        if [ ! -f "$_mc" ] || [ -n "$(find "$_mc" -mmin +1440 2>/dev/null)" ]; then
-            vibe-model-sync >/dev/null 2>&1 || true
-        fi
-    fi
-{%- endif %}
 {%- if c.auto_approve_flags %}
     local _approve_args=()
     if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then

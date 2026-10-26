@@ -24,6 +24,26 @@ Older containers retain their root-owned pipx installation. Rebuild the agent
 image and create a new container to adopt the uv installation. Updating a tool
 inside one container does not update the image or other containers.
 
+### Vibe model discovery
+
+The Vibe image enables its native experimental model catalog for CLI,
+headless, and ACP sessions. The Mistral provider retains `backend = "mistral"`
+when routed through the vault, so Vibe can fetch its catalog using the phantom
+token. Explicitly selected non-Mistral providers use the generic backend and
+do not request Mistral's catalog.
+
+Vibe fetches the catalog at session start and caches it in its own shared
+configuration directory. Fetch failures fall back to local model definitions.
+Set `VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=false` to disable discovery.
+The old `vibe-model-sync` helper and its unused `mistral-models.txt` cache are
+no longer used. Rebuild the agent image and create a new container to adopt
+the new image default and launcher.
+
+For manual model definitions, set both `max_context_length` and
+`max_output_tokens`: the total context window and per-response output limit
+are distinct. In Vibe 3.0.2, omitting the output cap can request all remaining
+context space as output and exceed the provider's completion-token limit.
+
 ### Harness-driven providers
 
 Curated OpenAI-compatible endpoints driven through the OpenCode
