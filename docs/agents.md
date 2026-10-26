@@ -58,6 +58,10 @@ shared-directory search. Child sessions are not automatic resume candidates.
 `--terok-new-session` starts fresh; explicit `--resume` and `--continue` also
 operate within the task-private store.
 
+Vibe validates checkpoint contents when resuming. If it rejects a saved
+session, the wrapper preserves that error and prints a fresh-session hint;
+it does not silently resume an older conversation instead.
+
 After upgrading, rebuild the agent image and recreate the task container to
 update the ACP adapter as well. Old shared histories are not deleted or
 automatically imported: their task ownership cannot be established safely.

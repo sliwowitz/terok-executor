@@ -107,6 +107,9 @@ import json
 import sys
 from pathlib import Path
 
+# Vibe publishes CURRENT atomically after the generation is durable. Its
+# presence identifies a saved candidate; Vibe validates the store on resume.
+# Do not silently fall back to older work when native validation fails.
 sessions = []
 for path in Path(sys.argv[1]).glob('unified/*/meta.json'):
     try:

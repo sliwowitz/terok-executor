@@ -241,7 +241,11 @@ def _vibe_session(
     parent: str | None = None,
     archived: bool = False,
 ) -> Path:
-    """Persist a Vibe 3 root or child session in its unified storage layout."""
+    """Create session-discovery stand-ins for the stubbed Vibe binary.
+
+    These are not native checkpoints. The wrapper reads metadata and observes
+    publication; checkpoint validation belongs to Vibe, not the shell wrapper.
+    """
     directory = store / "unified" / session_id
     directory.mkdir(parents=True)
     (directory / "CURRENT").write_text("saved checkpoint")
@@ -345,6 +349,23 @@ class TestVibeTaskSessions:
         result = harness.run("vibe")
         assert result.returncode == 0, result.stderr
         assert harness.calls == ["ARGV:--resume saved"]
+
+    def test_native_resume_failure_does_not_fall_back_to_older_work(self, harness: Harness) -> None:
+        """Vibe owns checkpoint validation; a rejected resume must not rewind the task."""
+        harness.stub("vibe")
+        store = harness.terok_dir / _VIBE_STORE
+        _vibe_session(store, "older")
+        _vibe_session(store, "latest", modified=10)
+
+        result = harness.run("vibe", rc=7)
+
+        assert result.returncode == 7
+        assert harness.calls == ["ARGV:--resume latest"]
+        assert (harness.terok_dir / _VIBE_RECORD).read_text() == "latest"
+        assert "resumed session latest" in result.stderr
+        assert "vibe --terok-new-session" in result.stderr
+        assert harness.run("vibe", "--terok-new-session").returncode == 0
+        assert harness.calls == ["ARGV:--resume latest", "ARGV:"]
 
     def test_acp_uses_the_same_task_private_store(self, harness: Harness) -> None:
         """The ACP entry point exposes only the CLI task's sessions, not shared history."""
