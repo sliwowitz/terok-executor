@@ -2334,8 +2334,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.7.0a2.dev521+g2d4cb1d69"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Faslr-control#2d4cb1d69ee2d8c07a345e2dc16dcd69d42d9156" }
+version = "0.7.0a2.dev522+gd4d666a09"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Faslr-control#d4d666a09707ef0755e7dbd10ea7dec7fae737be" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
