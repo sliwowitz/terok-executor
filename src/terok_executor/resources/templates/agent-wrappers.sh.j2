@@ -14,6 +14,7 @@
     # its own name and session file set as plain shell variables — visible in
     # its subshell, inherited by no child process.
     local _name="${_terok_wrapper_name:-{{ c.binary }}}"
+    _terok_record_agent "$_name"
 {%- if c.session_path %}
     local _session_file="${_terok_session_file:-{{ c.session_path }}}"
 {%- endif %}
@@ -243,6 +244,7 @@ if files:
 
 {%- macro claude_wrapper(c) -%}
 claude() {
+    _terok_record_agent claude
 {%- if c.refuse_pattern %}
     case "${1:-}" in
         {{ c.refuse_pattern }})
@@ -317,6 +319,15 @@ claude() {
     return $_rc
 }
 {%- endmacro -%}
+# Append rather than rewrite so concurrent shells cannot discard each other's
+# history. Bookkeeping must never prevent an agent from starting.
+_terok_record_agent() {
+    local _history="$HOME/.terok/agent-history"
+    {
+        mkdir -p "${_history%/*}" && printf '%s\n' "$1" >> "$_history"
+    } 2>/dev/null || true
+}
+
 # Frame the agent's own --help with the wrapper's flags: a header before the
 # vendor text (long, and it scrolls) and a one-line reminder after it, so a
 # user who reaches for -h learns that the command is a terok wrapper either

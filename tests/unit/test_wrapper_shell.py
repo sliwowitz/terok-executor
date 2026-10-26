@@ -5,8 +5,8 @@
 
 The string-level tests check what the template *says*; these check what the
 shell *does* on the paths a container user actually hits: the ``--help``
-framing, ``--terok-new-session``, and the resume hint that replaced the old
-fast-fail retry.  Every container path the template bakes in is re-rooted
+framing, ``--terok-new-session``, resume hints, and task-local agent history
+reported by the login banner. Every container path the template bakes in is re-rooted
 under ``tmp_path`` before sourcing.
 """
 
@@ -16,16 +16,22 @@ import os
 import shlex
 import shutil
 import subprocess
+from importlib import resources
 from pathlib import Path
 
 import pytest
 
+from terok_executor.provider.providers import AGENTS, OPENCODE_PROVIDERS
 from terok_executor.provider.wrappers import generate_all_wrappers
 from tests.constants import CONTAINER_TEROK_DIR, CONTAINER_TEROK_SHARE_DIR
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
 
-_HOST_TOOLS = ("bash", "cat", "env", "tee", "timeout")
+_HOST_TOOLS = ("awk", "bash", "cat", "env", "mkdir", "tee", "timeout")
+
+_HISTORY_FILENAME = "agent-history"
+_HISTORY_LABEL = "Agents previously active: "
+_BANNER_RESOURCE = resources.files("terok_executor") / "resources/scripts/terok-bash-banner.sh"
 
 _STUB = """#!__BASH__
 printf 'ARGV:%s\\n' "$*" | tee -a "$STUB_LOG"
@@ -39,10 +45,10 @@ class Harness:
     """A tmp-rooted stand-in for the container: wrappers, stub agents, state dir."""
 
     def __init__(self, tmp_path: Path) -> None:
-        self.terok_dir = tmp_path / "terok"
         self.bin = tmp_path / "bin"
         self.home = tmp_path / "home"
-        for d in (self.terok_dir, self.bin, self.home):
+        self.terok_dir = self.home / ".terok"
+        for d in (self.home, self.terok_dir, self.bin):
             d.mkdir()
         for name in _HOST_TOOLS:
             executable = shutil.which(name)
@@ -74,6 +80,48 @@ class Harness:
 
     def run(self, *argv: str, rc: int = 0) -> subprocess.CompletedProcess[str]:
         """Invoke *argv* through the sourced wrappers; the stub exits with *rc*."""
+        command = f"source {shlex.quote(str(self.wrappers))}; {shlex.join(argv)}"
+        return subprocess.run(
+            ["bash", "-c", command],
+            env=self._environment(rc),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def banner(
+        self, *, tty: bool = True, already_shown: bool = False, hilfe_rc: int = 0
+    ) -> subprocess.CompletedProcess[str]:
+        """Source the real login banner, optionally on a terminal, with stubbed help."""
+        source = _BANNER_RESOURCE.read_text().replace(str(CONTAINER_TEROK_DIR), str(self.terok_dir))
+        command = f"hilfe() {{ printf 'HILFE\\n'; return {hilfe_rc}; }};\n{source}"
+        env = self._environment()
+        env["_TEROK_BANNER_SHOWN"] = "1" if already_shown else ""
+        argv = ["bash", "-c", command]
+        if not tty:
+            return subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+
+        master, slave = os.openpty()
+        with os.fdopen(master, "rb") as output, os.fdopen(slave, "wb") as terminal:
+            os.set_blocking(master, False)
+            result = subprocess.run(
+                argv, env=env, stdout=terminal, stderr=subprocess.PIPE, text=True, check=False
+            )
+            stdout = (output.read() or b"").decode().replace("\r\n", "\n")
+        return subprocess.CompletedProcess(result.args, result.returncode, stdout, result.stderr)
+
+    @property
+    def calls(self) -> list[str]:
+        """Argument vectors the stub was invoked with, in order."""
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    @property
+    def history(self) -> Path:
+        """The same task-local history file the wrappers and greeter share."""
+        return self.terok_dir / _HISTORY_FILENAME
+
+    def _environment(self, rc: int = 0) -> dict[str, str]:
+        """Isolate shell commands from real agent binaries and the operator's home."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("TEROK_", "CLAUDE"))}
         env.update(
             # Only selected host tools and test stubs, never real agent launchers.
@@ -84,16 +132,9 @@ class Harness:
             # Satisfy the native-agent readiness guard (codex, vibe) without a
             # live vault: it only checks that this handle is non-empty.
             TEROK_PROVIDER_OPENAI_BASE_OPENAI_RESPONSES="ready",
+            TEROK_PROVIDER_MISTRAL_BASE_OPENAI_CHAT="ready",
         )
-        command = f"source {shlex.quote(str(self.wrappers))}; {shlex.join(argv)}"
-        return subprocess.run(
-            ["bash", "-c", command], env=env, capture_output=True, text=True, check=False
-        )
-
-    @property
-    def calls(self) -> list[str]:
-        """Argument vectors the stub was invoked with, in order."""
-        return self.log.read_text().splitlines() if self.log.exists() else []
+        return env
 
 
 @pytest.fixture
@@ -314,3 +355,130 @@ class TestProviderAliasSessions:
         # variables are locals, so they never reach the launched process.
         assert "_terok_wrapper_name" not in result.stdout
         assert "_terok_session_file" not in result.stdout
+
+
+class TestAgentHistory:
+    """Every wrapped invocation appends its command name before launching the agent."""
+
+    def test_every_agent_and_alias_records_help(self, harness: Harness) -> None:
+        """Even help counts as a wrapper invocation; aliases record only their own name."""
+        assert AGENTS and OPENCODE_PROVIDERS
+        commands = [(agent.binary, agent.binary) for agent in AGENTS.values()]
+        commands.extend((name, "opencode") for name in OPENCODE_PROVIDERS)
+        recorded = []
+        for name, binary in commands:
+            harness.stub(binary)
+            result = harness.run(name, "--help")
+            assert result.returncode == 0, result.stderr
+            recorded.append(name)
+            assert harness.history.read_text().splitlines() == recorded
+
+    @pytest.mark.parametrize("agent", ("claude", "codex", "vibe", "opencode", "copilot"))
+    @pytest.mark.parametrize("headless", (False, True))
+    def test_failed_agent_still_records_invocation(
+        self, harness: Harness, agent: str, headless: bool
+    ) -> None:
+        """Interactive and timed launches retain history regardless of the agent's exit."""
+        harness.stub(agent)
+        flags = ("--terok-timeout", "5") if headless else ()
+        result = harness.run(agent, *flags, rc=7)
+        assert result.returncode == 7, result.stderr
+        assert harness.history.read_text() == f"{agent}\n"
+
+    @pytest.mark.parametrize("agent", ("blablador", "kisski"))
+    def test_alias_launch_records_alias_not_harness(self, harness: Harness, agent: str) -> None:
+        """A provider shortcut logs once, under the command the user actually entered."""
+        harness.stub("opencode-provider")
+        result = harness.run(agent)
+        assert result.returncode == 0, result.stderr
+        assert harness.history.read_text() == f"{agent}\n"
+
+    @pytest.mark.parametrize(("agent", "command"), (("claude", "setup-token"), ("codex", "login")))
+    def test_refused_command_still_records_invocation(
+        self, harness: Harness, agent: str, command: str
+    ) -> None:
+        """The history records invocation, not successful agent startup."""
+        result = harness.run(agent, command)
+        assert result.returncode == 1
+        assert harness.history.read_text() == f"{agent}\n"
+        assert harness.calls == []
+
+    def test_creates_missing_state_directory(self, harness: Harness) -> None:
+        """The first invocation can establish its own task-state directory."""
+        harness.terok_dir.rmdir()
+        harness.stub("claude")
+        result = harness.run("claude")
+        assert result.returncode == 0, result.stderr
+        assert harness.history.read_text() == "claude\n"
+
+    @pytest.mark.parametrize("blocked", ("directory", "history"))
+    def test_history_write_failure_does_not_prevent_agent(
+        self, harness: Harness, blocked: str
+    ) -> None:
+        """Unavailable state is silent and cannot change the agent's own exit status."""
+        if blocked == "directory":
+            harness.terok_dir.rmdir()
+            harness.terok_dir.write_text("not a directory")
+        else:
+            harness.history.mkdir()
+        harness.stub("claude")
+        result = harness.run("claude", rc=7)
+        assert result.returncode == 7
+        assert result.stderr == ""
+        assert harness.calls == ["ARGV:--add-dir /"]
+
+    def test_history_survives_separate_shells_and_greeter_reads(self, harness: Harness) -> None:
+        """Fresh logins show unique agents in first-use order without rewriting history."""
+        for agent in ("codex", "claude", "codex"):
+            if not (harness.bin / agent).exists():
+                harness.stub(agent)
+            result = harness.run(agent)
+            assert result.returncode == 0, result.stderr
+        history = harness.history.read_text()
+        assert history == "codex\nclaude\ncodex\n"
+        for _ in range(2):
+            result = harness.banner()
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == f"HILFE\n{_HISTORY_LABEL}codex, claude\n"
+            assert harness.history.read_text() == history
+
+
+class TestAgentHistoryBanner:
+    """The interactive greeter summarizes prior wrappers immediately after help."""
+
+    @pytest.mark.parametrize("history", (None, "", "\n\n", " \n\t\n"))
+    def test_no_agents_means_no_extra_output(self, harness: Harness, history: str | None) -> None:
+        """Missing, empty, and blank-only histories leave the ordinary greeting unchanged."""
+        if history is not None:
+            harness.history.write_text(history)
+        result = harness.banner()
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "HILFE\n"
+
+    def test_history_follows_help_and_precedes_initial_prompt(self, harness: Harness) -> None:
+        """The new line fits between existing help and initial-prompt sections."""
+        harness.history.write_text("codex\n\nclaude\ncodex\nblablador\n")
+        harness.session("initial-prompt.txt", "PROMPT")
+        result = harness.banner()
+        assert result.returncode == 0, result.stderr
+        summary = f"{_HISTORY_LABEL}codex, claude, blablador"
+        assert result.stdout.index("HILFE") < result.stdout.index(summary)
+        assert result.stdout.index(summary) < result.stdout.index("Initial prompt")
+        assert "PROMPT" in result.stdout
+
+    @pytest.mark.parametrize(("tty", "already_shown"), ((False, False), (True, True)))
+    def test_existing_greeting_guards_still_apply(
+        self, harness: Harness, tty: bool, already_shown: bool
+    ) -> None:
+        """Non-terminal output and nested shells do not repeat either greeting section."""
+        harness.history.write_text("claude\n")
+        result = harness.banner(tty=tty, already_shown=already_shown)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+
+    def test_failed_help_does_not_hide_history(self, harness: Harness) -> None:
+        """The help command's existing best-effort behavior also permits the history line."""
+        harness.history.write_text("claude\n")
+        result = harness.banner(hilfe_rc=1)
+        assert result.returncode == 0, result.stderr
+        assert f"{_HISTORY_LABEL}claude" in result.stdout

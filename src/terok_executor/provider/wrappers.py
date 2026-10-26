@@ -5,8 +5,8 @@
 """Shell wrapper generation for agent CLI commands.
 
 Produces per-provider bash functions (``claude()``, ``codex()``, ``vibe()``,
-etc.) that set git identity, handle session resume, and support both
-interactive and headless (``--terok-timeout``) modes.
+etc.) that record task-local agent history, set git identity, handle session
+resume, and support both interactive and headless (``--terok-timeout``) modes.
 
 The shell itself lives in the Jinja template
 ``resources/templates/agent-wrappers.sh.j2``; this module only prepares the
@@ -88,7 +88,7 @@ def generate_agent_wrapper(agent: Agent) -> str:
     """Render a single agent's wrapper function, without the shared helpers.
 
     Used to inspect one agent's wrapper in isolation; the full file (with
-    the ``_terok_wrapper_help`` / ``_terok_resume_hint`` /
+    the ``_terok_record_agent`` / ``_terok_wrapper_help`` / ``_terok_resume_hint`` /
     ``_terok_trust_workspace_for_vibe`` helpers) is produced by
     [`generate_all_wrappers`][terok_executor.provider.wrappers.generate_all_wrappers].
     """
