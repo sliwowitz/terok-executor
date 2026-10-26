@@ -4,7 +4,7 @@
 """Pydantic schema for the executor-owned slice of the shared ``config.yml``.
 
 terok-executor owns one top-level section in the shared config:
-``image:`` (base image, agent roster, Dockerfile snippets).  This
+``image:`` (base image, package family, agent roster).  This
 module defines that section's strict schema and composes it with
 sandbox's [`SandboxConfigView`][terok_sandbox.config_schema.SandboxConfigView].
 
@@ -32,11 +32,12 @@ from terok_executor.integrations.sandbox import SandboxConfigView
 
 
 class RawImageSection(BaseModel):
-    """The ``image:`` section — base image, agent roster, Dockerfile snippets.
+    """The ``image:`` section — base image, package family, agent roster.
 
-    Strict on its own keys (``extra="forbid"``).  Same shape used in both
-    the global ``config.yml`` (defaults across projects) and per-project
-    ``project.yml`` (project overrides).
+    Strict on its own keys (``extra="forbid"``).  In the global
+    ``config.yml`` these are the defaults across projects; a project
+    configuration that extends the section with project-only keys (such
+    as a Dockerfile snippet) subclasses it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -58,12 +59,6 @@ class RawImageSection(BaseModel):
             '(e.g. "all,-vibe" or just "-vibe" — both mean "everything '
             'except vibe").  Inherits from the global config when unset.'
         ),
-    )
-    user_snippet_inline: str | None = Field(
-        default=None, description="Inline Dockerfile snippet injected into the project image"
-    )
-    user_snippet_file: str | None = Field(
-        default=None, description="Path to a file containing a Dockerfile snippet"
     )
 
 

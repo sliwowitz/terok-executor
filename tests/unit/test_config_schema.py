@@ -42,11 +42,17 @@ def test_image_section_accepts_known_keys() -> None:
             "base_image": "fedora:43",
             "family": "rpm",
             "agents": "claude,codex",
-            "user_snippet_inline": "RUN apt update",
         }
     )
     assert section.base_image == "fedora:43"
     assert section.family == "rpm"
+
+
+@pytest.mark.parametrize("key", ["user_snippet_inline", "user_snippet_file"])
+def test_image_section_has_no_dockerfile_snippet(key: str) -> None:
+    """A Dockerfile snippet is project configuration, not a default in config.yml."""
+    with pytest.raises(ValidationError, match=key):
+        RawImageSection.model_validate({key: "RUN apt update"})
 
 
 # ── Composed view: inherits sandbox strictness, tolerant of foreign keys ──
