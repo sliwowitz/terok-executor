@@ -96,6 +96,38 @@
         ln -sf "$_plugin_src" "$_plugin_dir/terok-session.mjs"
     fi
 {%- endif %}
+{%- if c.is_vibe and c.session_path %}
+    # Credentials/settings stay shared; session storage belongs to this task.
+    local -x VIBE_SESSION_LOGGING__SAVE_DIR="${_session_file%.txt}.d"
+    local -x VIBE_SESSION_LOGGING__ENABLED=true
+    _terok_capture_vibe_session() {
+        local _sid
+        _sid=$(python3 - "$VIBE_SESSION_LOGGING__SAVE_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+sessions = []
+for path in Path(sys.argv[1]).glob('unified/*/meta.json'):
+    try:
+        metadata = json.loads(path.read_text())
+        if (isinstance(metadata, dict)
+                and metadata.get('session_id') == path.parent.name
+                and not metadata.get('parent_session_id')
+                and not metadata.get('archived_at')
+                and (path.parent / 'CURRENT').is_file()):
+            sessions.append((path.stat().st_mtime_ns, metadata['session_id']))
+    except (OSError, ValueError):
+        continue
+if sessions:
+    print(max(sessions)[1])
+PY
+        ) || return
+        printf '%s' "$_sid" > "$_session_file"
+    }
+    # Recover after abrupt exits, and discard pointers into the old shared store.
+    _terok_capture_vibe_session || return
+{%- endif %}
 {%- if c.session_path and (c.resume_flag or c.resume_subcommand) %}
     local _resumed=""
 {%- if c.resume_flag %}
@@ -130,20 +162,6 @@
         set -- {{ c.seed_prefix }}"$(cat /home/dev/.terok/initial-prompt.txt)"
         mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
     fi
-{%- if c.is_vibe and c.session_path %}
-    _terok_capture_vibe_session() {
-        python3 -c "
-import json, os, glob
-files = sorted(glob.glob(os.path.expanduser('~/.vibe/logs/session/session_*/meta.json')),
-               key=os.path.getmtime, reverse=True)
-if files:
-    with open(files[0]) as f:
-        sid = json.load(f).get('session_id', '')
-    if sid:
-        print(sid)
-" > "$_session_file" 2>/dev/null || true
-    }
-{%- endif %}
     if [ -n "$_timeout" ]; then
         (
             _terok_apply_git_identity "$_agent_name" "$_agent_email"

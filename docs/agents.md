@@ -44,6 +44,27 @@ For manual model definitions, set both `max_context_length` and
 are distinct. In Vibe 3.0.2, omitting the output cap can request all remaining
 context space as output and exceed the provider's completion-token limit.
 
+### Vibe task sessions
+
+The CLI wrapper and ACP adapter store Vibe sessions under
+`/home/dev/.terok/vibe-session.d`, inside the task-private state mount.
+Credentials, model catalog, and user configuration remain in shared `~/.vibe`.
+Session persistence is enabled so restarting the agent can resume its work.
+
+The CLI wrapper records the latest saved, non-archived root session from
+Vibe 3's `unified/<id>/meta.json` layout. It refreshes the task's session
+pointer both before launch and after exit, so abrupt exits do not require a
+shared-directory search. Child sessions are not automatic resume candidates.
+`--terok-new-session` starts fresh; explicit `--resume` and `--continue` also
+operate within the task-private store.
+
+After upgrading, rebuild the agent image and recreate the task container to
+update the ACP adapter as well. Old shared histories are not deleted or
+automatically imported: their task ownership cannot be established safely.
+Old session pointers that have no corresponding task-private session are
+discarded. Initial instructions, first-prompt delivery, and wrapper agent
+history remain unchanged.
+
 ### Harness-driven providers
 
 Curated OpenAI-compatible endpoints driven through the OpenCode

@@ -33,6 +33,9 @@ Vibe's native Mistral model catalog is enabled through the vault. Disable it
 with `VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=false`; no separate model-sync
 command is needed. Custom model definitions need separate context and output
 limits (`max_context_length` and `max_output_tokens`).
+Vibe sessions are task-private under `/home/dev/.terok/vibe-session.d`;
+credentials and user settings remain shared in `~/.vibe`. The `vibe` wrapper
+resumes only a saved root session from this task, never the shared directory.
 
 ## Git workflow
 

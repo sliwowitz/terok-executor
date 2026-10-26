@@ -12,6 +12,7 @@ under ``tmp_path`` before sourcing.
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -27,11 +28,14 @@ from tests.constants import CONTAINER_TEROK_DIR, CONTAINER_TEROK_SHARE_DIR
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is required")
 
-_HOST_TOOLS = ("awk", "bash", "cat", "env", "mkdir", "tee", "timeout")
+_HOST_TOOLS = ("awk", "bash", "cat", "cp", "env", "mkdir", "mv", "python3", "rm", "tee", "timeout")
 
 _HISTORY_FILENAME = "agent-history"
 _HISTORY_LABEL = "Agents previously active: "
 _BANNER_RESOURCE = resources.files("terok_executor") / "resources/scripts/terok-bash-banner.sh"
+_VIBE_ACP_RESOURCE = resources.files("terok_executor") / "resources/scripts/terok-vibe-acp"
+_VIBE_STORE = "vibe-session.d"
+_VIBE_RECORD = "vibe-session.txt"
 
 _STUB = """#!__BASH__
 printf 'ARGV:%s\\n' "$*" | tee -a "$STUB_LOG"
@@ -122,13 +126,16 @@ class Harness:
 
     def _environment(self, rc: int = 0) -> dict[str, str]:
         """Isolate shell commands from real agent binaries and the operator's home."""
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("TEROK_", "CLAUDE"))}
+        env = {
+            k: v for k, v in os.environ.items() if not k.startswith(("TEROK_", "CLAUDE", "VIBE_"))
+        }
         env.update(
             # Only selected host tools and test stubs, never real agent launchers.
             PATH=str(self.bin),
             HOME=str(self.home),
             STUB_LOG=str(self.log),
             STUB_RC=str(rc),
+            TASK_ID="test-task",
             # Satisfy the native-agent readiness guard (codex, vibe) without a
             # live vault: it only checks that this handle is non-empty.
             TEROK_PROVIDER_OPENAI_BASE_OPENAI_RESPONSES="ready",
@@ -224,6 +231,138 @@ class TestNewSession:
         assert harness.run("opencode").returncode == 0
         assert harness.run("opencode", "--terok-new-session").returncode == 0
         assert harness.calls == ["ARGV:--session abc", "ARGV:"]
+
+
+def _vibe_session(
+    store: Path,
+    session_id: str,
+    *,
+    modified: int = 1,
+    parent: str | None = None,
+    archived: bool = False,
+) -> Path:
+    """Persist a Vibe 3 root or child session in its unified storage layout."""
+    directory = store / "unified" / session_id
+    directory.mkdir(parents=True)
+    (directory / "CURRENT").write_text("saved checkpoint")
+    metadata = directory / "meta.json"
+    metadata.write_text(
+        json.dumps(
+            {
+                "session_id": session_id,
+                "parent_session_id": parent,
+                "archived_at": "archived" if archived else None,
+            }
+        )
+    )
+    os.utime(metadata, (modified, modified))
+    return metadata
+
+
+class TestVibeTaskSessions:
+    """Shared credentials never turn another task's conversation into our resume."""
+
+    @pytest.mark.parametrize("args", [(), ("--terok-timeout", "5")])
+    def test_tasks_share_config_but_resume_only_their_own_sessions(
+        self, tmp_path: Path, args: tuple[str, ...]
+    ) -> None:
+        """CLI and headless select task roots, not shared, child, or archived sessions."""
+        shared = tmp_path / "shared-vibe"
+        shared.mkdir()
+        _vibe_session(shared / "logs" / "session", "foreign", modified=100)
+        for name in ("project-a", "project-b"):
+            task = tmp_path / name
+            task.mkdir()
+            harness = Harness(task)
+            (harness.home / ".vibe").symlink_to(shared, target_is_directory=True)
+            harness.stub("vibe")
+            store = harness.terok_dir / _VIBE_STORE
+            _vibe_session(store, name)
+            _vibe_session(store, "child", parent=name, modified=200)
+            _vibe_session(store, "archived", archived=True, modified=300)
+            harness.session(_VIBE_RECORD, "foreign")
+
+            result = harness.run("vibe", *args)
+
+            assert result.returncode == 0, result.stderr
+            assert harness.calls == [f"ARGV:--resume {name}"]
+            assert f"VIBE_SESSION_LOGGING__SAVE_DIR={store}" in result.stdout
+            assert "VIBE_SESSION_LOGGING__ENABLED=true" in result.stdout
+            assert (harness.terok_dir / _VIBE_RECORD).read_text() == name
+            assert harness.history.read_text() == "vibe\n"
+
+    def test_old_shared_pointer_does_not_block_initial_prompt(self, harness: Harness) -> None:
+        """An unowned old pointer is discarded; task instructions and first prompt survive."""
+        harness.stub("vibe")
+        harness.session(_VIBE_RECORD, "foreign")
+        harness.session("initial-prompt.txt", "FIRST PROMPT")
+        harness.session("instructions.md", "TASK INSTRUCTIONS")
+        stub = harness.bin / "vibe"
+        stub.write_text(
+            stub.read_text().replace(
+                'echo "VENDOR USAGE"',
+                'cat "$HOME/.vibe/prompts/$VIBE_SYSTEM_PROMPT_ID.md"',
+            )
+        )
+        _vibe_session(harness.home / ".vibe" / "logs" / "session", "foreign")
+
+        result = harness.run("vibe")
+
+        assert result.returncode == 0, result.stderr
+        assert harness.calls == ["ARGV:FIRST PROMPT"]
+        assert "TASK INSTRUCTIONS" in result.stdout
+        assert (harness.terok_dir / "initial-prompt.consumed.txt").exists()
+        assert (harness.terok_dir / _VIBE_RECORD).read_text() == ""
+        assert harness.history.read_text() == "vibe\n"
+
+    def test_capture_on_exit_and_new_session(self, harness: Harness) -> None:
+        """A failed agent still records its saved session, and explicit fresh launch works."""
+        harness.stub("vibe")
+        stub = harness.bin / "vibe"
+        stub.write_text(
+            stub.read_text().replace(
+                'echo "VENDOR USAGE"',
+                'mkdir -p "$VIBE_SESSION_LOGGING__SAVE_DIR/unified/created"\n'
+                'printf \'{"session_id":"created"}\' > '
+                '"$VIBE_SESSION_LOGGING__SAVE_DIR/unified/created/meta.json"\n'
+                ': > "$VIBE_SESSION_LOGGING__SAVE_DIR/unified/created/CURRENT"',
+            )
+        )
+        assert harness.run("vibe", rc=7).returncode == 7
+        assert (harness.terok_dir / _VIBE_RECORD).read_text() == "created"
+        assert harness.run("vibe").returncode == 0
+        assert harness.run("vibe", "--terok-new-session").returncode == 0
+        assert harness.calls == ["ARGV:", "ARGV:--resume created", "ARGV:"]
+
+    def test_incomplete_metadata_does_not_replace_resumable_root(self, harness: Harness) -> None:
+        """Unreadable metadata and sessions without committed state cannot win selection."""
+        harness.stub("vibe")
+        store = harness.terok_dir / _VIBE_STORE
+        _vibe_session(store, "saved")
+        _vibe_session(store, "broken", modified=10).write_text("{")
+        unsaved = _vibe_session(store, "unsaved", modified=20)
+        (unsaved.parent / "CURRENT").unlink()
+        result = harness.run("vibe")
+        assert result.returncode == 0, result.stderr
+        assert harness.calls == ["ARGV:--resume saved"]
+
+    def test_acp_uses_the_same_task_private_store(self, harness: Harness) -> None:
+        """The ACP entry point exposes only the CLI task's sessions, not shared history."""
+        harness.stub("vibe-acp")
+        share = harness.home.parent / "share"
+        share.mkdir()
+        (share / "terok-acp-env.sh").write_text(":\n")
+        adapter = harness.bin / "terok-vibe-acp"
+        adapter.write_text(
+            _VIBE_ACP_RESOURCE.read_text()
+            .replace(str(CONTAINER_TEROK_SHARE_DIR), str(share))
+            .replace(str(CONTAINER_TEROK_DIR), str(harness.terok_dir))
+        )
+        adapter.chmod(0o755)
+        result = harness.run("terok-vibe-acp")
+        assert result.returncode == 0, result.stderr
+        assert f"VIBE_SESSION_LOGGING__SAVE_DIR={harness.terok_dir / _VIBE_STORE}" in result.stdout
+        assert "VIBE_SESSION_LOGGING__ENABLED=true" in result.stdout
 
 
 class TestResumeHint:

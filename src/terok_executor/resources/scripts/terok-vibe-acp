@@ -42,6 +42,10 @@ _AGENT_NAME="Vibe"
 _AGENT_EMAIL="noreply@mistral.ai"
 . /usr/local/share/terok/terok-acp-env.sh
 
+# Match the CLI wrapper's task-private store; never list another task's sessions.
+export VIBE_SESSION_LOGGING__SAVE_DIR="${HOME}/.terok/vibe-session.d"
+export VIBE_SESSION_LOGGING__ENABLED=true
+
 _TEROK_INSTR="/home/dev/.terok/instructions.md"
 _VIBE_PROMPTS_DIR="${HOME}/.vibe/prompts"
 
