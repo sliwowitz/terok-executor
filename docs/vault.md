@@ -79,7 +79,7 @@ it in different ways, depending on what their SDK supports:
 |-------|-------------------------|-------|
 | **Claude** | `ANTHROPIC_BASE_URL=http://localhost:9419` (+ `ANTHROPIC_UNIX_SOCKET` pointing at the vault socket) | Anthropic SDK respects these env vars |
 | **Codex** | Shared `~/.codex/config.toml` rewrite (`openai_base_url`, `chatgpt_base_url`) | Codex's built-in first-party auth is file/config based, so terok patches the shared Codex config instead of relying on env vars.  `openai_base_url` is keyed by stored credential type: OAuth → `{{ vault_tls_url }}/backend-api/codex`, API key → `{{ vault_url }}/v1`.  `chatgpt_base_url` is `{{ vault_tls_url }}/backend-api/` |
-| **Vibe** | `config.toml` with `api_base` (+ `api_key_env_var`) in shared `~/.vibe` mount | Mistral SDK ignores the URL path in api_base, only uses host:port. Written by the `provider.config_patch` in YAML |
+| **Vibe** | `config.toml` with `api_base`, `api_key_env_var`, and `backend = "mistral"` in shared `~/.vibe` mount | The native backend enables model catalog discovery through the vault. Written by the `provider.config_patch` in YAML |
 | **OpenCode / Pi** | Generic `TEROK_PROVIDER_<NAME>_*` variables | Terok creates a phantom token, a vault base URL, a label, and model data for each authenticated provider. The provider must support the agent protocol. Use `--provider <name>` to select the provider. Legacy aliases also keep their `TEROK_OC_<NAME>_*` settings. |
 | **gh** | `http_unix_socket` in `~/.config/gh/config.yml` | gh routes ALL API traffic through a Unix socket. See below. |
 | **glab** | `GITLAB_API_HOST` + `API_PROTOCOL=http` env vars | glab sends to `http://<api_host>/api/v4/...`; the host is `localhost:9419` in socket mode, `host.containers.internal:<port>` in TCP mode |
@@ -154,6 +154,7 @@ provider:
     toml_set:
       api_base: "{{ vault_url }}/v1"
       api_key_env_var: MISTRAL_API_KEY
+      backend: mistral
 
 # gh: YAML patch
 provider:

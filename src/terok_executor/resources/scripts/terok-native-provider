@@ -181,14 +181,21 @@ def _deliver_codex(
 def _deliver_vibe(provider: str, base_url: str, token_var: str) -> tuple[list[str], dict[str, str]]:
     """Vibe ``VIBE_PROVIDERS`` env entry re-pointing its active provider.
 
-    Vibe (pydantic-settings, ``VIBE_`` prefix) merges this JSON entry over the
-    config's providers by ``name``; ``api_key_env_var`` names the phantom-token
+    Vibe (pydantic-settings, ``VIBE_`` prefix) replaces the config's same-name
+    provider with this JSON entry; ``api_key_env_var`` names the phantom-token
     variable Vibe reads, so traffic routes through the vault.  The endpoint is
     carried by *base_url* / *token_var*; the entry keeps Vibe's active-provider
-    name.
+    name. Only Mistral uses the native backend and its model catalog; other
+    providers keep the generic OpenAI-compatible backend.
     """
-    del provider  # carried entirely by base_url / token_var
-    entry = [{"name": _VIBE_ACTIVE_PROVIDER, "api_base": base_url, "api_key_env_var": token_var}]
+    entry = [
+        {
+            "name": _VIBE_ACTIVE_PROVIDER,
+            "api_base": base_url,
+            "api_key_env_var": token_var,
+            "backend": "mistral" if provider == "mistral" else "generic",
+        }
+    ]
     return [], {"VIBE_PROVIDERS": json.dumps(entry)}
 
 

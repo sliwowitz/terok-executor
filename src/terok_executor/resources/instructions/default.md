@@ -29,6 +29,10 @@ Python 3 and Node.js are available. Use {% if family == "deb" %}`sudo apt instal
 When installed, Vibe uses a uv-managed Python 3.14 environment owned by `dev`,
 separate from system Python. Update it with `uv tool upgrade mistral-vibe`
 (without sudo), then restart Vibe to use the new version.
+Vibe's native Mistral model catalog is enabled through the vault. Disable it
+with `VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=false`; no separate model-sync
+command is needed. Custom model definitions need separate context and output
+limits (`max_context_length` and `max_output_tokens`).
 
 ## Git workflow
 

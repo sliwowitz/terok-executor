@@ -996,6 +996,8 @@ class TestSharedConfigPatches:
         # socket (socket mode) or the host's per-container TCP port (tcp mode),
         # so config patches always pin to the well-known loopback endpoint.
         assert "localhost:9419" in mistral["api_base"]
+        assert mistral["api_key_env_var"] == "MISTRAL_API_KEY"
+        assert mistral["backend"] == "mistral"
 
         codex_cfg = tomllib.loads((codex_dir / "config.toml").read_text())
         # No stored credential → falls back to the route's declared type (oauth),
@@ -1109,12 +1111,16 @@ class TestSharedConfigPatches:
                 credential_set="default",
             )
 
-    def test_patches_idempotent(self, roster, tmp_path):
-        """Calling apply_shared_config_patches twice must not duplicate entries."""
+    @pytest.mark.parametrize("backend", ["", 'backend = "generic"\n'])
+    def test_patches_idempotent(self, roster, tmp_path, backend):
+        """Existing Vibe configs gain native discovery without losing user fields."""
         from terok_executor.credentials.vault_config import apply_shared_config_patches
 
         vibe_dir = tmp_path / "_vibe-config"
         vibe_dir.mkdir()
+        (vibe_dir / "config.toml").write_text(
+            '[[providers]]\nname = "mistral"\nproject_id = "keep-me"\n' + backend
+        )
 
         with patch(
             "terok_executor.integrations.sandbox.SandboxConfig",
@@ -1132,6 +1138,9 @@ class TestSharedConfigPatches:
         providers = data.get("providers", [])
         mistral_entries = [p for p in providers if p.get("name") == "mistral"]
         assert len(mistral_entries) == 1, "idempotent: must have exactly one mistral entry"
+        assert mistral_entries[0]["backend"] == "mistral"
+        assert mistral_entries[0]["api_key_env_var"] == "MISTRAL_API_KEY"
+        assert mistral_entries[0]["project_id"] == "keep-me"
 
     def test_patches_can_be_limited_to_selected_providers(self, roster, tmp_path):
         """Provider filtering can skip Codex while still patching others."""

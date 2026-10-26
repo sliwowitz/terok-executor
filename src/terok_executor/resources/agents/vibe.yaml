@@ -55,14 +55,13 @@ provider:
     file: config.toml
     toml_table: providers
     toml_match: {name: mistral}
-    # api_key_env_var restores the MISTRAL_API_KEY binding that vibe's
-    # DEFAULT_PROVIDERS sets — the user's ``providers = [...]`` list
-    # *replaces* defaults wholesale, so if we only write ``api_base`` the
-    # provider falls back to ``api_key_env_var=""``, vibe reads no env, and
-    # sends requests without an Authorization header (vault returns 401).
+    # Vibe replaces same-name provider entries rather than merging fields.
+    # Keep the key binding for vault auth and the backend for native catalog
+    # discovery, which skips generic providers even when named "mistral".
     toml_set:
       api_base: "{{ vault_url }}/v1"
       api_key_env_var: MISTRAL_API_KEY
+      backend: mistral
 
 auth:
   host_dir: _vibe-config
@@ -74,18 +73,15 @@ install:
   run_as_root: |
     RUN set -eux; \
         cp /tmp/terok-scripts/terok-vibe-acp /usr/local/bin/terok-vibe-acp; \
-        cp /tmp/terok-scripts/vibe-model-sync.sh /usr/local/bin/vibe-model-sync; \
-        cp /tmp/terok-scripts/mistral-model-sync.py /usr/local/bin/mistral-model-sync.py; \
         cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
         chmod +x /usr/local/bin/terok-vibe-acp \
-                 /usr/local/bin/vibe-model-sync \
-                 /usr/local/bin/mistral-model-sync.py \
                  /usr/local/bin/terok-native-provider; \
         ln -sf terok-native-provider /usr/local/bin/vibe-provider
   # Vibe's updater uses uv, so dev must own its tool environment. Seed a
   # GIL-enabled interpreter: uv cannot download a +gil request directly,
   # and Vibe's dependencies do not all ship free-threaded Python wheels.
   run_as_dev: |
+    ENV VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=true
     RUN uv python install cpython-3.14 \
      && uv tool install --python cpython-3.14+gil mistral-vibe
 
