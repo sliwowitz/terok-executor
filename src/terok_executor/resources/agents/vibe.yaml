@@ -81,9 +81,13 @@ install:
                  /usr/local/bin/vibe-model-sync \
                  /usr/local/bin/mistral-model-sync.py \
                  /usr/local/bin/terok-native-provider; \
-        ln -sf terok-native-provider /usr/local/bin/vibe-provider; \
-        pipx install mistral-vibe; \
-        pipx inject mistral-vibe mistralai
+        ln -sf terok-native-provider /usr/local/bin/vibe-provider
+  # Vibe's updater uses uv, so dev must own its tool environment. Seed a
+  # GIL-enabled interpreter: uv cannot download a +gil request directly,
+  # and Vibe's dependencies do not all ship free-threaded Python wheels.
+  run_as_dev: |
+    RUN uv python install cpython-3.14 \
+     && uv tool install --python cpython-3.14+gil mistral-vibe
 
 help:
   label: '  \033[36mvibe\033[0m       - Mistral Vibe'

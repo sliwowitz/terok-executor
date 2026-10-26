@@ -13,6 +13,17 @@
 
 \* OAuth support for Claude and Codex is experimental.
 
+### Updating Vibe
+
+The Vibe roster installs `mistral-vibe` as `dev` with uv and a GIL-enabled
+Python 3.14 interpreter. System Python is unchanged. Inside a container built
+with this roster, run `uv tool upgrade mistral-vibe` without sudo, then restart
+Vibe. The bulk `sudo update-all-the-things` helper uses the same uv environment.
+
+Older containers retain their root-owned pipx installation. Rebuild the agent
+image and create a new container to adopt the uv installation. Updating a tool
+inside one container does not update the image or other containers.
+
 ### Harness-driven providers
 
 Curated OpenAI-compatible endpoints driven through the OpenCode
