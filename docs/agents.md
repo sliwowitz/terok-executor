@@ -44,6 +44,42 @@ For manual model definitions, set both `max_context_length` and
 are distinct. In Vibe 3.0.2, omitting the output cap can request all remaining
 context space as output and exceed the provider's completion-token limit.
 
+### Vibe task sessions
+
+Vibe keeps its native transcript storage: by default `~/.vibe/logs/session`,
+inside the shared Vibe mount. Custom `VIBE_HOME` and session-logging settings
+are not overridden. Mount sharing is chosen by the caller; terok defaults to
+host-wide sharing and supports project-scoped mounts via `credentials.scope`.
+
+The CLI wrapper and ACP adapter install native `pre_tool` and `post_agent`
+[hooks](https://github.com/mistralai/mistral-vibe#hooks) in Vibe's `hooks.toml`,
+preserving existing hooks and comments. Hooks
+receive the session ID from Vibe itself and write only root-session IDs to
+`/home/dev/.terok/vibe-session-id.txt`, the task-private resume pointer.
+Subagent hooks cannot replace it. The installer locks and atomically updates
+the shared hooks file, so simultaneous task launches cannot clobber it.
+
+Automatic CLI resume uses only that captured ID, never the newest shared
+transcript. `--terok-new-session` starts fresh; explicit `--resume` and
+`--continue` retain Vibe's native behavior and can select shared history.
+ACP clients control their own session selection; their root-session hooks
+also capture the pointer for a subsequent CLI launch.
+
+There is no session-start hook in Vibe 3.0.2: capture happens before a tool
+call or after a completed agent turn. If a fresh run exits before either
+hook fires, or hooks are unavailable/disabled, the wrapper warns that
+automatic resume is unavailable. It never guesses from shared history.
+Use `vibe --resume` to select a transcript manually in that case. Session
+logging must remain enabled for Vibe to persist a resumable transcript.
+
+Vibe validates checkpoint contents when resuming. A rejected resume keeps
+its error, pointer, and fresh-session hint; there is no silent fallback to
+older work. Old `vibe-session.txt` pointers came from unverified discovery
+and are ignored. Existing transcripts are neither deleted nor relocated.
+Rebuild the agent image and recreate the task container to install the hook
+helper and ACP adapter. Initial instructions, first-prompt delivery, and
+wrapper agent history remain unchanged.
+
 ### Harness-driven providers
 
 Curated OpenAI-compatible endpoints driven through the OpenCode

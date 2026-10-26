@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -58,12 +59,12 @@ class TestBundledDefault:
         """Each family sees its own package manager and never the other's."""
         text = bundled_default_instructions(family)
         assert tool in text
-        assert other_tool not in text
+        # Match package names, not the "apt" inside session "capture" guidance.
+        assert not re.search(rf"\b{other_tool}\b", text)
 
     def test_unknown_family_stays_generic(self) -> None:
         """No family → no distro-specific claims that could be untrue."""
-        assert "apt" not in DEFAULT_INSTRUCTIONS
-        assert "dnf" not in DEFAULT_INSTRUCTIONS
+        assert not re.search(r"\b(?:apt|dnf)\b", DEFAULT_INSTRUCTIONS)
         assert "package manager" in DEFAULT_INSTRUCTIONS
 
     @pytest.mark.parametrize("family", ["deb", "rpm", None])
