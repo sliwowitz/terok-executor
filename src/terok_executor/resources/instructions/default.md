@@ -33,9 +33,11 @@ Vibe's native Mistral model catalog is enabled through the vault. Disable it
 with `VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=false`; no separate model-sync
 command is needed. Custom model definitions need separate context and output
 limits (`max_context_length` and `max_output_tokens`).
-Vibe sessions are task-private under `/home/dev/.terok/vibe-session.d`;
-credentials and user settings remain shared in `~/.vibe`. The `vibe` wrapper
-resumes only a saved root session from this task, never the shared directory.
+Vibe transcripts use native storage (default `~/.vibe/logs/session` in the
+shared Vibe mount). Native hooks capture the task's root-session ID in
+`/home/dev/.terok/vibe-session-id.txt` for automatic resume. If no hook has
+captured an ID, the wrapper warns rather than guessing from shared history;
+use `vibe --resume` to choose a transcript explicitly.
 
 ## Git workflow
 

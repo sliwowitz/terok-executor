@@ -42,9 +42,12 @@ _AGENT_NAME="Vibe"
 _AGENT_EMAIL="noreply@mistral.ai"
 . /usr/local/share/terok/terok-acp-env.sh
 
-# Match the CLI wrapper's task-private store; never list another task's sessions.
-export VIBE_SESSION_LOGGING__SAVE_DIR="${HOME}/.terok/vibe-session.d"
-export VIBE_SESSION_LOGGING__ENABLED=true
+# Hooks record the root session for a later CLI restart; storage stays native.
+export TEROK_SESSION_FILE="${HOME}/.terok/vibe-session-id.txt"
+if ! python3 /usr/local/share/terok/terok-vibe-session.py install; then
+    echo "terok: Vibe session hooks unavailable; no shared-history auto-discovery." >&2
+fi
+rm -f "$TEROK_SESSION_FILE"
 
 _TEROK_INSTR="/home/dev/.terok/instructions.md"
 _VIBE_PROMPTS_DIR="${HOME}/.vibe/prompts"
@@ -92,4 +95,10 @@ _terok_trust_workspace_for_vibe /workspace
 # even on a clean shutdown.  Bash forwards SIGINT/SIGTERM to the
 # foreground child by default; vibe-acp's exit code propagates as our
 # own.
-vibe-acp "$@"
+_rc=0
+vibe-acp "$@" || _rc=$?
+if [[ ! -s "$TEROK_SESSION_FILE" ]]; then
+    echo "terok: Vibe did not capture a task session (hooks unavailable or no tool/turn completed)." >&2
+    echo "  Automatic CLI resume is unavailable; shared history is never guessed. Use vibe --resume to choose." >&2
+fi
+exit "$_rc"

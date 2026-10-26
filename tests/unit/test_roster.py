@@ -280,7 +280,7 @@ class TestDeserializeProvider:
         assert p.supports_session_resume is True
         assert p.resume_flag == "--resume"
         assert p.continue_flag == "--continue"
-        assert p.session_file == "vibe-session.txt"
+        assert p.session_file == "vibe-session-id.txt"
         assert p.model_flag == "--agent"
 
     def test_pi_uses_json_mode_for_headless(self) -> None:

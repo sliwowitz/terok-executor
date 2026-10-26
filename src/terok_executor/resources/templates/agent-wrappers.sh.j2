@@ -97,39 +97,11 @@
     fi
 {%- endif %}
 {%- if c.is_vibe and c.session_path %}
-    # Credentials/settings stay shared; session storage belongs to this task.
-    local -x VIBE_SESSION_LOGGING__SAVE_DIR="${_session_file%.txt}.d"
-    local -x VIBE_SESSION_LOGGING__ENABLED=true
-    _terok_capture_vibe_session() {
-        local _sid
-        _sid=$(python3 - "$VIBE_SESSION_LOGGING__SAVE_DIR" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-# Vibe publishes CURRENT atomically after the generation is durable. Its
-# presence identifies a saved candidate; Vibe validates the store on resume.
-# Do not silently fall back to older work when native validation fails.
-sessions = []
-for path in Path(sys.argv[1]).glob('unified/*/meta.json'):
-    try:
-        metadata = json.loads(path.read_text())
-        if (isinstance(metadata, dict)
-                and metadata.get('session_id') == path.parent.name
-                and not metadata.get('parent_session_id')
-                and not metadata.get('archived_at')
-                and (path.parent / 'CURRENT').is_file()):
-            sessions.append((path.stat().st_mtime_ns, metadata['session_id']))
-    except (OSError, ValueError):
-        continue
-if sessions:
-    print(max(sessions)[1])
-PY
-        ) || return
-        printf '%s' "$_sid" > "$_session_file"
-    }
-    # Recover after abrupt exits, and discard pointers into the old shared store.
-    _terok_capture_vibe_session || return
+    # Native hooks identify this task's session; transcript storage stays native.
+    local _vibe_hook=/usr/local/share/terok/terok-vibe-session.py
+    if ! python3 "$_vibe_hook" install; then
+        echo "terok: Vibe session hooks unavailable; no shared-history auto-discovery." >&2
+    fi
 {%- endif %}
 {%- if c.session_path and (c.resume_flag or c.resume_subcommand) %}
     local _resumed=""
@@ -155,6 +127,12 @@ PY
         fi
     fi
 {%- endif %}
+{%- if c.is_vibe and c.session_path %}
+    # A fresh/explicit launch must not leave a stale automatic-resume pointer.
+    if [ -z "$_resumed" ] && [ "${1:-}" != "--version" ]; then
+        rm -f "$_session_file"
+    fi
+{%- endif %}
 {%- if c.is_codex %}
     local _instr_args=()
     [ -f /home/dev/.terok/instructions.md ] && \
@@ -175,9 +153,6 @@ PY
             export TEROK_SESSION_FILE="$_session_file"
 {%- endif %}
         {{ c.headless_cmd }}
-{%- if c.is_vibe and c.session_path %}
-        local _rc=$?; _terok_capture_vibe_session; return $_rc
-{%- endif %}
         )
     else
         (
@@ -189,13 +164,16 @@ PY
             export TEROK_SESSION_FILE="$_session_file"
 {%- endif %}
         {{ c.interactive_cmd }}
-{%- if c.is_vibe and c.session_path %}
-        local _rc=$?; _terok_capture_vibe_session; return $_rc
-{%- endif %}
         )
     fi
 {%- if c.session_path and (c.resume_flag or c.resume_subcommand) %}
     local _rc=$?
+{%- if c.is_vibe %}
+    if [ ! -s "$_session_file" ] && [ "${1:-}" != "--version" ]; then
+        echo "terok: Vibe did not capture a task session (hooks unavailable or no tool/turn completed)." >&2
+        echo "  Automatic resume is unavailable; shared history is never guessed. Use vibe --resume to choose." >&2
+    fi
+{%- endif %}
     [ $_rc -ne 0 ] && [ $_rc -lt 124 ] && [ -n "$_resumed" ] && \
         _terok_resume_hint "$_name" "$_resumed" "$_session_file" $_rc
     return $_rc

@@ -38,7 +38,8 @@ session:
   supports_resume: true
   resume_flag: "--resume"
   continue_flag: "--continue"
-  session_file: vibe-session.txt
+  # Only hook-captured IDs: never reuse the old shared-directory discovery pointer.
+  session_file: vibe-session-id.txt
 
 capabilities:
   log_format: plain
@@ -72,6 +73,7 @@ auth:
 install:
   run_as_root: |
     RUN set -eux; \
+        cp /tmp/terok-scripts/terok-vibe-session.py /usr/local/share/terok/; \
         cp /tmp/terok-scripts/terok-vibe-acp /usr/local/bin/terok-vibe-acp; \
         cp /tmp/terok-scripts/terok-native-provider /usr/local/bin/terok-native-provider; \
         chmod +x /usr/local/bin/terok-vibe-acp \
