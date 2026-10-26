@@ -160,6 +160,54 @@ class TestGetTasksStorage:
 # ---------------------------------------------------------------------------
 
 
+class TestSharedMountStorageInfo:
+    """Mount labels are available before individual measurements begin."""
+
+    @pytest.mark.parametrize(
+        ("name", "label"),
+        [("_claude-config", "Claude"), ("_mystery-tool", "Mystery tool")],
+    )
+    def test_label_lookup_does_not_walk_directories(self, name: str, label: str):
+        """Known and fallback labels do not require a recursive directory walk."""
+        with (
+            patch("terok_executor.storage.AgentRoster.shared") as mock_roster,
+            patch.object(Path, "rglob") as walk,
+        ):
+            mock_roster.return_value.mounts = TestMountLabel.ROSTER
+            assert SharedMountStorageInfo.label_for(name) == label
+        walk.assert_not_called()
+
+    def test_measures_only_the_selected_mount(self, mounts_tree: Path):
+        """A single mount measurement excludes neighboring mount directories."""
+        with patch("terok_executor.storage.AgentRoster.shared") as mock_roster:
+            mock_roster.return_value.mounts = TestMountLabel.ROSTER
+            info = SharedMountStorageInfo.measure(mounts_tree / "_claude-config")
+        assert info == SharedMountStorageInfo("_claude-config", "Claude", 3)
+
+    def test_missing_mount_has_zero_bytes(self, tmp_path: Path):
+        """Missing mounts retain their name and label with a zero footprint."""
+        with patch("terok_executor.storage.AgentRoster.shared") as mock_roster:
+            mock_roster.return_value.mounts = ()
+            info = SharedMountStorageInfo.measure(tmp_path / "_mystery-tool")
+        assert info == SharedMountStorageInfo("_mystery-tool", "Mystery tool", 0)
+
+    def test_bulk_results_match_individual_measurements(self, mounts_tree: Path):
+        """Bulk queries use the same measurement once for every mount."""
+        with (
+            patch("terok_executor.storage.AgentRoster.shared") as mock_roster,
+            patch.object(
+                SharedMountStorageInfo, "measure", wraps=SharedMountStorageInfo.measure
+            ) as measure,
+        ):
+            mock_roster.return_value.mounts = TestMountLabel.ROSTER
+            results = SharedMountStorageInfo.measure_all(mounts_tree)
+            assert measure.call_count == 2
+            assert {call.args[0] for call in measure.call_args_list} == set(mounts_tree.iterdir())
+            assert results == [
+                SharedMountStorageInfo.measure(path) for path in sorted(mounts_tree.iterdir())
+            ]
+
+
 class TestGetSharedMountsStorage:
     """Shared mount measurement with roster label resolution."""
 

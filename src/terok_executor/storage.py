@@ -74,19 +74,29 @@ class SharedMountStorageInfo:
         if not base.is_dir():
             return []
 
-        roster_mounts = AgentRoster.shared().mounts
         return sorted(
-            (
-                cls(
-                    name=d.name,
-                    label=_mount_label(d.name, roster_mounts),
-                    bytes=_dir_bytes(d),
-                )
-                for d in base.iterdir()
-                if d.is_dir()
-            ),
+            (cls.measure(d) for d in base.iterdir() if d.is_dir()),
             key=lambda m: m.name,
         )
+
+    @classmethod
+    def measure(cls, mount_dir: Path) -> SharedMountStorageInfo:
+        """Measure one shared config mount, returning zero bytes if absent."""
+        return cls(
+            name=mount_dir.name,
+            label=cls.label_for(mount_dir.name),
+            bytes=_dir_bytes(mount_dir),
+        )
+
+    @staticmethod
+    def label_for(name: str) -> str:
+        """Describe a shared config mount without measuring its contents.
+
+        Labels come from the agent roster when available, falling back to
+        a title-cased version of the directory name.  Callers can display
+        the label before starting a potentially slow measurement.
+        """
+        return _mount_label(name, AgentRoster.shared().mounts)
 
 
 # ---------------------------------------------------------------------------
