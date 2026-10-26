@@ -212,9 +212,11 @@ agent's own subset around the agent's usage text. If a resumed agent exits with
 an error, the wrapper reports it and points to `--terok-new-session`. The
 wrapper never retries. To skip the wrapper, run `command <agent>`.
 
-Every wrapper invocation appends its command name to `~/.terok/agent-history`
-in that task, regardless of the agent's exit status. Provider aliases such as
-`blablador` record their own names. When a fresh interactive shell opens, the greeter
+Every wrapper invocation attempts to append its command name to
+`~/.terok/agent-history` in that task, regardless of the agent's exit status.
+History writes are best-effort and do not prevent agents from starting.
+Provider aliases such as `blablador` record their own names.
+When a fresh interactive shell opens, the greeter
 lists unique names after the help banner, in first-use order:
 `Agents previously active: codex, claude`. Tasks without history show no extra
 line. Reattaching an existing tmux shell does not rerun the greeter. Commands run
