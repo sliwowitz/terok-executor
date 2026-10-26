@@ -37,6 +37,7 @@ from terok_executor.container.build import (
     stage_tmux_config,
     stage_toad_agents,
 )
+from tests.constants import CONTAINER_HOME
 
 pytestmark = pytest.mark.usefixtures("fake_podman")
 
@@ -632,10 +633,23 @@ class TestTemplateRendering:
         assert 'LABEL ai.terok.agents="claude,codex"' in content
 
     def test_l1_omits_unselected_agents(self) -> None:
-        # Selecting only claude should not pull in vibe's pipx install.
         content = render_l1("terok-l0:test", family="deb", agents=("claude",))
         assert "claude.ai/install" in content
-        assert "pipx install mistral-vibe" not in content
+        assert "mistral-vibe" not in content
+
+    @pytest.mark.parametrize("family", ["deb", "rpm"])
+    def test_l1_installs_vibe_with_user_owned_uv(self, family: str) -> None:
+        """Vibe's updater must find a writable uv tool, independent of system Python."""
+        content = render_l1("terok-l0:test", family=family, agents=("vibe",))
+        python_install = "uv python install cpython-3.14"
+        vibe_install = "uv tool install --python cpython-3.14+gil mistral-vibe"
+        before_install, _, after_install = content.partition(python_install)
+        assert before_install.split("USER ")[-1].startswith("dev\n")
+        assert before_install.rsplit("ENV HOME=", 1)[-1].splitlines()[0] == str(CONTAINER_HOME)
+        assert f":{CONTAINER_HOME}/.local/bin:" in before_install
+        assert vibe_install in after_install.split("USER root")[0]
+        assert "pipx" not in content.lower()
+        assert "PIPX_" not in content
 
     def test_l1_resolves_transitive_deps(self) -> None:
         # blablador depends_on opencode → opencode install must appear.
@@ -913,6 +927,14 @@ class TestStageScripts:
         assert (dest / "setup-codex-auth.sh").is_file()
         assert (dest / "mistral-model-sync.py").is_file()
         assert (dest / "vibe-model-sync.sh").is_file()
+
+    def test_stages_vibe_updater_for_dev(self, tmp_path: Path) -> None:
+        """The root-only bulk updater targets dev's uv environment, not root's."""
+        dest = tmp_path / "scripts"
+        stage_scripts(dest)
+        updater = (dest / "update-all-the-things").read_text()
+        assert "sudo -H -u dev uv tool upgrade mistral-vibe" in updater
+        assert "pipx" not in updater
 
     def test_excludes_pycache(self, tmp_path: Path) -> None:
         dest = tmp_path / "scripts"

@@ -26,6 +26,10 @@ git, gh (GitHub CLI), glab (GitLab CLI), rg (ripgrep), fd-find, jq, yq, ast-grep
 
 Python 3 and Node.js are available. Use {% if family == "deb" %}`sudo apt install`{% elif family == "rpm" %}`sudo dnf install`{% else %}the image's package manager{% endif %} or `pip`/`npm` for anything else.
 
+When installed, Vibe uses a uv-managed Python 3.14 environment owned by `dev`,
+separate from system Python. Update it with `uv tool upgrade mistral-vibe`
+(without sudo), then restart Vibe to use the new version.
+
 ## Git workflow
 
 - Git identity is pre-configured:
