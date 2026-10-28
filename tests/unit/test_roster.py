@@ -677,6 +677,17 @@ class TestUserOverrides:
         ap = reg.get_auth_provider("mytool")
         assert ap.command == ["mytool", "auth"]
 
+    def test_user_override_with_legacy_oauth_mode_loads_as_login(self, tmp_path: Path) -> None:
+        """A user override still spelling the login mode ``oauth`` keeps loading."""
+        user_dir = tmp_path / "agents"
+        user_dir.mkdir()
+        (user_dir / "claude.yaml").write_text("auth:\n  modes: [oauth, api_key]\n")
+
+        with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
+            reg = load_roster()
+
+        assert reg.get_auth_provider("claude").modes == ("login", "api_key")
+
     def test_no_user_dir_ok(self, tmp_path: Path) -> None:
         """Missing user dir is fine — only bundled agents are loaded."""
         with patch(
@@ -716,9 +727,16 @@ class TestRegistryBehavior:
             assert ap.host_dir_name, f"{name}: empty host_dir"
             assert ap.container_mount, f"{name}: empty container_mount"
             assert ap.modes, f"{name}: no auth modes"
-            # OAuth providers must have a container command
-            if ap.supports_oauth:
-                assert ap.command, f"{name}: oauth mode but no command"
+            # Login providers must have a container command
+            if ap.supports_login:
+                assert ap.command, f"{name}: login mode but no command"
+
+    def test_vibe_login_runs_vibe_setup(self) -> None:
+        """Vibe's login is its own setup (browser sign-in); a pasted key stays the fallback."""
+        ap = load_roster().get_auth_provider("vibe")
+        assert ap.modes == ("login", "api_key")
+        assert ap.command == ["vibe"]
+        assert not ap.supports_device_auth
 
     def test_opencode_providers_have_complete_config(self) -> None:
         """Providers with opencode config have all required fields populated."""
@@ -833,7 +851,7 @@ class TestStrictValidation:
             "auth": {
                 "host_dir": "_x",
                 "container_mount": "/x",
-                "modes": ["oauth", "telepathy"],
+                "modes": ["login", "telepathy"],
             }
         }
         with pytest.raises(ValidationError, match="modes"):

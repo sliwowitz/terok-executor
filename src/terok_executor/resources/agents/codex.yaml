@@ -83,7 +83,7 @@ provider:
 auth:
   host_dir: _codex-config
   container_mount: /home/dev/.codex
-  modes: [oauth, api_key]
+  modes: [login, api_key]
   command: ["setup-codex-auth.sh"]
   banner_hint: |-
     This will set up port forwarding (using socat) and open a browser for authentication.

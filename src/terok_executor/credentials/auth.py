@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Andreas Knüpfer
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authenticates AI coding agents via OAuth or API key.
+"""Authenticates AI coding agents via the vendor's own login or an API key.
 
 Three public entry points:
 
@@ -62,7 +62,7 @@ class AuthProvider:
     """Mount point inside the container (e.g. ``"/home/dev/.codex"``)."""
 
     command: list[str]
-    """Command to execute inside the container (OAuth mode only)."""
+    """Command to execute inside the container (login mode only)."""
 
     banner_hint: str
     """Provider-specific help text shown before the container runs."""
@@ -71,13 +71,14 @@ class AuthProvider:
     """Additional ``podman run`` arguments (e.g. port forwarding)."""
 
     modes: tuple[str, ...] = ("api_key",)
-    """Supported auth modes: ``"oauth"`` (container), ``"api_key"`` (fast path)."""
+    """Supported auth modes: ``"login"`` (the vendor's own login, run in a container),
+    ``"api_key"`` (fast path)."""
 
     device_auth: bool = False
-    """Whether the OAuth flow has a headless device-code variant.
+    """Whether the vendor login has a headless device-code variant.
 
     When set, the auth prompt offers a device-code method alongside the normal
-    OAuth login: it runs ``<command> --device-auth`` with the normal flow's
+    login: it runs ``<command> --device-auth`` with the normal flow's
     port-forwarding (``extra_run_args``) dropped — the device-code flow polls a
     remote endpoint and needs no localhost callback, so it works where the
     operator can't complete the forwarded-port login."""
@@ -111,9 +112,9 @@ class AuthProvider:
             )
 
     @property
-    def supports_oauth(self) -> bool:
-        """Whether this provider supports OAuth (container-based) auth."""
-        return "oauth" in self.modes
+    def supports_login(self) -> bool:
+        """Whether this provider supports the vendor login (run in a container)."""
+        return "login" in self.modes
 
     @property
     def supports_api_key(self) -> bool:
@@ -204,7 +205,7 @@ class Authenticator:
         mounts_dir: Path,
         image: str | Callable[[], str] | None = None,
         expose_token: bool = False,
-        oauth_enabled: bool = True,
+        login_enabled: bool = True,
         credential_set: str = "default",
         device_auth: bool = False,
     ) -> None:
@@ -222,12 +223,12 @@ class Authenticator:
             mounts_dir=mounts_dir,
             image=image,
             expose_token=expose_token,
-            oauth_enabled=oauth_enabled,
+            login_enabled=login_enabled,
             credential_set=credential_set,
             device_auth=device_auth,
         )
 
-    def prepare_oauth(
+    def prepare_login(
         self,
         project_id: str | None,
         *,
@@ -240,27 +241,27 @@ class Authenticator:
         """Build an [`AuthSession`][terok_executor.AuthSession] without running it.
 
         Frontends that own their own UI loop (e.g. the terok Textual TUI,
-        which wants to dispatch the OAuth container into a new terminal
+        which wants to dispatch the login container into a new terminal
         tab or via tmux instead of inline) build the session here, run
         ``session.argv`` however they like, then call ``session.capture()``
         on success.  The CLI's blocking ``authenticate`` path is just
         another such caller — see ``_run_auth_container``.
 
         With *device_auth*, the session runs the provider's headless
-        device-code login (see [`prepare_oauth_session`][terok_executor.prepare_oauth_session]).
+        device-code login (see [`prepare_login_session`][terok_executor.prepare_login_session]).
         """
         providers, route_refresher = _load_auth_context()
         info = providers.get(self.provider)
         if not info:
             available = ", ".join(providers)
             raise SystemExit(f"Unknown auth provider: {self.provider}. Available: {available}")
-        if not info.supports_oauth:
+        if not info.supports_login:
             raise SystemExit(
-                f"Provider {self.provider!r} does not support OAuth — use store_api_key() instead."
+                f"Provider {self.provider!r} has no vendor login — use store_api_key() instead."
             )
         if device_auth and not info.supports_device_auth:
             raise SystemExit(f"Provider {self.provider!r} has no device-auth login.")
-        return _prepare_oauth_session(
+        return _prepare_login_session(
             info,
             project_id,
             mounts_dir=mounts_dir,
@@ -279,23 +280,23 @@ def authenticate(
     mounts_dir: Path,
     image: str | Callable[[], str] | None = None,
     expose_token: bool = False,
-    oauth_enabled: bool = True,
+    login_enabled: bool = True,
     credential_set: str = "default",
     device_auth: bool = False,
 ) -> None:
     """Run the auth flow for *provider*, optionally scoped to a project.
 
-    Offers every auth method the provider supports — OAuth (vendor CLI in a
-    container), the OAuth device-code variant (for providers that declare
-    ``device_auth``), and a direct API key — as the *effective* mode set: what
+    Offers every auth method the provider supports — the vendor login (the
+    vendor CLI in a container), its device-code variant (for providers that
+    declare ``device_auth``), and a direct API key — as the *effective* mode set: what
     the roster declares (``modes:``, ``device_auth``) intersected with what the
-    caller permits via *oauth_enabled*.  One method runs straight through; two or
+    caller permits via *login_enabled*.  One method runs straight through; two or
     more prompt the user to choose.
 
     Pass *device_auth* to force the device-code variant non-interactively
     (the headless ``--device-auth`` path): the menu is skipped and the
     device-code login runs straight through.  Raises ``SystemExit`` if the
-    provider has no device-code login or OAuth is gated off.
+    provider has no device-code login or the login is gated off.
 
     Args:
         project_id: Project identifier used for container naming and the
@@ -304,25 +305,25 @@ def authenticate(
             ``host-auth-<provider>`` name.
         provider: Auth provider name (e.g. ``"claude"``).
         mounts_dir: Base directory for shared config bind-mounts.
-        image: Container image for the OAuth container.  Either a tag
+        image: Container image for the login container.  Either a tag
             string (eager) or a zero-arg callable returning the tag
             (lazy — invoked only when the user actually chooses the
-            OAuth path).  ``None`` is fine for API-key-only providers,
+            login).  ``None`` is fine for API-key-only providers,
             where no container is launched.  Use the lazy form to avoid
             paying the L1 build cost when the user might pick API key
-            from the OAuth-or-API-key prompt.
+            from the login-or-API-key prompt.
         expose_token: When True, copy the real credential files into
             the shared mount instead of writing a phantom marker.  Used
             by tier 3 (``expose_oauth_token``) where containers need
             the actual token.
-        oauth_enabled: External gate for the OAuth path.  ``True``
+        login_enabled: External gate for the login.  ``True``
             (default) means the roster's ``modes`` list is honored
             verbatim.  ``False`` instructs the function to skip the
-            OAuth prompt and go straight to the API-key flow regardless
+            login and go straight to the API-key flow regardless
             of what the roster declares — terok passes ``False`` for
-            providers whose OAuth path requires unset config flags
+            providers whose login requires unset config flags
             (e.g. ``agent.codex.allow_oauth=true`` plus ``experimental:
-            true``).  When the provider declares only OAuth and the
+            true``).  When the provider declares only the login and the
             gate is closed, raises ``SystemExit`` with a clear hint.
         credential_set: Storage namespace in the vault DB.  Defaults to
             ``"default"`` — the shared host-wide bucket every standalone
@@ -341,15 +342,15 @@ def authenticate(
         available = ", ".join(providers)
         raise SystemExit(f"Unknown auth provider: {provider}. Available: {available}")
 
-    # Gating: a provider's roster may declare OAuth, but the deployment
+    # Gating: a provider's roster may declare the login, but the deployment
     # may not allow it (terok's ``allow_oauth`` + ``experimental`` gate).
-    has_oauth = info.supports_oauth and oauth_enabled
+    has_login = info.supports_login and login_enabled
     has_api_key = info.supports_api_key
 
-    # OAuth (and its device-code variant) run the vendor CLI in a container; the
-    # image is resolved lazily so the OAuth-or-API-key prompt never pays the L1
+    # The login (and its device-code variant) runs the vendor CLI in a container;
+    # the image is resolved lazily so the login-or-API-key prompt never pays the L1
     # build cost when the user picks the container-free API-key path.
-    def _oauth(*, device: bool) -> None:
+    def _login(*, device: bool) -> None:
         _run_auth_container(
             project_id,
             info,
@@ -371,21 +372,21 @@ def authenticate(
         )
 
     methods: list[tuple[str, Callable[[], None]]] = []
-    if has_oauth:
-        methods.append(("OAuth login", lambda: _oauth(device=False)))
+    if has_login:
+        methods.append(("Vendor login", lambda: _login(device=False)))
         if info.supports_device_auth:
-            # Same OAuth credential, obtained via a device code the operator
+            # Same credential, obtained via a device code the operator
             # enters on a second device instead of a forwarded callback port.
-            methods.append(("OAuth login — device code", lambda: _oauth(device=True)))
+            methods.append(("Vendor login — device code", lambda: _login(device=True)))
     if has_api_key:
         methods.append(("API key", _api_key))
 
     if device_auth:
         # Headless force: bypass the chooser and run the device-code login
-        # directly.  Reuses the OAuth gate's hint when the path is closed.
-        if not has_oauth:
+        # directly.  Reuses the login gate's hint when the path is closed.
+        if not has_login:
             raise SystemExit(
-                f"Device-code auth for {provider!r} requires OAuth, but it is "
+                f"Device-code auth for {provider!r} needs the vendor login, which is "
                 f"disabled by the caller's gating policy.  For terok this "
                 f"typically means the experimental flag and/or the "
                 f"provider-specific allow_oauth/expose_oauth_token config "
@@ -393,13 +394,13 @@ def authenticate(
             )
         if not info.supports_device_auth:
             raise SystemExit(f"Provider {provider!r} has no device-code login.")
-        _oauth(device=True)
+        _login(device=True)
         return
 
     if not methods:
-        # Provider declares only OAuth and the caller's gate is closed.
+        # Provider declares only the login and the caller's gate is closed.
         raise SystemExit(
-            f"Auth for {provider!r} requires OAuth, but it is disabled by "
+            f"Auth for {provider!r} needs the vendor login, which is disabled by "
             f"the caller's gating policy.  For terok this typically means "
             f"the experimental flag and/or the provider-specific "
             f"allow_oauth/expose_oauth_token config keys are unset."
@@ -426,13 +427,13 @@ def authenticate(
 def _resolve_image(image: str | Callable[[], str] | None, provider: str) -> str:
     """Coerce *image* — eager string, lazy callable, or ``None`` — to a tag.
 
-    ``None`` means the caller didn't supply one and the OAuth path is
+    ``None`` means the caller didn't supply one and the login is
     actually about to launch a container; that is a programming error,
     not a user-recoverable one — raise.
     """
     if image is None:
         raise ValueError(
-            f"OAuth auth for {provider!r} needs an L1 image; "
+            f"The login for {provider!r} needs an L1 image; "
             "pass image=<tag> or image=<callable returning tag>."
         )
     return image() if callable(image) else image
@@ -592,10 +593,10 @@ def _prompt_api_key(info: AuthProvider) -> str:
 
 @dataclass
 class AuthSession:
-    """A prepared-but-not-run OAuth auth container session.
+    """A prepared-but-not-run login container session.
 
-    Built by [`Authenticator.prepare_oauth`][terok_executor.credentials.auth.Authenticator.prepare_oauth]
-    (or the module-level [`prepare_oauth_session`][terok_executor.prepare_oauth_session]
+    Built by [`Authenticator.prepare_login`][terok_executor.credentials.auth.Authenticator.prepare_login]
+    (or the module-level [`prepare_login_session`][terok_executor.prepare_login_session]
     helper).  Hold-don't-call: the caller is responsible for running
     ``argv`` (synchronously, in a new terminal tab, suspended TUI, etc.)
     and calling ``capture()`` afterwards.  Use as a context manager so
@@ -695,7 +696,7 @@ class AuthSession:
         self.cleanup()
 
 
-def prepare_oauth_session(
+def prepare_login_session(
     provider: AuthProvider,
     project_id: str | None,
     *,
@@ -720,7 +721,7 @@ def prepare_oauth_session(
     polls a remote endpoint, so there is no localhost callback to forward.
     """
     _, route_refresher = _load_auth_context()
-    return _prepare_oauth_session(
+    return _prepare_login_session(
         provider,
         project_id,
         mounts_dir=mounts_dir,
@@ -732,7 +733,7 @@ def prepare_oauth_session(
     )
 
 
-def _prepare_oauth_session(
+def _prepare_login_session(
     provider: AuthProvider,
     project_id: str | None,
     *,
@@ -743,7 +744,7 @@ def _prepare_oauth_session(
     device_auth: bool,
     route_refresher: Callable[[], Path] | None,
 ) -> AuthSession:
-    """Build an OAuth session with its selected roster route publisher."""
+    """Build a login session with its selected roster route publisher."""
     _check_podman()
 
     tmpdir = tempfile.TemporaryDirectory(prefix=f"terok-auth-{provider.name}-")
@@ -806,12 +807,12 @@ def _run_auth_container(
 ) -> None:
     """Synchronous CLI helper: prepare a session, run it inline, capture.
 
-    Thin wrapper around [`prepare_oauth_session`][terok_executor.prepare_oauth_session]
+    Thin wrapper around [`prepare_login_session`][terok_executor.prepare_login_session]
     that preserves the original ``terok auth`` behaviour — print banner,
     run ``podman`` in the foreground, capture on success, swallow 130
     (Ctrl-C inside the container) without surfacing as failure.
     """
-    with _prepare_oauth_session(
+    with _prepare_login_session(
         provider,
         project_id,
         mounts_dir=mounts_dir,
@@ -823,7 +824,7 @@ def _run_auth_container(
     ) as session:
         print(session.banner)
         try:
-            # argv is built by prepare_oauth_session from the bundled roster
+            # argv is built by prepare_login_session from the bundled roster
             # command + a resolved image tag, no shell, no untrusted input;
             # the foreground run is intentional for the CLI.
             subprocess.run(session.argv, check=True)  # nosec B603

@@ -25,7 +25,7 @@ def test_run_delegates_with_bound_provider() -> None:
             mounts_dir=Path("/m"),
             image="some:tag",
             expose_token=True,
-            oauth_enabled=False,
+            login_enabled=False,
             credential_set="proj-123",
         )
     auth.assert_called_once_with(
@@ -34,7 +34,7 @@ def test_run_delegates_with_bound_provider() -> None:
         mounts_dir=Path("/m"),
         image="some:tag",
         expose_token=True,
-        oauth_enabled=False,
+        login_enabled=False,
         credential_set="proj-123",
         device_auth=False,
     )
@@ -50,7 +50,7 @@ def test_run_defaults_match_underlying_fn() -> None:
         mounts_dir=Path("/m"),
         image=None,
         expose_token=False,
-        oauth_enabled=True,
+        login_enabled=True,
         credential_set="default",
         device_auth=False,
     )
