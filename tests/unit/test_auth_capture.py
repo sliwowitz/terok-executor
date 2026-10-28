@@ -22,6 +22,7 @@ from terok_executor.credentials.auth import (
     _codex_oauth_mount_writer,
     _refresh_vault_routes,
     _write_claude_credentials_file,
+    load_auth_providers,
     store_api_key,
 )
 from tests.constants import EXAMPLE_PROVIDER_UPSTREAM
@@ -182,6 +183,25 @@ class TestCaptureCredentials:
         stored = db.load_credential("default", "blablador")
         db.close()
         assert stored["key"] == "blab-key"
+
+    def test_captures_vibe_sign_in_key(self, tmp_path: Path) -> None:
+        """Vibe's sign-in key, saved to .env with no keyring, is stored under mistral."""
+        (tmp_path / ".env").write_text("MISTRAL_API_KEY='plan-key'\n")
+
+        db_path = tmp_path / "proxy" / "credentials.db"
+        with patch("terok_executor.integrations.sandbox.SandboxConfig") as mock_cfg_cls:
+            mock_cfg_cls.return_value.db_path = db_path
+            mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
+                db_path, passphrase=TEST_VAULT_PASSPHRASE
+            )
+            _capture_credentials(
+                "vibe", tmp_path, "default", auth_provider=load_auth_providers()["vibe"]
+            )
+
+        db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
+        stored = db.load_credential("default", "mistral")
+        db.close()
+        assert stored == {"type": "api_key", "key": "plan-key"}
 
     def test_extraction_failure_prints_error(self, tmp_path: Path, capsys) -> None:
         """Failed extraction prints an error mentioning the provider."""
@@ -1014,9 +1034,9 @@ class TestStoreApiKey:
 
 
 class TestAuthenticateImageLaziness:
-    """Verify ``authenticate(image=callable)`` defers L1 build to the OAuth path.
+    """Verify ``authenticate(image=callable)`` defers L1 build to the login path.
 
-    Picking API key from the OAuth-or-API-key prompt must short-circuit
+    Picking API key from the login-or-API-key prompt must short-circuit
     before the lazy resolver fires — otherwise users who only ever use
     API keys still pay for an L1 image build they don't need.
     """
@@ -1034,7 +1054,7 @@ class TestAuthenticateImageLaziness:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
             api_key_hint="hint",
         )
         resolver = MagicMock()
@@ -1057,8 +1077,8 @@ class TestAuthenticateImageLaziness:
         assert mock_store.call_args.args == ("claude", "sk-ant-test")
         assert mock_store.call_args.kwargs["credential_set"] == "default"
 
-    def test_oauth_choice_resolves_image(self, tmp_path: Path) -> None:
-        """User picks ``1`` (OAuth) → resolver is called exactly once."""
+    def test_login_choice_resolves_image(self, tmp_path: Path) -> None:
+        """User picks ``1`` (login) → resolver is called exactly once."""
         from unittest.mock import MagicMock, patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1070,7 +1090,7 @@ class TestAuthenticateImageLaziness:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
         )
         resolver = MagicMock(return_value="terok-l1-cli:ubuntu-24.04")
         with (
@@ -1088,8 +1108,8 @@ class TestAuthenticateImageLaziness:
         # The resolved tag is what reaches _run_auth_container, not the callable.
         assert mock_run.call_args.kwargs["image"] == "terok-l1-cli:ubuntu-24.04"
 
-    def test_oauth_only_provider_resolves_image(self, tmp_path: Path) -> None:
-        """OAuth-only providers don't show the prompt — image resolves immediately."""
+    def test_login_only_provider_resolves_image(self, tmp_path: Path) -> None:
+        """Login-only providers don't show the prompt — image resolves immediately."""
         from unittest.mock import MagicMock, patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1101,7 +1121,7 @@ class TestAuthenticateImageLaziness:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth",),
+            modes=("login",),
         )
         resolver = MagicMock(return_value="terok-l1-cli:ubuntu-24.04")
         with (
@@ -1162,7 +1182,7 @@ class TestAuthenticateImageLaziness:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth",),
+            modes=("login",),
         )
         with (
             patch.dict(
@@ -1176,8 +1196,8 @@ class TestAuthenticateImageLaziness:
 
         assert mock_run.call_args.kwargs["image"] == "my-l1:tag"
 
-    def test_oauth_path_with_no_image_raises(self, tmp_path: Path) -> None:
-        """OAuth path without an image (or callable) is a programming error."""
+    def test_login_path_with_no_image_raises(self, tmp_path: Path) -> None:
+        """Login path without an image (or callable) is a programming error."""
         from unittest.mock import patch
 
         import pytest
@@ -1191,7 +1211,7 @@ class TestAuthenticateImageLaziness:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth",),
+            modes=("login",),
         )
         with patch.dict(
             "terok_executor.credentials.auth.AUTH_PROVIDERS",
@@ -1202,18 +1222,18 @@ class TestAuthenticateImageLaziness:
                 authenticate(None, "codex", mounts_dir=tmp_path, image=None)
 
 
-class TestAuthenticateOauthGate:
-    """Verify ``oauth_enabled=False`` collapses dual-mode providers to API-key.
+class TestAuthenticateLoginGate:
+    """Verify ``login_enabled=False`` collapses dual-mode providers to API-key.
 
     The roster declares which modes a provider supports; deployments
     sometimes have to clamp that down (terok's ``experimental`` +
     ``allow_oauth`` gating for Codex/Claude).  When the gate is closed,
-    the OAuth prompt must not be offered — even though the roster says
-    OAuth is supported.
+    the login must not be offered — even though the roster says
+    it is supported.
     """
 
-    def test_oauth_disabled_skips_prompt_and_goes_to_api_key(self, tmp_path: Path) -> None:
-        """Dual-mode provider with ``oauth_enabled=False`` short-circuits to API key."""
+    def test_login_disabled_skips_prompt_and_goes_to_api_key(self, tmp_path: Path) -> None:
+        """Dual-mode provider with ``login_enabled=False`` short-circuits to API key."""
         from unittest.mock import MagicMock, patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1225,9 +1245,9 @@ class TestAuthenticateOauthGate:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),  # roster says both
+            modes=("login", "api_key"),  # roster says both
         )
-        # No ``input`` patch — if the OAuth-or-API-key prompt fires the
+        # No ``input`` patch — if the login-or-API-key prompt fires the
         # test will hang (catching that regression too).
         with (
             patch.dict(
@@ -1247,15 +1267,15 @@ class TestAuthenticateOauthGate:
                 "claude",
                 mounts_dir=tmp_path,
                 image=MagicMock(),
-                oauth_enabled=False,
+                login_enabled=False,
             )
 
         assert mock_store.call_args.args == ("claude", "sk-ant-test")
         assert mock_store.call_args.kwargs["credential_set"] == "default"
         mock_run.assert_not_called()
 
-    def test_oauth_enabled_default_keeps_dual_prompt(self, tmp_path: Path) -> None:
-        """``oauth_enabled`` defaults to True so existing callers see the prompt."""
+    def test_login_enabled_default_keeps_dual_prompt(self, tmp_path: Path) -> None:
+        """``login_enabled`` defaults to True so existing callers see the prompt."""
         from unittest.mock import patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1267,7 +1287,7 @@ class TestAuthenticateOauthGate:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
         )
         with (
             patch.dict(
@@ -1283,11 +1303,11 @@ class TestAuthenticateOauthGate:
             patch("terok_executor.credentials.auth._store_api_key"),
         ):
             authenticate(None, "claude", mounts_dir=tmp_path, image="img:tag")
-        # Default ``oauth_enabled=True`` ⇒ user is asked to choose.
+        # Default ``login_enabled=True`` ⇒ user is asked to choose.
         mock_input.assert_called_once()
 
-    def test_oauth_only_provider_with_gate_closed_raises(self, tmp_path: Path) -> None:
-        """A provider that only declares OAuth raises when the gate forbids it."""
+    def test_login_only_provider_with_gate_closed_raises(self, tmp_path: Path) -> None:
+        """A provider that only declares the login raises when the gate forbids it."""
         from unittest.mock import patch
 
         import pytest
@@ -1295,26 +1315,26 @@ class TestAuthenticateOauthGate:
         from terok_executor.credentials.auth import AuthProvider, authenticate
 
         provider = AuthProvider(
-            name="some-future-oauth-only",
+            name="some-future-login-only",
             label="Future",
             host_dir_name="_future-config",
             container_mount="/home/dev/.future",
             command=["future"],
             banner_hint="",
-            modes=("oauth",),  # no api_key fallback
+            modes=("login",),  # no api_key fallback
         )
         with patch.dict(
             "terok_executor.credentials.auth.AUTH_PROVIDERS",
-            {"some-future-oauth-only": provider},
+            {"some-future-login-only": provider},
             clear=True,
         ):
-            with pytest.raises(SystemExit, match="OAuth.*disabled"):
+            with pytest.raises(SystemExit, match="vendor login.*disabled"):
                 authenticate(
                     None,
-                    "some-future-oauth-only",
+                    "some-future-login-only",
                     mounts_dir=tmp_path,
                     image="img:tag",
-                    oauth_enabled=False,
+                    login_enabled=False,
                 )
 
 
@@ -1322,7 +1342,7 @@ class TestAuthenticateOauthGate:
 def podman_free(monkeypatch: pytest.MonkeyPatch, fake_podman: Path) -> list[list[str]]:
     """Neutralise the auth module's raw podman subprocess calls.
 
-    ``prepare_oauth_session`` pre-cleans a stale auth container and
+    ``prepare_login_session`` pre-cleans a stale auth container and
     ``AuthSession.cleanup`` force-removes it on exit. Unit tests must not depend on a
     host podman (CI runners happen to ship one; dev containers don't),
     and must never reach a real one: the pre-clean would ``podman rm -f``
@@ -1349,7 +1369,7 @@ def podman_free(monkeypatch: pytest.MonkeyPatch, fake_podman: Path) -> list[list
     return calls
 
 
-class TestPrepareOauthSession:
+class TestPrepareLoginSession:
     """Verify the hold-don't-call session API the TUI dispatches against."""
 
     def _provider(self) -> object:
@@ -1362,17 +1382,17 @@ class TestPrepareOauthSession:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="Banner line one.\nBanner line two.",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
         )
 
     def test_argv_includes_provider_command_and_mount(
         self, tmp_path: Path, podman_free: list[list[str]]
     ) -> None:
         """``argv`` ends with the provider command and contains the temp-dir mount."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
-            with prepare_oauth_session(
+            with prepare_login_session(
                 self._provider(), None, mounts_dir=tmp_path, image="terok-l1:test"
             ) as session:
                 assert Path(session.argv[0]).is_absolute()
@@ -1388,10 +1408,10 @@ class TestPrepareOauthSession:
         self, tmp_path: Path, podman_free: list[list[str]]
     ) -> None:
         """Banner mentions the provider label and either the project or host-wide scope."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
-            with prepare_oauth_session(
+            with prepare_login_session(
                 self._provider(), "myproj", mounts_dir=tmp_path, image="img"
             ) as session:
                 assert "Claude" in session.title
@@ -1403,7 +1423,7 @@ class TestPrepareOauthSession:
         self, tmp_path: Path, podman_free: list[list[str]]
     ) -> None:
         """``session.capture()`` forwards to ``_capture_credentials`` with stored kwargs."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         route_refresher = MagicMock()
         context_loader = MagicMock(return_value=({}, route_refresher))
@@ -1411,7 +1431,7 @@ class TestPrepareOauthSession:
             patch("terok_executor.credentials.auth._auth_context_loader", context_loader),
             patch("terok_executor.credentials.auth._check_podman"),
         ):
-            with prepare_oauth_session(
+            with prepare_login_session(
                 self._provider(),
                 "myproj",
                 mounts_dir=tmp_path,
@@ -1444,7 +1464,7 @@ class TestPrepareOauthSession:
         with (
             patch("terok_executor.credentials.auth._auth_context_loader", context_loader),
             patch("terok_executor.credentials.auth._check_podman"),
-            Authenticator("claude").prepare_oauth(
+            Authenticator("claude").prepare_login(
                 None, mounts_dir=tmp_path, image="img"
             ) as session,
             patch("terok_executor.credentials.auth._capture_credentials") as capture,
@@ -1456,10 +1476,10 @@ class TestPrepareOauthSession:
 
     def test_cleanup_is_idempotent(self, tmp_path: Path, podman_free: list[list[str]]) -> None:
         """Calling ``cleanup`` twice does not raise; the temp dir is released once."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
-            session = prepare_oauth_session(
+            session = prepare_login_session(
                 self._provider(), None, mounts_dir=tmp_path, image="img"
             )
         session.cleanup()
@@ -1507,10 +1527,10 @@ class TestPrepareOauthSession:
         assert not auth_dir.exists()
         assert session._tmpdir is None
 
-    def test_authenticator_prepare_oauth_rejects_api_key_only_provider(
+    def test_authenticator_prepare_login_rejects_api_key_only_provider(
         self, tmp_path: Path
     ) -> None:
-        """API-key-only providers can't be prepared for OAuth — early failure."""
+        """API-key-only providers can't be prepared for a login — early failure."""
         from terok_executor.credentials.auth import Authenticator, AuthProvider
 
         api_only = AuthProvider(
@@ -1527,8 +1547,8 @@ class TestPrepareOauthSession:
             {"blablador": api_only},
             clear=True,
         ):
-            with pytest.raises(SystemExit, match="does not support OAuth"):
-                Authenticator("blablador").prepare_oauth(None, mounts_dir=tmp_path, image="img")
+            with pytest.raises(SystemExit, match="has no vendor login"):
+                Authenticator("blablador").prepare_login(None, mounts_dir=tmp_path, image="img")
 
 
 class TestDeviceAuth:
@@ -1544,7 +1564,7 @@ class TestDeviceAuth:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
             extra_run_args=("-p", "127.0.0.1:1455:1455"),
             device_auth=True,
         )
@@ -1561,10 +1581,10 @@ class TestDeviceAuth:
         self, tmp_path: Path, podman_free: list[list[str]]
     ) -> None:
         """Device-auth runs ``<command> --device-auth`` with no port forwarding."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
-            with prepare_oauth_session(
+            with prepare_login_session(
                 self._codex(), None, mounts_dir=tmp_path, image="img", device_auth=True
             ) as session:
                 assert session.argv[-2:] == ["setup-codex-auth.sh", "--device-auth"]
@@ -1574,10 +1594,10 @@ class TestDeviceAuth:
         self, tmp_path: Path, podman_free: list[list[str]]
     ) -> None:
         """Without device-auth the browser flow keeps its port-forward and command."""
-        from terok_executor.credentials.auth import prepare_oauth_session
+        from terok_executor.credentials.auth import prepare_login_session
 
         with patch("terok_executor.credentials.auth._check_podman"):
-            with prepare_oauth_session(
+            with prepare_login_session(
                 self._codex(), None, mounts_dir=tmp_path, image="img"
             ) as session:
                 assert session.argv[-1] == "setup-codex-auth.sh"
@@ -1600,8 +1620,8 @@ class TestDeviceAuth:
             authenticate(None, "codex", mounts_dir=tmp_path, image="img")
         assert mock_run.call_args.kwargs["device_auth"] is True
 
-    def test_menu_plain_oauth_choice_no_device_auth(self, tmp_path: Path) -> None:
-        """Choosing the plain OAuth method (choice 1) runs the container device_auth=False."""
+    def test_menu_plain_login_choice_no_device_auth(self, tmp_path: Path) -> None:
+        """Choosing the plain login method (choice 1) runs the container device_auth=False."""
         from terok_executor.credentials.auth import authenticate
 
         with (
@@ -1629,7 +1649,7 @@ class TestDeviceAuth:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
         )
         with (
             patch.dict(
@@ -1664,7 +1684,7 @@ class TestAuthenticateCredentialSet:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
             api_key_hint="hint",
         )
         with (
@@ -1684,8 +1704,8 @@ class TestAuthenticateCredentialSet:
         assert mock_store.call_args.args == ("claude", "sk-ant")
         assert mock_store.call_args.kwargs["credential_set"] == "my-proj"
 
-    def test_dual_mode_oauth_choice_threads_set(self, tmp_path: Path) -> None:
-        """Dual-prompt + ``1`` (OAuth) → ``_run_auth_container`` sees the set."""
+    def test_dual_mode_login_choice_threads_set(self, tmp_path: Path) -> None:
+        """Dual-prompt + ``1`` (login) → ``_run_auth_container`` sees the set."""
         from unittest.mock import patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1697,7 +1717,7 @@ class TestAuthenticateCredentialSet:
             container_mount="/home/dev/.claude",
             command=["claude"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
         )
         with (
             patch.dict(
@@ -1744,8 +1764,8 @@ class TestAuthenticateCredentialSet:
         assert mock_store.call_args.args == ("vibe", "sk-vibe")
         assert mock_store.call_args.kwargs["credential_set"] == "my-proj"
 
-    def test_oauth_only_threads_set(self, tmp_path: Path) -> None:
-        """OAuth-only provider → ``_run_auth_container`` sees the set."""
+    def test_login_only_threads_set(self, tmp_path: Path) -> None:
+        """Login-only provider → ``_run_auth_container`` sees the set."""
         from unittest.mock import patch
 
         from terok_executor.credentials.auth import AuthProvider, authenticate
@@ -1757,7 +1777,7 @@ class TestAuthenticateCredentialSet:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth",),
+            modes=("login",),
         )
         with (
             patch.dict(
@@ -1818,7 +1838,7 @@ class TestDeviceAuthForcePath:
             container_mount="/home/dev/.codex",
             command=["setup-codex-auth.sh"],
             banner_hint="",
-            modes=("oauth", "api_key"),
+            modes=("login", "api_key"),
             api_key_hint="hint",
             device_auth=device_auth,
         )
@@ -1857,8 +1877,8 @@ class TestDeviceAuthForcePath:
         ):
             authenticate(None, "codex", mounts_dir=tmp_path, image="l1:tag", device_auth=True)
 
-    def test_oauth_gated_off_raises(self, tmp_path: Path) -> None:
-        """A closed OAuth gate blocks the device-code variant too."""
+    def test_login_gated_off_raises(self, tmp_path: Path) -> None:
+        """A closed login gate blocks the device-code variant too."""
         from terok_executor.credentials.auth import authenticate
 
         with (
@@ -1867,13 +1887,13 @@ class TestDeviceAuthForcePath:
                 {"codex": self._codex()},
                 clear=True,
             ),
-            pytest.raises(SystemExit, match="requires OAuth"),
+            pytest.raises(SystemExit, match="needs the vendor login"),
         ):
             authenticate(
                 None,
                 "codex",
                 mounts_dir=tmp_path,
                 image="l1:tag",
-                oauth_enabled=False,
+                login_enabled=False,
                 device_auth=True,
             )

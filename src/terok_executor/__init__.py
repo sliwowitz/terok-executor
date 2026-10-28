@@ -88,7 +88,7 @@ if TYPE_CHECKING:
         AuthSession as AuthSession,
         credential_provider as credential_provider,
         load_auth_providers as load_auth_providers,
-        prepare_oauth_session as prepare_oauth_session,
+        prepare_login_session as prepare_login_session,
         store_api_key as store_api_key,
     )
     from .credentials.vault_commands import (
@@ -154,7 +154,7 @@ _LAZY: dict[str, str] = {
     "AuthSession": ".credentials.auth",
     "credential_provider": ".credentials.auth",
     "load_auth_providers": ".credentials.auth",
-    "prepare_oauth_session": ".credentials.auth",
+    "prepare_login_session": ".credentials.auth",
     "store_api_key": ".credentials.auth",
     # Vault credential scanning
     "scan_leaked_credentials": ".credentials.vault_commands",

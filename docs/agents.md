@@ -142,13 +142,17 @@ never references a name that won't resolve at build time.
 
 Three auth paths depending on the provider:
 
-**OAuth / interactive login** (Claude, Codex, gh) — launches a temporary
-container with the vendor CLI. After login, the OAuth token is captured
-to the host-side credential database.
+**Vendor login** (Claude, Codex, gh, Vibe) — launches a temporary
+container with the vendor CLI and runs its own login. After login, the
+credential it produced (an OAuth token, or the key Vibe's browser sign-in
+issues for your plan) is captured to the host-side credential database.
 
 ```bash
 terok-executor auth claude
 ```
+
+Vibe's browser sign-in needs no browser in the container: press `c` in
+its setup to show the sign-in URL and open it on any machine.
 
 Codex also has a headless device-code variant for hosts without a
 browser callback: `terok-executor auth codex --device-auth`.

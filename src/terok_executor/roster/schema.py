@@ -16,7 +16,7 @@ Validation guarantees:
 - **Strict keys**: every section uses ``extra="forbid"``, so a typo
   (``headles:``, ``oauth_refesh:``) fails fast with a precise error
   instead of silently falling back to defaults.
-- **Type-checked values**: ``modes`` only accepts ``oauth``/``api_key``,
+- **Type-checked values**: ``modes`` only accepts ``login``/``api_key``,
   ``credential_type`` only accepts the four known kinds, ``help.section``
   only accepts ``agent``/``dev_tool``.
 - **Required fields**: ``provider.upstream``, ``provider.auth`` (≥1 mode),
@@ -71,6 +71,17 @@ StrOrStrList = Annotated[list[str], BeforeValidator(_coerce_str_to_list)]
 
 PostCaptureState = Annotated[dict[str, dict], BeforeValidator(_coerce_none_to_empty_dict)]
 """Mapping of ``filename`` → JSON patch.  ``post_capture_state: ~`` collapses to ``{}``."""
+
+
+def _upgrade_legacy_auth_mode(v: object) -> object:
+    """Read the former spelling ``oauth`` as ``login``."""
+    return "login" if v == "oauth" else v
+
+
+AuthMode = Annotated[Literal["login", "api_key"], BeforeValidator(_upgrade_legacy_auth_mode)]
+"""``login`` runs the vendor's own login in a container; ``api_key`` prompts for a key.
+
+The former spelling ``oauth`` is read as ``login``, so older user overrides keep loading."""
 
 
 class StrictModel(BaseModel):
@@ -204,7 +215,7 @@ class RawAuthKey(StrictModel):
 
 
 class RawAuth(StrictModel):
-    """``auth:`` — credential-capture behavior (OAuth container or API-key prompt)."""
+    """``auth:`` — credential-capture behavior (vendor login container or API-key prompt)."""
 
     host_dir: str = Field(
         description="Single-segment dir under mounts_dir() (e.g. ``_codex-config``)"
@@ -212,17 +223,17 @@ class RawAuth(StrictModel):
     container_mount: str = Field(description="Mount point inside the container")
     command: list[str] | None = Field(
         default=None,
-        description="Container command for OAuth mode; derived from auth_key when absent",
+        description="Container command for the login mode; derived from auth_key when absent",
     )
     auth_key: RawAuthKey | None = None
     banner_hint: str = ""
     extra_run_args: list[str] = Field(default_factory=list)
-    modes: list[Literal["oauth", "api_key"]] = Field(
+    modes: list[AuthMode] = Field(
         default_factory=lambda: ["api_key"]  # type: ignore[arg-type]
     )
     device_auth: bool = Field(
         default=False,
-        description="OAuth flow has a headless device-code variant, offered in the auth prompt",
+        description="The login has a headless device-code variant, offered in the auth prompt",
     )
     api_key_hint: str = ""
     post_capture_state: PostCaptureState = Field(

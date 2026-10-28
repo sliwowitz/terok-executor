@@ -57,8 +57,8 @@ provider:
 auth:
   host_dir: _claude-config
   container_mount: /home/dev/.claude
-  modes: [oauth, api_key]          # oauth requires container, api_key is fast-path
-  command: ["claude"]               # only used for oauth mode
+  modes: [login, api_key]          # login runs in a container, api_key is fast-path
+  command: ["claude"]               # only used for the login mode
   banner_hint: |-
     Claude will guide you through authentication (OAuth or API key).
     After completing auth, exit Claude with /exit or Ctrl+C.

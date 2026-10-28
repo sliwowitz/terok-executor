@@ -67,8 +67,16 @@ provider:
 auth:
   host_dir: _vibe-config
   container_mount: /home/dev/.vibe
-  modes: [api_key]
-  api_key_hint: "Get your API key at: https://console.mistral.ai/api-keys"
+  # Vibe's browser sign-in polls Mistral until the operator approves, so it
+  # needs no forwarded port.  With no keyring in the container, Vibe saves the
+  # key to .env, which the vibe credential extractor reads.
+  modes: [login, api_key]
+  command: ["vibe"]
+  banner_hint: |-
+    Vibe will start its setup: choose 'Launch browser', then 'Mistral AI'.
+    No browser opens in the container: press c to show the sign-in URL and open it anywhere.
+    After 'Finished setup', exit Vibe with /exit or Ctrl+C.
+  api_key_hint: "Vibe plan key: https://chat.mistral.ai/code/extensions?focus=key (pay-as-you-go API key: https://console.mistral.ai/api-keys)"
 
 install:
   run_as_root: |

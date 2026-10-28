@@ -22,7 +22,7 @@ provider:
 auth:
   host_dir: _gh-config
   container_mount: /home/dev/.config/gh
-  modes: [oauth, api_key]
+  modes: [login, api_key]
   command: ["gh", "auth", "login"]
   banner_hint: |-
     You will be guided through GitHub authentication.

@@ -57,7 +57,7 @@ both run inside each container's supervisor, spawned on demand.
 
 ```bash
 terok-executor auth claude              # OAuth login
-terok-executor auth vibe                # interactive API key prompt
+terok-executor auth vibe                # browser sign-in or API key
 terok-executor auth gh --api-key ghp_…  # non-interactive
 ```
 
