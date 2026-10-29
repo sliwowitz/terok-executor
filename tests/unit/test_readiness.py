@@ -20,6 +20,7 @@ from types import ModuleType
 import pytest
 
 import terok_executor.resources.scripts as _scripts_pkg
+from terok_executor import CLAUDE_OAUTH_UNROUTED_ENV, CLAUDE_OAUTH_UNROUTED_ON
 from tests.constants import CONTAINER_AGENTS_MANIFEST_PATH
 
 # Container-side base URLs the env builder would emit; only the protocol
@@ -255,6 +256,24 @@ class TestAgentRollup:
         vibe = self._rollup(manifest, "vibe")
         assert vibe["usable"] is True
         assert vibe["reason"] == ""
+
+    def test_unrouted_claude_login_flag_leaves_the_views_alone(self, generator: ModuleType) -> None:
+        """terok's flag for a Claude login with no route from Claude's default
+        endpoint concerns that endpoint alone.  A selection, Claude's default
+        provider included, still routes through the vault (pinned by the
+        wrapper shell tests), and the views list what a selection can use, so
+        the pair stays ready and Claude stays usable: the shell refusal sends
+        the user to these very pairs."""
+        env = {
+            "TEROK_PROVIDER_ANTHROPIC_TOKEN": "terok-p-aaa",
+            "TEROK_PROVIDER_ANTHROPIC_BASE_ANTHROPIC_MESSAGES": f"{_LOOPBACK}/v1",
+        }
+        flagged = {**env, CLAUDE_OAUTH_UNROUTED_ENV: CLAUDE_OAUTH_UNROUTED_ON}
+        plain = generator.build_manifest(set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, env)
+        manifest = generator.build_manifest(set(AGENT_FACTS), AGENT_FACTS, AGENT_UNIVERSE, flagged)
+        assert manifest == plain
+        assert _pair(manifest, "claude", "anthropic")["ready"] is True
+        assert self._rollup(manifest, "claude")["usable"] is True
 
     def test_agent_without_protocol_is_always_usable(self, generator: ModuleType) -> None:
         """A pure frontend (toad: no protocol) has nothing to assess → bright."""

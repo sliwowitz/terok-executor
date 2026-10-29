@@ -232,7 +232,66 @@
 {%- endif %}
 {%- endmacro -%}
 
+{%- macro claude_ready_helper(c) -%}
+# Claude's pre-flight against its default provider ({{ c.default_provider }}), rendered
+# per task from the roster binding.  claude() calls it whenever no selected
+# provider routes the launch, and the ACP launcher (terok-claude-acp) sources
+# these wrappers to call it too, so both entry points check the same handle,
+# including a default that a user agent override re-binds.  Without the handle
+# Claude starts credential-less and falls into its first-run login, which the
+# egress firewall refuses (the provider's hosts are reserved for the vault): a
+# bare ConnectionRefused with no hint.  The handle belongs to the startup
+# snapshot the `hilfe` / `providers` views read.  The routing flag checked next
+# is not part of those views: they list the pairs a selection can use, and a
+# selection routes claude through the vault whatever the flag says.
+# A non-empty $1 says the caller honours --provider: claude() passes
+# "selectable"; the ACP launcher, which honours no selection, passes nothing.
+_terok_claude_ready() {
+    local _eff={{ c.default_provider | shquote }}
+    local _handle="TEROK_PROVIDER_${_eff^^}_BASE_{{ c.provider_protocol_var }}"
+    if [ -z "${!_handle:-}" ]; then
+        echo "terok: claude has no authenticated {{ c.provider_protocol }} provider ('${_eff}')." >&2
+        echo "  Authenticate one on the host:  terok auth {{ c.name }}" >&2
+        echo "  (In-container login is blocked by the egress firewall.)" >&2
+        echo "  Ready pairs in this container: providers" >&2
+        echo "  (Authenticating on the host after this task started needs a fresh task to take effect.)" >&2
+        return 1
+    fi
+    _terok_claude_routed "$_eff" "${1:-}"
+}
+
+# A handle proves a stored login, not a route from claude's default endpoint.
+# When the vault holds a Claude OAuth login that terok neither routes to claude
+# nor exposes to it (OAuth routing off), terok removes claude's own route to
+# the provider but keeps the handle for the task's other agents, which reach
+# the provider through the vault, and sets {{ c.oauth_unrouted_env }}={{ c.oauth_unrouted_on }}.
+# claude on its default endpoint would go straight to the provider's hosts:
+# the same firewall refusal, the same bare ConnectionRefused.  A selection never
+# comes here: claude() sends it through the selected provider's vault handle,
+# claude's default provider included.  Only claude's entry points read the
+# flag.  $1 names the provider; a non-empty $2 says a selection is open to the
+# caller, so the refusal names that way round, which works in this very task.
+_terok_claude_routed() {
+    local _flag={{ c.oauth_unrouted_env | shquote }}
+    [ "${!_flag:-}" = {{ c.oauth_unrouted_on | shquote }} ] || return 0
+    echo "terok: claude cannot use the Claude login stored for its provider ('$1') on its default endpoint." >&2
+    echo "  It is an OAuth login, and OAuth routing is off in this configuration, so claude" >&2
+    echo "  would go straight to the provider's hosts, which the egress firewall reserves for the vault." >&2
+    echo "  Store an API key on the host instead:  terok auth {{ c.name }}" >&2
+    echo "  Or turn OAuth routing on in terok's config.yml:  experimental: true, agent.{{ c.name }}.allow_oauth: true" >&2
+    if [ -n "${2:-}" ]; then
+        echo "  Or route this launch through the vault:  claude --provider NAME  (ready pairs: providers)" >&2
+    fi
+    echo "  (A change on the host needs a fresh task to take effect.)" >&2
+    return 1
+}
+{%- endmacro -%}
+
 {%- macro claude_wrapper(c) -%}
+{%- if c.readiness_guard -%}
+{{ claude_ready_helper(c) }}
+
+{% endif -%}
 claude() {
     _terok_record_agent claude
 {%- if c.refuse_pattern %}
@@ -245,13 +304,13 @@ claude() {
 {%- endif %}
     local _timeout="" _new_session=""
     # Default to the container-selected provider; an explicit --provider overrides.
-    local _provider="${TEROK_PROVIDER:-}"
+    local _provider="${TEROK_PROVIDER:-}" _provider_from=TEROK_PROVIDER
     # Extract terok-specific flags (must come before claude flags)
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --terok-timeout) _timeout="$2"; shift 2 ;;
             --terok-new-session) _new_session=1; shift ;;
-            --provider) _provider="$2"; shift 2 ;;
+            --provider) _provider="$2"; _provider_from=--provider; shift 2 ;;
             *) break ;;
         esac
     done
@@ -260,7 +319,9 @@ claude() {
     esac
     # Resolve a selected provider to its vault-materialized endpoint.  Claude
     # honors it as plain environment (base URL + bearer); the vault routes on
-    # the token.  An unserved protocol leaves Claude on its default endpoint.
+    # the token.  A provider that is authenticated but does not serve
+    # {{ c.provider_protocol }} (one selected for another harness) leaves Claude
+    # on its default endpoint.
     local _prov_base="" _prov_token=""
     if [ -n "$_provider" ]; then
         local _pu="${_provider^^}"
@@ -268,9 +329,43 @@ claude() {
         local _tvar="TEROK_PROVIDER_${_pu}_TOKEN"
         _prov_base="${!_bvar:-}"
         _prov_token="${!_tvar:-}"
+{%- if c.readiness_guard %}
+        # Pre-flight (selection): like the generic wrapper, refuse a selected
+        # provider this task holds no credential for.  The startup snapshot
+        # `providers` reads has a token for every provider authenticated in
+        # this task; a selection without one is refused, never swapped for the
+        # default: that would send the session to a provider nobody picked.
+        if [ -z "$_prov_token" ]; then
+            local _auth="${_provider,,}"
+{%- if c.auth_entries %}
+            case "$_auth" in
+{%- for provider, entry in c.auth_entries %}
+                {{ provider | shquote }}) _auth={{ entry | shquote }} ;;
+{%- endfor %}
+            esac
+{%- endif %}
+            echo "terok: claude's provider '$_provider' (from $_provider_from) is not authenticated in this task." >&2
+            echo "  Authenticate it on the host:  terok auth $_auth" >&2
+            echo "  (In-container login is blocked by the egress firewall.)" >&2
+            echo "  Or pick a ready provider:  claude --provider NAME  (ready pairs: providers)" >&2
+            echo "  (Authenticating on the host after this task started needs a fresh task to take effect.)" >&2
+            return 1
+        fi
+{%- endif %}
         [ -z "$_prov_base" ] && \
             echo "terok: provider '$_provider' does not serve {{ c.provider_protocol }}; using claude's default endpoint." >&2
     fi
+{%- if c.readiness_guard %}
+    # Pre-flight (default): with no selected provider routing it, claude runs on
+    # its default endpoint, whose credential and route the shared check
+    # requires.  A routing selection skips it, claude's default provider named
+    # by hand included: the export below sends claude through that provider's
+    # vault handle, so terok's flag for a login with no route from the default
+    # endpoint does not apply to it.
+    if [ -z "$_prov_base" ]; then
+        _terok_claude_ready selectable || return 1
+    fi
+{%- endif %}
     local _args=()
     [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
         . /usr/local/share/terok/terok-env-git-identity.sh

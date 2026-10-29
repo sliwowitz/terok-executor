@@ -116,6 +116,10 @@ if TYPE_CHECKING:
         get_agent as get_agent,
         resolve_agent_value as resolve_agent_value,
     )
+    from .provider.wrappers import (
+        CLAUDE_OAUTH_UNROUTED_ENV as CLAUDE_OAUTH_UNROUTED_ENV,
+        CLAUDE_OAUTH_UNROUTED_ON as CLAUDE_OAUTH_UNROUTED_ON,
+    )
     from .roster import (
         AgentRoster as AgentRoster,
         EgressProjection as EgressProjection,
@@ -145,6 +149,9 @@ _LAZY: dict[str, str] = {
     # Agent config preparation
     "AgentConfigSpec": ".provider.agents",
     "prepare_agent_config_dir": ".provider.agents",
+    # In-container wrapper contract (env vars the host sets for the wrappers)
+    "CLAUDE_OAUTH_UNROUTED_ENV": ".provider.wrappers",
+    "CLAUDE_OAUTH_UNROUTED_ON": ".provider.wrappers",
     # Instructions
     "bundled_default_instructions": ".provider.instructions",
     "resolve_instructions": ".provider.instructions",
@@ -199,14 +206,17 @@ _LAZY: dict[str, str] = {
 }
 
 #: Names that must resolve *without* triggering the roster bootstrap: the ACP
-#: queries read a Unix socket / credential DB, while the config-path accessor
-#: only applies XDG resolution.  None needs the agent registry.
+#: queries read a Unix socket / credential DB, the config-path accessor only
+#: applies XDG resolution, and the wrapper env var's name and value are plain
+#: strings.  None needs the agent registry.
 _BOOTSTRAP_FREE = frozenset(
     {
         "ACPEndpointStatus",
         "acp_socket_is_live",
         "list_authenticated_agents",
         "providers_config_dir",
+        "CLAUDE_OAUTH_UNROUTED_ENV",
+        "CLAUDE_OAUTH_UNROUTED_ON",
     }
 )
 

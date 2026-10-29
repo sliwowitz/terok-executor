@@ -283,6 +283,56 @@ agent's own subset around the agent's usage text. If a resumed agent exits with
 an error, the wrapper reports it and points to `--terok-new-session`. The
 wrapper never retries. To skip the wrapper, run `command <agent>`.
 
+Before launch, the `claude`, `codex` and `vibe` wrappers check that the task
+holds a credential for the provider the agent will use. They read the same
+snapshot as `providers`, taken when the task started. Claude's check on its
+default endpoint also reads one flag that terok sets, described below; the
+readiness views do not. Without a credential, the wrapper stops and names the
+command to run on the host, for example `terok auth claude`. Do not log in
+inside the task: the egress firewall reserves the provider's hosts for the
+vault. A login on the host takes effect in a new task. `--help` works without a
+credential.
+
+Claude refuses a selected provider (`--provider`, or the task's
+`TEROK_PROVIDER`) that has no credential in the task. It does not switch to its
+default provider instead, because that would send the session to a provider
+nobody selected. A selected provider that has a credential but does not speak
+Claude's protocol, for example one selected for OpenCode, leaves Claude on its
+default provider. The check then covers that default. The Claude ACP launcher,
+`terok-claude-acp`, runs the default-provider check from the task's wrappers,
+so Toad and terok's ACP proxy cannot start Claude without a credential. If a
+user agent override re-binds Claude's default provider, both paths check the
+new default.
+
+A stored credential does not always give Claude's default endpoint a route.
+The vault can hold a Claude OAuth login that terok's configuration neither
+routes to Claude nor exposes to it. Routing needs `experimental: true` and
+`agent.claude.allow_oauth: true` in terok's `config.yml`; exposure needs
+`experimental: true` and `agent.claude.expose_oauth_token: true`. With neither,
+terok removes Claude's own route to Anthropic but keeps the login's provider
+handle, because other agents, such as OpenCode and Pi, still reach Anthropic
+through the vault with it. A bare `claude` would go straight to Anthropic's
+hosts and meet the egress firewall. So terok also sets
+`TEROK_CLAUDE_OAUTH_UNROUTED=1` in the task, in that case only. It never sets
+the variable while routing is on or the login is exposed, because Claude's
+default endpoint then works. With that value, both Claude entry points refuse
+a launch on the default endpoint up front. The refusal names the cause and the
+remedies: store an API key with `terok auth claude`, or turn OAuth routing on,
+then start a new task.
+
+A selected provider that has a credential and speaks Claude's protocol still
+routes the shell wrapper through the vault. This includes Claude's default
+provider: `claude --provider anthropic` reaches Anthropic through its vault
+handle, as `claude --provider openrouter` reaches OpenRouter with a credential
+of its own. The shell refusal names this way round, which works in the same
+task. The ACP launcher honours no selection, so it refuses whenever the flag is
+on. Only Claude's entry points read the variable, and any value other than `1`
+leaves them unchanged. `providers` and `hilfe` do not read it: they list the
+pairs that a selection can use, so they keep showing Claude and its default
+provider as ready. terok takes the name and the value from
+`terok_executor.CLAUDE_OAUTH_UNROUTED_ENV` and
+`terok_executor.CLAUDE_OAUTH_UNROUTED_ON` rather than spelling them.
+
 Every wrapper invocation attempts to append its command name to
 `~/.terok/agent-history` in that task, regardless of the agent's exit status.
 History writes are best-effort and do not prevent agents from starting.
