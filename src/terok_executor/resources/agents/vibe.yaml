@@ -68,7 +68,7 @@ auth:
   host_dir: _vibe-config
   container_mount: /home/dev/.vibe
   # Vibe's browser sign-in polls Mistral until the operator approves, so it
-  # needs no forwarded port.  With no keyring in the container, Vibe saves the
+  # needs no forwarded port.  With no desktop keyring in the container, Vibe saves the
   # key to .env, which the vibe credential extractor reads.
   modes: [login, api_key]
   command: ["vibe"]
