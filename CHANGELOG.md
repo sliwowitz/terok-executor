@@ -6,6 +6,7 @@
 - Own executor setup receipts and compose readiness checks downward.
 - Resolve host tools from the current launch environment.
 - Serialize setup and uninstall with the other packages.
+- Remove `image.user_snippet_inline` and `image.user_snippet_file` from the `config.yml` schema; a Dockerfile snippet is set per project.
 
 ## v0.5.0 — At Your Service
 
