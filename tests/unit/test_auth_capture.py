@@ -185,7 +185,7 @@ class TestCaptureCredentials:
         assert stored["key"] == "blab-key"
 
     def test_captures_vibe_sign_in_key(self, tmp_path: Path) -> None:
-        """Vibe's sign-in key, saved to .env with no keyring, is stored under mistral."""
+        """Vibe's sign-in key, saved to .env with no desktop keyring, is stored under mistral."""
         (tmp_path / ".env").write_text("MISTRAL_API_KEY='plan-key'\n")
 
         db_path = tmp_path / "proxy" / "credentials.db"
