@@ -173,7 +173,7 @@ async def _run(
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, _request_stop)
-        except NotImplementedError:  # pragma: no cover — non-POSIX
+        except NotImplementedError:  # pragma: no cover - non-POSIX
             pass
 
     supervisor = asyncio.create_task(
@@ -259,5 +259,5 @@ async def _watch_container(
             continue
 
 
-if __name__ == "__main__":  # pragma: no cover — module entry point
+if __name__ == "__main__":  # pragma: no cover - module entry point
     sys.exit(main())

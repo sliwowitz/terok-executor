@@ -73,7 +73,7 @@ from .helpers import exec_in, podman, podman_rm, unique_container_name
 pytestmark = [pytest.mark.needs_podman, podman_missing, hooks_missing]
 
 PROVIDER = "openai"  # codex's vault route key (codex.yaml provider.default: openai)
-REAL_SECRET = "sk-integration-codex-not-for-the-container"  # nosec B105 — fixture value
+REAL_SECRET = "sk-integration-codex-not-for-the-container"  # nosec B105 - fixture value
 CREDENTIAL_SET = "default"
 CREDENTIAL_SCOPE = "integration-scope"
 _CODEX_IMAGE = "terok-executor-itest-codex:latest"
@@ -124,7 +124,7 @@ class _TrappingVault:
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._start())
-        except Exception as exc:  # noqa: BLE001 — surfaced to __enter__, not lost as a timeout
+        except Exception as exc:  # noqa: BLE001 - surfaced to __enter__; not lost as a timeout
             self._startup_error = exc
             self._loop.run_until_complete(self._cleanup())
             self._loop.close()
@@ -184,7 +184,7 @@ class _TrappingVault:
         self._runners.append(broker_runner)
         broker_site = web.UnixSite(broker_runner, path=str(self._socket_path))
         await broker_site.start()
-        os.chmod(self._socket_path, 0o666)  # noqa: S103 — per-test tmp socket, container peer UID
+        os.chmod(self._socket_path, 0o666)  # noqa: S103 - per-test tmp socket; container peer UID
 
     async def _cleanup(self) -> None:
         for runner in self._runners:

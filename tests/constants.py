@@ -119,7 +119,7 @@ A ``touch()`` without an explicit mode inherits the umask, so a 0022 umask
 masks the bug: only an all-permissive umask falsifies the claim that the
 0600 comes from executor rather than from the process environment."""
 
-INTEGRATION_VAULT_PASSPHRASE = "integration-test-passphrase"  # nosec: B105 — fixture key
+INTEGRATION_VAULT_PASSPHRASE = "integration-test-passphrase"  # nosec: B105 - fixture key
 """Passphrase for the throwaway SQLCipher vault each integration test seeds."""
 
 PODMAN_COMMAND_TIMEOUT = 60

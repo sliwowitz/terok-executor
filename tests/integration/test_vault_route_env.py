@@ -33,7 +33,7 @@ pytestmark = [pytest.mark.needs_podman, podman_missing, hooks_missing]
 PROVIDER = "anthropic"
 """The provider under test — claude's default, and the roster's richest route."""
 
-REAL_SECRET = "sk-integration-not-for-the-container"  # nosec B105 — fixture, not a real key
+REAL_SECRET = "sk-integration-not-for-the-container"  # nosec B105 - fixture, not a real key
 """The credential stored in the vault.  It must never appear in a container."""
 
 CREDENTIAL_SCOPE = "integration-scope"

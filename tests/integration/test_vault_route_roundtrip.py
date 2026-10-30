@@ -45,7 +45,7 @@ pytestmark = [pytest.mark.needs_podman, podman_missing, hooks_missing]
 PROVIDER = "anthropic"
 """claude's default route — the roster's richest, matching test_vault_route_env."""
 
-REAL_SECRET = "sk-integration-roundtrip-not-for-the-container"  # nosec B105 — fixture value
+REAL_SECRET = "sk-integration-roundtrip-not-for-the-container"  # nosec B105 - fixture value
 CREDENTIAL_SCOPE = "integration-scope"
 CREDENTIAL_SET = "default"
 TASK_ID = "vault-roundtrip"

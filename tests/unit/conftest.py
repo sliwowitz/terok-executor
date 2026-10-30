@@ -33,7 +33,7 @@ from unittest.mock import patch
 
 import pytest
 
-TEST_VAULT_PASSPHRASE = "unit-test-passphrase"  # nosec: B105 — fixture, not a real secret
+TEST_VAULT_PASSPHRASE = "unit-test-passphrase"  # nosec: B105 - fixture, not a real secret
 """Passphrase used everywhere a unit test seeds or opens the vault DB."""
 
 

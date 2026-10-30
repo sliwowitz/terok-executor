@@ -59,7 +59,7 @@ if TYPE_CHECKING:
         acp_socket_is_live as acp_socket_is_live,
         list_authenticated_agents as list_authenticated_agents,
     )
-    from .commands import COMMANDS as AGENT_COMMANDS  # noqa: F401 — renamed re-export
+    from .commands import COMMANDS as AGENT_COMMANDS  # noqa: F401 - renamed re-export
     from .config_schema import (
         ExecutorConfigView as ExecutorConfigView,
         RawImageSection as RawImageSection,
@@ -235,7 +235,7 @@ def _bootstrap_roster() -> None:
     ``roster → auth/providers → roster`` import cycle. The leaf modules do not
     depend on the roster.
     """
-    global AGENT_NAMES  # noqa: PLW0603 — tuple requires rebind
+    global AGENT_NAMES  # noqa: PLW0603 - tuple requires rebind
 
     import terok_executor.provider.providers as _reg
     from terok_executor.credentials.auth import (

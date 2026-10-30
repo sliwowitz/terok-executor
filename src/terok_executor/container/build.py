@@ -1232,7 +1232,7 @@ def _base_tag(base_image: str) -> str:
 @lru_cache(maxsize=1)
 def _jinja_env() -> Environment:
     """Shared stateless Jinja2 environment for all Dockerfile rendering."""
-    return Environment(  # nosec B701 — Dockerfile output, not HTML
+    return Environment(  # nosec B701 - Dockerfile output, not HTML
         loader=BaseLoader(), keep_trailing_newline=True, autoescape=False
     )
 

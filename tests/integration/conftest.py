@@ -80,11 +80,11 @@ def _hooks_available() -> bool:
     """
     try:
         from terok_shield.podman_info import has_global_hooks
-    except ImportError:  # pragma: no cover — shield always ships with sandbox
+    except ImportError:  # pragma: no cover - shield always ships with sandbox
         return False
     try:
         return bool(has_global_hooks())
-    except Exception:  # pragma: no cover — defensive; a probe never fails a run
+    except Exception:  # pragma: no cover - defensive; a probe never fails a run
         return False
 
 

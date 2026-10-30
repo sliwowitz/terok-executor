@@ -79,10 +79,10 @@ can be flattened to plain text before being wrapped in a single dim span."""
 MANIFEST_PATH = Path("/home/dev/.terok/agents.json")
 """Where the readiness manifest is written for agents and the operator to read."""
 
-_TOKEN_PREFIX = "TEROK_PROVIDER_"  # nosec B105 — env-var name fragment, not a secret
+_TOKEN_PREFIX = "TEROK_PROVIDER_"  # nosec B105 - env-var name fragment, not a secret
 """Env-var prefix shared by every per-provider token and base-URL variable."""
 
-_TOKEN_SUFFIX = "_TOKEN"  # nosec B105 — env-var name fragment, not a secret
+_TOKEN_SUFFIX = "_TOKEN"  # nosec B105 - env-var name fragment, not a secret
 """Env-var suffix that marks a provider's phantom-token variable."""
 
 _BASE_MARKER = "_BASE_"
@@ -398,6 +398,6 @@ if __name__ == "__main__":
     # reported and swallowed — the command always exits 0.
     try:
         main(sys.argv)
-    except Exception as exc:  # noqa: BLE001 — advisory metadata must not abort init
+    except Exception as exc:  # noqa: BLE001 - advisory metadata must not abort init
         print(f"terok-agents: could not write readiness manifest: {exc}", file=sys.stderr)
     sys.exit(0)
