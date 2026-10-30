@@ -416,7 +416,7 @@ def _seed_prefix(agent: Agent) -> str:
 @lru_cache(maxsize=1)
 def _env() -> Environment:
     """Shared Jinja environment with a shell-quote filter (shell output, not HTML)."""
-    env = Environment(  # nosec B701 — shell output, not HTML
+    env = Environment(  # nosec B701 - shell output, not HTML
         loader=BaseLoader(), keep_trailing_newline=True, autoescape=False
     )
     env.filters["shquote"] = shlex.quote

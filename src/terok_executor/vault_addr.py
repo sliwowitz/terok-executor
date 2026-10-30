@@ -28,7 +28,7 @@ from terok_executor.integrations.sandbox import CONTAINER_VAULT_SOCKET as _CONTA
 CONTAINER_VAULT_SOCKET = _CONTAINER_VAULT_SOCKET
 """Host vault socket as seen inside the container (socket mode only)."""
 
-LOOPBACK_BRIDGE_SOCKET = "/tmp/terok-vault.sock"  # nosec B108 — container-only path
+LOOPBACK_BRIDGE_SOCKET = "/tmp/terok-vault.sock"  # nosec B108 - container-only path
 """Local socat-created socket that fronts the broker in TCP mode."""
 
 LOOPBACK_VAULT_PORT = 9419
@@ -46,7 +46,7 @@ LOOPBACK_VAULT_TLS_PORT = 9420
 VAULT_TLS_PORT_ENV = "TEROK_VAULT_TLS_PORT"
 """Env var name the bridge script reads to find the TLS port."""
 
-VAULT_TLS_CERT = "/tmp/.terok/vault-tls/cert.pem"  # nosec B108 — container-only path
+VAULT_TLS_CERT = "/tmp/.terok/vault-tls/cert.pem"  # nosec B108 - container-only path
 """The TLS bridge's self-signed certificate, made in the container by the bridge script.
 
 A client that should trust the TLS bridge is pointed at this file; nothing else trusts it.

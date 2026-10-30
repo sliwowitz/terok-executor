@@ -111,7 +111,7 @@ def bundled_default_instructions(family: str | None = None) -> str:
     from jinja2 import BaseLoader, Environment
 
     ref = importlib.resources.files("terok_executor.resources.instructions").joinpath("default.md")
-    env = Environment(  # nosec B701 — Markdown output, not HTML
+    env = Environment(  # nosec B701 - Markdown output, not HTML
         loader=BaseLoader(),
         trim_blocks=True,
         lstrip_blocks=True,

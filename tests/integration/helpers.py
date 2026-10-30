@@ -16,7 +16,7 @@ hold throughout, and callers must not break them:
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 — driving the real podman CLI is the point
+import subprocess  # nosec B404 - driving the real podman CLI is the point
 import uuid
 
 from tests.constants import PODMAN_COMMAND_TIMEOUT, PODMAN_CONTAINER_PREFIX
@@ -29,7 +29,7 @@ def unique_container_name(slug: str) -> str:
 
 def podman(*args: str, timeout: int = PODMAN_COMMAND_TIMEOUT) -> subprocess.CompletedProcess[str]:
     """Run ``podman *args`` and return the completed process (never raises on exit code)."""
-    return subprocess.run(  # nosec B603 B607 — fixed binary, test-controlled args
+    return subprocess.run(  # nosec B603 B607 - fixed binary, test-controlled args
         ["podman", *args],
         capture_output=True,
         text=True,
@@ -57,7 +57,7 @@ def podman_rm(name: str) -> None:
     """
     try:
         podman("rm", "-f", "-t", "0", name)
-    except (subprocess.TimeoutExpired, OSError):  # pragma: no cover — cleanup fallback
+    except (subprocess.TimeoutExpired, OSError):  # pragma: no cover - cleanup fallback
         pass
 
 

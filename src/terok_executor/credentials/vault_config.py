@@ -382,7 +382,7 @@ def _patch_env() -> Environment:
     """Jinja environment for patch values; an unknown name is an error, never empty text."""
     from jinja2 import Environment, StrictUndefined
 
-    return Environment(undefined=StrictUndefined, autoescape=False)  # nosec B701 — config values, not HTML
+    return Environment(undefined=StrictUndefined, autoescape=False)  # nosec B701 - config values, not HTML
 
 
 def _substitute(value: object, location: VaultLocation) -> object:

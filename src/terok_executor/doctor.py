@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # Constants
 # ---------------------------------------------------------------------------
 
-_BRIDGE_PIDDIR = "/tmp/.terok"  # nosec B108 — matches ensure-bridges.sh in-container paths
+_BRIDGE_PIDDIR = "/tmp/.terok"  # nosec B108 - matches ensure-bridges.sh in-container paths
 _SSH_AGENT_PIDFILE = f"{_BRIDGE_PIDDIR}/ssh-agent.pid"
 _SSH_AGENT_SOCKET = "/tmp/ssh-agent.sock"  # nosec B108
 _VAULT_LOOPBACK_PIDFILE = f"{_BRIDGE_PIDDIR}/vault-loopback.pid"

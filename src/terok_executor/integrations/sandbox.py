@@ -35,7 +35,7 @@ terok-clearance the same way) and terok-main (where the same pattern
 lives at ``terok.lib.integrations.*``).
 """
 
-from terok_sandbox import (  # noqa: F401 — re-exported public API
+from terok_sandbox import (  # noqa: F401 - re-exported public API
     CODEX_SHARED_OAUTH_MARKER,
     CONTAINER_GATE_SOCKET,
     CONTAINER_RUNTIME_DIR,
@@ -76,12 +76,12 @@ from terok_sandbox import (  # noqa: F401 — re-exported public API
     write_sidecar,
     yaml_update_section,
 )
-from terok_sandbox.commands import (  # noqa: F401 — re-exported public API
+from terok_sandbox.commands import (  # noqa: F401 - re-exported public API
     COMMANDS,
     _handle_sandbox_setup,
     _handle_sandbox_uninstall,
 )
-from terok_sandbox.doctor import CheckVerdict, DoctorCheck  # noqa: F401 — re-exported public API
+from terok_sandbox.doctor import CheckVerdict, DoctorCheck  # noqa: F401 - re-exported public API
 
 #: Public surface of the adapter.  Underscore-prefixed handler symbols
 #: (``_handle_sandbox_setup`` / ``_handle_sandbox_uninstall``) stay

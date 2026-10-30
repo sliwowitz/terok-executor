@@ -84,7 +84,7 @@ class RawClaudeOauthBlock(_VendorFile):
     a vendor-side shape we never look at.
     """
 
-    accessToken: str = ""  # noqa: N815 — vendor uses camelCase
+    accessToken: str = ""  # noqa: N815 - vendor uses camelCase
     refreshToken: str = ""  # noqa: N815
     expiresAt: JsTimestamp = None  # noqa: N815
     scopes: Any = ""
@@ -127,7 +127,7 @@ class RawCodexAuthFile(_VendorFile):
     """
 
     tokens: RawCodexTokensBlock | None = None
-    OPENAI_API_KEY: str | None = None  # noqa: N815 — vendor's literal key name
+    OPENAI_API_KEY: str | None = None  # noqa: N815 - vendor's literal key name
 
 
 # ── Generic API-key JSON ──────────────────────────────────────────────────
