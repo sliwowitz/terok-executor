@@ -43,6 +43,7 @@ from terok_sandbox import (  # noqa: F401 - re-exported public API
     CONTAINER_VAULT_SOCKET,
     PHANTOM_CREDENTIALS_MARKER,
     READY_MARKER,
+    BrokerContext,
     ConfigScope,
     ContainerRuntime,
     CredentialDB,
@@ -82,6 +83,7 @@ from terok_sandbox.commands import (  # noqa: F401 - re-exported public API
     _handle_sandbox_uninstall,
 )
 from terok_sandbox.doctor import CheckVerdict, DoctorCheck  # noqa: F401 - re-exported public API
+from terok_sandbox.runtime import Container, Image  # noqa: F401 - re-exported public API
 
 #: Public surface of the adapter.  Underscore-prefixed handler symbols
 #: (``_handle_sandbox_setup`` / ``_handle_sandbox_uninstall``) stay
@@ -98,14 +100,17 @@ __all__ = [
     "CONTAINER_VAULT_SOCKET",
     "PHANTOM_CREDENTIALS_MARKER",
     "READY_MARKER",
+    "BrokerContext",
     "CheckVerdict",
     "ConfigScope",
+    "Container",
     "ContainerRuntime",
     "CredentialDB",
     "DoctorCheck",
     "GitGate",
     "GpuConfigError",
     "GpuSelector",
+    "Image",
     "KrunRuntime",
     "LifecycleHooks",
     "NoPassphraseError",

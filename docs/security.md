@@ -72,3 +72,47 @@ every action with the user.
 All containers run under rootless Podman — no daemon, no root privileges.
 Combined with SELinux labeling, this limits what a compromised agent can
 reach on the host filesystem.
+
+
+## Host inputs and shared vendor state
+
+The host treats container-writable paths as untrusted. Shared vendor
+configuration and transcripts remain shared and writable. Host readers and
+writers reject symlinks in any path component, hardlinked files, directories,
+FIFOs, and other nonregular entries. Reads are bounded: credential files to
+1 MiB and merged vendor configuration to 4 MiB. Writes replace files atomically
+rather than modifying an existing inode. Errors identify the unsafe entry;
+repair it as an ordinary file rather than linking it to another host path.
+
+| Host task directory | Container location | Access |
+| --- | --- | --- |
+| `agent-inputs/` | `/home/dev/.terok/input/` | Host-written, container read-only |
+| `agent-events/` | `/home/dev/.terok/events/` | Narrow writable acknowledgement channel |
+| `agent-config/` | `/home/dev/.terok/` | Writable session pointers and status |
+
+Wrappers, instructions, initial and headless prompts, review notices, and the
+Toad access token belong in `agent-inputs/`. An initial prompt is immutable.
+The wrapper atomically creates the empty `initial-prompt.consumed` marker in
+`agent-events/` before passing the prompt to the agent. The banner only displays
+pending prompts; it does not claim them. The marker acknowledges delivery, not
+successful agent execution. Deleting or forging it can affect delivery but
+cannot replace the host-authored prompt.
+
+Input and event **directory** mounts remain live in sealed mode, so publication
+after background startup and prompt acknowledgement are visible immediately.
+This is a narrow exception to copied state, alongside the existing live service
+channels. Other task state and vendor files remain isolated copies in sealed
+mode. Atomic host publication is visible through directory mounts; an individual
+file mount would retain an obsolete inode.
+
+### Upgrade requirements
+
+Rebuild the agent and project images and recreate retained task containers.
+Restarting cannot replace their old writable-input mounts. Old images and
+containers fail with an actionable recreation error. Shared vendor settings and
+sessions can be retained, but symlinked or hardlinked host-consumed files must be
+replaced with ordinary files. There is no unsafe one-time migration exception.
+The orchestrator must not import legacy agent-writable prompt text as authoritative
+host instructions. Authorization sidecars also require the explicit credential
+scope, subject, and credential set from token issuance; legacy sidecars are not
+assigned a guessed namespace.

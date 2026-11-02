@@ -20,8 +20,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import ValidationError
+from terok_util import UnsafePathError, read_untrusted_text
 
 from .vendor_files import (
+    MAX_CREDENTIAL_BYTES,
     RawApiKeyJsonFile,
     RawClaudeCredentialsFile,
     RawCodexAuthFile,
@@ -137,7 +139,9 @@ def extract_api_key_env(base_dir: Path, filename: str = ".env", var_name: str = 
     """
     env_file = base_dir / filename
     try:
-        text = env_file.read_text(encoding="utf-8")
+        text = read_untrusted_text(env_file, max_bytes=MAX_CREDENTIAL_BYTES)
+    except UnsafePathError:
+        raise
     except OSError:
         raise ValueError(f"Env file not found or unreadable: {env_file}") from None
 

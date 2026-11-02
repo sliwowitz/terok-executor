@@ -9,7 +9,7 @@
 # before exec-ing the real claude-agent-acp adapter.
 #
 # Instructions: --append-system-prompt flag injects the resolved terok
-# instructions from /home/dev/.terok/instructions.md (per-task, written by
+# instructions from /home/dev/.terok/input/instructions.md (per-task, written by
 # prepare_agent_config_dir on the host).  Same mechanism as the headless wrapper.
 #
 # Unrestricted mode: claude-agent-acp reads /etc/claude-code/managed-settings.json
@@ -47,8 +47,8 @@ _AGENT_EMAIL="noreply@anthropic.com"
 . /usr/local/share/terok/terok-acp-env.sh
 
 _args=()
-if [[ -f /home/dev/.terok/instructions.md ]]; then
-    _args+=(--append-system-prompt "$(cat /home/dev/.terok/instructions.md)")
+if [[ -f /home/dev/.terok/input/instructions.md ]]; then
+    _args+=(--append-system-prompt "$(cat /home/dev/.terok/input/instructions.md)")
 fi
 
 exec claude-agent-acp "${_args[@]}" "$@"

@@ -68,8 +68,8 @@ _WAY_ROUND = (
 )
 """The line of the shell refusal that names a selection, which works in the same task."""
 
-_INITIAL_PROMPT = "initial-prompt.txt"
-_INITIAL_PROMPT_CONSUMED = "initial-prompt.consumed.txt"
+_INITIAL_PROMPT = "input/initial-prompt.txt"
+_INITIAL_PROMPT_CONSUMED = "events/initial-prompt.consumed"
 
 _STUB = """#!__BASH__
 printf 'ARGV:%s\\n' "$*" | tee -a "$STUB_LOG"
@@ -93,6 +93,14 @@ class Harness:
             executable = shutil.which(name)
             assert executable is not None, f"{name} is required"
             (self.bin / name).symlink_to(executable)
+        (self.terok_dir / "input").mkdir()
+        (self.terok_dir / "events").mkdir()
+        share = tmp_path / "share"
+        share.mkdir()
+        prompt_helper = (_SCRIPTS_RESOURCE / "terok-initial-prompt.py").read_text()
+        (share / "terok-initial-prompt.py").write_text(
+            prompt_helper.replace(str(CONTAINER_TEROK_DIR), str(self.terok_dir))
+        )
         self.log = tmp_path / "stub.log"
         # The share dir is re-rooted to a directory that does not exist, which
         # skips the optional git-identity / plugin sources; the identity helper
@@ -175,7 +183,11 @@ class Harness:
         self, *, tty: bool = True, already_shown: bool = False, hilfe_rc: int = 0
     ) -> subprocess.CompletedProcess[str]:
         """Source the real login banner, optionally on a terminal, with stubbed help."""
-        source = _BANNER_RESOURCE.read_text().replace(str(CONTAINER_TEROK_DIR), str(self.terok_dir))
+        source = (
+            _BANNER_RESOURCE.read_text()
+            .replace(str(CONTAINER_TEROK_DIR), str(self.terok_dir))
+            .replace(str(CONTAINER_TEROK_SHARE_DIR), str(self.root / "share"))
+        )
         command = f"hilfe() {{ printf 'HILFE\\n'; return {hilfe_rc}; }};\n{source}"
         env = self._environment()
         env["_TEROK_BANNER_SHOWN"] = "1" if already_shown else ""
@@ -402,11 +414,11 @@ class TestVibeTaskSessions:
         _install_vibe_hook(harness)
         harness.stub("vibe")
         harness.session("vibe-session.txt", "foreign")
-        harness.session("initial-prompt.txt", "FIRST PROMPT")
+        harness.session(_INITIAL_PROMPT, "FIRST PROMPT")
         result = harness.run("vibe")
         assert result.returncode == 0, result.stderr
         assert harness.calls == ["ARGV:FIRST PROMPT"]
-        assert (harness.terok_dir / "initial-prompt.consumed.txt").exists()
+        assert (harness.terok_dir / _INITIAL_PROMPT_CONSUMED).exists()
         assert not (harness.terok_dir / _VIBE_RECORD).exists()
         assert "Automatic resume is unavailable" in result.stderr
         assert harness.history.read_text() == "vibe\n"
@@ -718,7 +730,7 @@ class TestAgentHistory:
 
     def test_creates_missing_state_directory(self, harness: Harness) -> None:
         """The first invocation can establish its own task-state directory."""
-        harness.terok_dir.rmdir()
+        shutil.rmtree(harness.terok_dir)
         harness.stub("claude")
         result = harness.run("claude")
         assert result.returncode == 0, result.stderr
@@ -730,7 +742,7 @@ class TestAgentHistory:
     ) -> None:
         """Unavailable state is silent and cannot change the agent's own exit status."""
         if blocked == "directory":
-            harness.terok_dir.rmdir()
+            shutil.rmtree(harness.terok_dir)
             harness.terok_dir.write_text("not a directory")
         else:
             harness.history.mkdir()
@@ -771,7 +783,7 @@ class TestAgentHistoryBanner:
     def test_history_follows_help_and_precedes_initial_prompt(self, harness: Harness) -> None:
         """The new line fits between existing help and initial-prompt sections."""
         harness.history.write_text("codex\n\nclaude\ncodex\nblablador\n")
-        harness.session("initial-prompt.txt", "PROMPT")
+        harness.session(_INITIAL_PROMPT, "PROMPT")
         result = harness.banner()
         assert result.returncode == 0, result.stderr
         summary = f"{_HISTORY_LABEL}codex, claude, blablador"

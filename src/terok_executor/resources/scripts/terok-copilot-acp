@@ -25,7 +25,7 @@ _AGENT_NAME="Copilot"
 _AGENT_EMAIL="noreply@github.com"
 . /usr/local/share/terok/terok-acp-env.sh
 
-_TEROK_INSTR="/home/dev/.terok/instructions.md"
+_TEROK_INSTR="/home/dev/.terok/input/instructions.md"
 _COPILOT_INSTR_DIR="/home/dev/.terok/copilot-instructions"
 
 if [[ -f "$_TEROK_INSTR" ]]; then

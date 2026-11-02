@@ -9,14 +9,21 @@ into the shared OpenCode configs, and installs the Claude SessionStart hook.
 """
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from terok_util import ensure_dir, ensure_dir_writable
+from terok_util import (
+    open_untrusted_directory,
+    read_untrusted_text,
+    untrusted_file_lock,
+    write_untrusted_text,
+)
+
+from terok_executor.task_files import CONTAINER_AGENT_INPUTS, MAX_PROMPT_BYTES, agent_input_dir
 
 from .providers import OPENCODE_PROVIDERS
+
+_MAX_CONFIG_BYTES = 4 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Dataclasses / types
@@ -44,6 +51,9 @@ class AgentConfigSpec:
 def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     """Create and populate the agent-config directory for a task.
 
+    Host-authored files live in the sibling ``agent-inputs`` directory.
+    The returned ``agent-config`` directory holds only writable task state.
+
     Writes:
     - terok-executor.sh (always) — wrapper functions with git env vars
     - prompt.txt (if prompt given, headless only)
@@ -59,11 +69,15 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     """
     from .providers import get_agent as _get_agent
 
+    if spec.prompt is not None and len(spec.prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
+        raise ValueError("Headless prompt exceeds the one-megabyte limit")
     resolved = _get_agent(spec.agent, default_agent=spec.default_agent)
 
     task_dir = spec.tasks_root / str(spec.task_id)
     agent_config_dir = task_dir / "agent-config"
-    ensure_dir(agent_config_dir)
+    with open_untrusted_directory(agent_config_dir, create=True):
+        pass
+    inputs_dir = agent_input_dir(task_dir)
 
     # Write instructions file — always present so opencode.json `instructions`
     # references never point to a missing file.  When no custom instructions
@@ -71,7 +85,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     _DEFAULT_INSTRUCTIONS = "Follow the project's coding conventions and existing patterns."
 
     instructions_text = spec.instructions or _DEFAULT_INSTRUCTIONS
-    (agent_config_dir / "instructions.md").write_text(instructions_text, encoding="utf-8")
+    write_untrusted_text(inputs_dir / "instructions.md", instructions_text)
 
     # Inject instructions path into opencode.json configs on the host so
     # all OpenCode-based providers discover them natively (works for both
@@ -90,17 +104,16 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     from .wrappers import generate_all_wrappers
 
     wrapper = generate_all_wrappers()
-    (agent_config_dir / "terok-executor.sh").write_text(wrapper, encoding="utf-8")
+    write_untrusted_text(inputs_dir / "terok-executor.sh", wrapper)
 
     # Write SessionStart hook — only for providers that support it (Claude)
     if resolved.supports_session_hook:
         shared_claude_dir = mounts_base / "_claude-config"
-        ensure_dir_writable(shared_claude_dir, "_claude-config")
         _write_session_hook(shared_claude_dir / "settings.json")
 
     # Prompt (headless only)
     if spec.prompt is not None:
-        (agent_config_dir / "prompt.txt").write_text(spec.prompt, encoding="utf-8")
+        write_untrusted_text(inputs_dir / "prompt.txt", spec.prompt)
 
     return agent_config_dir
 
@@ -114,67 +127,34 @@ def _inject_opencode_instructions(config_path: Path) -> None:
     """Inject the instructions file path into an opencode.json config.
 
     Ensures the ``"instructions"`` key is a list containing the container-local
-    path ``"/home/dev/.terok/instructions.md"``.  If the file does not exist it
+    path ``"/home/dev/.terok/input/instructions.md"``.  If the file does not exist it
     is created with the required ``$schema`` key.  If the instructions entry is already present the
     file is left untouched (idempotent).
 
     Uses the same inter-process file lock + atomic-replace pattern as
     `_write_session_hook` for concurrency safety.
     """
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - fcntl is unavailable on some platforms.
-        fcntl = None  # type: ignore[assignment]
-
-    instr_path = "/home/dev/.terok/instructions.md"
-    _SCHEMA_URL = "https://opencode.ai/config.json"
-
-    lock_path = config_path.with_suffix(config_path.suffix + ".lock")
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
-        if fcntl is not None:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            if config_path.is_file():
-                try:
-                    loaded = json.loads(config_path.read_text(encoding="utf-8"))
-                    existing = loaded if isinstance(loaded, dict) else {}
-                except (json.JSONDecodeError, OSError):
-                    existing = {}
-            else:
-                existing = {}
-
-            # Ensure the $schema key is always present for a valid opencode.json.
-            schema_added = "$schema" not in existing
-            existing.setdefault("$schema", _SCHEMA_URL)
-
-            instructions = existing.get("instructions")
-            if isinstance(instructions, list) and instr_path in instructions:
-                if not schema_added:
-                    return  # fully up-to-date, nothing to write
-            elif isinstance(instructions, list):
-                instructions.append(instr_path)
-            else:
-                existing["instructions"] = [instr_path]
-
-            tmp_path: Path | None = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    "w",
-                    encoding="utf-8",
-                    dir=config_path.parent,
-                    delete=False,
-                ) as tmp_file:
-                    tmp_file.write(json.dumps(existing, indent=2) + "\n")
-                    tmp_path = Path(tmp_file.name)
-                os.replace(tmp_path, config_path)
-            finally:
-                if tmp_path is not None and tmp_path.exists():
-                    tmp_path.unlink()
-        finally:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    instr_path = f"{CONTAINER_AGENT_INPUTS}/instructions.md"
+    legacy_path = "/home/dev/.terok/instructions.md"
+    schema_url = "https://opencode.ai/config.json"
+    with untrusted_file_lock(config_path.with_name(config_path.name + ".lock")):
+        existing = _read_config(config_path)
+        schema_added = "$schema" not in existing
+        existing.setdefault("$schema", schema_url)
+        instructions = existing.get("instructions")
+        legacy_removed = isinstance(instructions, list) and legacy_path in instructions
+        if legacy_removed and isinstance(instructions, list):
+            instructions = existing["instructions"] = [
+                item for item in instructions if item != legacy_path
+            ]
+        if isinstance(instructions, list) and instr_path in instructions:
+            if not schema_added and not legacy_removed:
+                return
+        elif isinstance(instructions, list):
+            instructions.append(instr_path)
+        else:
+            existing["instructions"] = [instr_path]
+        write_untrusted_text(config_path, json.dumps(existing, indent=2) + "\n")
 
 
 def _write_session_hook(settings_path: Path) -> None:
@@ -196,86 +176,37 @@ def _write_session_hook(settings_path: Path) -> None:
     Updates are serialized with an inter-process file lock and persisted via
     atomic replace to avoid clobbering concurrent task launches.
     """
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - fcntl is unavailable on some platforms.
-        fcntl = None  # type: ignore[assignment]
-
     hook_command = (
         "python3 -c \"import json,sys; print(json.load(sys.stdin)['session_id'])\""
         " > /home/dev/.terok/claude-session.txt"
     )
     hook_entry = {"hooks": [{"type": "command", "command": hook_command}]}
-    lock_path = settings_path.with_suffix(settings_path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
-        if fcntl is not None:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            if settings_path.is_file():
-                try:
-                    loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-                    existing = loaded if isinstance(loaded, dict) else {}
-                except (json.JSONDecodeError, OSError):
-                    existing = {}
-            else:
-                existing = {}
+    with untrusted_file_lock(settings_path.with_name(settings_path.name + ".lock")):
+        existing = _read_config(settings_path)
+        hooks = existing.get("hooks")
+        if not isinstance(hooks, dict):
+            hooks = existing["hooks"] = {}
+        sessions = hooks.get("SessionStart")
+        if not isinstance(sessions, list):
+            sessions = hooks["SessionStart"] = []
+        if any(
+            isinstance(item, dict)
+            and isinstance(item.get("hooks"), list)
+            and any(
+                isinstance(hook, dict) and hook.get("command") == hook_command
+                for hook in item["hooks"]
+            )
+            for item in sessions
+        ):
+            return
+        sessions.append(hook_entry)
+        write_untrusted_text(settings_path, json.dumps(existing, indent=2) + "\n")
 
-            changed = False
 
-            hooks_obj = existing.get("hooks")
-            if hooks_obj is None or not isinstance(hooks_obj, dict):
-                hooks_obj = {}
-                existing["hooks"] = hooks_obj
-                changed = True
-
-            session_hooks_obj = hooks_obj.get("SessionStart")
-            if session_hooks_obj is None or not isinstance(session_hooks_obj, list):
-                session_hooks_obj = []
-                hooks_obj["SessionStart"] = session_hooks_obj
-                changed = True
-
-            session_hooks: list[object] = session_hooks_obj
-
-            # Idempotent across equivalent forms: skip append if an existing SessionStart
-            # command already writes session_id to claude-session.txt.
-            hook_present = False
-            for item in session_hooks:
-                if item == hook_entry:
-                    hook_present = True
-                    break
-                if not isinstance(item, dict):
-                    continue
-                nested = item.get("hooks")
-                if not isinstance(nested, list):
-                    continue
-                for nested_item in nested:
-                    if not isinstance(nested_item, dict):
-                        continue
-                    if nested_item.get("command") == hook_command:
-                        hook_present = True
-                        break
-                if hook_present:
-                    break
-
-            if not hook_present:
-                session_hooks.append(hook_entry)
-                changed = True
-
-            if changed:
-                tmp_path: Path | None = None
-                try:
-                    with tempfile.NamedTemporaryFile(
-                        "w",
-                        encoding="utf-8",
-                        dir=settings_path.parent,
-                        delete=False,
-                    ) as tmp_file:
-                        tmp_file.write(json.dumps(existing, indent=2) + "\n")
-                        tmp_path = Path(tmp_file.name)
-                    os.replace(tmp_path, settings_path)
-                finally:
-                    if tmp_path is not None and tmp_path.exists():
-                        tmp_path.unlink()
-        finally:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+def _read_config(path: Path) -> dict:
+    """Read ordinary shared JSON, preserving vendor fields but rejecting unsafe paths."""
+    try:
+        loaded = json.loads(read_untrusted_text(path, max_bytes=_MAX_CONFIG_BYTES))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}

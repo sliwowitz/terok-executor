@@ -132,6 +132,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.provider.agents"
 depends_on = [
+    "terok_executor.task_files",
     "terok_executor.provider.providers",
     "terok_executor.provider.wrappers",
 ]
@@ -141,7 +142,8 @@ depends_on = [
 # Build resource staging — standalone
 [[modules]]
 path = "terok_executor.container.build"
-depends_on = ["terok_executor.roster",
+depends_on = [
+    "terok_executor.task_files","terok_executor.roster",
 ]
 
 # Clone-cache workspace seeding — copies cached clone into task workspace
@@ -155,6 +157,8 @@ depends_on = [
 [[modules]]
 path = "terok_executor.container.env"
 depends_on = [
+    "terok_executor.credentials.vendor_files",
+    "terok_executor.task_files",
     "terok_executor._util",
     "terok_executor.credentials.extractors",
     "terok_executor.credentials.vault_commands",
@@ -172,6 +176,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.container.runner"
 depends_on = [
+    "terok_executor.task_files",
     "terok_executor.sandbox",
     "terok_executor._util",
     "terok_executor.container.build",
@@ -204,6 +209,7 @@ depends_on = [
 [[modules]]
 path = "terok_executor.credentials.auth"
 depends_on = [
+    "terok_executor.credentials.vendor_files",
     "terok_executor.credentials.extractors",
     "terok_executor.integrations.sandbox",
     "terok_executor.paths",
@@ -323,3 +329,11 @@ depends_on = [
     "terok_executor.provider.providers",
     "terok_executor.roster",
 ]
+
+[[modules]]
+path = "terok_executor.task_files"
+depends_on = ["terok_executor.integrations.sandbox"]
+
+[[modules]]
+path = "terok_executor.container.inject"
+depends_on = ["terok_executor.task_files", "terok_executor.integrations.sandbox"]

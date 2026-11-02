@@ -24,6 +24,7 @@ from terok_executor.container.env import (
 from terok_executor.integrations.sandbox import (
     CONTAINER_SSH_SIGNER_SOCKET,
     CONTAINER_VAULT_SOCKET,
+    BrokerContext,
 )
 from terok_executor.roster import AgentRoster
 from terok_executor.roster.types import Provider, ProviderAuth, ProviderModel, VaultRoute
@@ -179,7 +180,7 @@ class TestBaseEnv:
         from terok_executor.container.env import CONTAINER_PROTOCOL
 
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
-        assert CONTAINER_PROTOCOL == 3
+        assert CONTAINER_PROTOCOL == 4
         assert result.env["TEROK_CONTAINER_PROTOCOL"] == str(CONTAINER_PROTOCOL)
 
 
@@ -430,7 +431,8 @@ class TestAgentConfigMount:
         """Any installed Vibe sees the task file without sharing or rewriting it."""
         config_dir = tmp_path / "agent-config"
         config_dir.mkdir()
-        source = config_dir / _INSTRUCTIONS_FILENAME
+        source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(instructions)
         result = assemble_container_env(
             _spec(workspace, envs_dir, agent_config_dir=config_dir),
@@ -467,7 +469,8 @@ class TestAgentConfigMount:
         for task_id in ("first", "second"):
             config_dir = tmp_path / task_id / "agent-config"
             config_dir.mkdir(parents=True)
-            source = config_dir / _INSTRUCTIONS_FILENAME
+            source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+            source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(task_id)
             result = assemble_container_env(
                 _spec(workspace, envs_dir, task_id=task_id, agent_config_dir=config_dir),
@@ -493,7 +496,8 @@ class TestAgentConfigMount:
             native.write_text(native_content)
         config_dir = tmp_path / "agent-config"
         config_dir.mkdir()
-        source = config_dir / _INSTRUCTIONS_FILENAME
+        source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("Task instructions")
 
         assemble_container_env(
@@ -1429,7 +1433,7 @@ class TestConfigPatchSecurity:
                 "terok_executor.integrations.sandbox.SandboxConfig",
                 return_value=SandboxConfig(token_broker_port=18731),
             ),
-            pytest.raises(ConfigPatchError, match="Failed to apply"),
+            pytest.raises(ConfigPatchError, match="regular file"),
         ):
             apply_shared_config_patches(roster, tmp_path)
 
@@ -1598,4 +1602,28 @@ class TestEgressProjection:
         from terok_executor.container.env import ContainerEnvResult
         from terok_executor.roster.types import EgressProjection
 
-        assert ContainerEnvResult(env={}, volumes=()).egress == EgressProjection()
+        assert (
+            ContainerEnvResult(
+                env={}, volumes=(), broker_context=BrokerContext("project", "task", "default")
+            ).egress
+            == EgressProjection()
+        )
+
+
+def test_broker_context_matches_exact_issued_token_namespace(workspace, envs_dir, roster, tmp_path):
+    """Sidecar authorization uses the identical nondefault namespace as issued tokens."""
+    cfg = _make_vault_db(tmp_path, credential_set="selected-set")
+    spec = _spec(
+        workspace, envs_dir, credential_scope="actual-scope", credential_set="selected-set"
+    )
+    with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+        result = assemble_container_env(spec, roster)
+    assert result.broker_context == BrokerContext("actual-scope", spec.task_id, "selected-set")
+    db = cfg.open_credential_db()
+    try:
+        record = db.lookup_token(result.env["ANTHROPIC_API_KEY"])
+    finally:
+        db.close()
+    assert record["scope"] == result.broker_context.scope
+    assert record["subject"] == result.broker_context.subject
+    assert record["credential_set"] == result.broker_context.credential_set

@@ -15,7 +15,9 @@ from terok_executor.container.runner import AgentRunner, _generate_task_id, _res
 from terok_executor.integrations.sandbox import (
     CONTAINER_GATE_SOCKET,
     CONTAINER_RUNTIME_DIR,
+    BrokerContext,
 )
+from terok_executor.task_files import INPUTS_PROTOCOL, INPUTS_PROTOCOL_LABEL
 
 pytestmark = pytest.mark.usefixtures("fake_podman")
 
@@ -443,6 +445,9 @@ class TestAgentRunner:
         reservation.__exit__.return_value = None
         runtime_mock = _Mock()
         runtime_mock.reserve_port.return_value = reservation
+        runtime_mock.image.return_value.labels.return_value = {
+            INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL
+        }
 
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
@@ -586,6 +591,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         cname = runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={"TEROK_TASK": "demo"},
             volumes=[],
             image="terok-l1-cli:test",
@@ -603,6 +609,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={"FOO": "bar"},
             volumes=[],
             image="terok-l1-cli:test",
@@ -638,6 +645,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="terok-l1-cli:test",
@@ -659,6 +667,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -684,6 +693,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -706,6 +716,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -725,6 +736,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -742,6 +754,7 @@ class TestLaunchPrepared:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -762,6 +775,7 @@ class TestLaunchPrepared:
         hooks = LifecycleHooks(pre_start=lambda: None)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -786,6 +800,7 @@ class TestLaunchPrepared:
 
         with pytest.raises(BuildError, match="no CDI"):
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -811,6 +826,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -835,6 +851,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -856,6 +873,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -874,6 +892,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -897,6 +916,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={"TEROK_GATE_TOKEN": "terok-g-cafef00d"},
                 volumes=[],
                 image="img",
@@ -919,6 +939,7 @@ class TestLaunchPrepared:
 
         with patch("terok_executor.integrations.sandbox.write_sidecar") as write_sidecar:
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={},
                 volumes=[],
                 image="img",
@@ -962,6 +983,7 @@ class TestLaunchPreparedSupervisorWiring:
         ):
             with pytest.raises(BuildError, match="refusing to launch an unsupervised container"):
                 runner.launch_prepared(
+                    broker_context=BrokerContext("project", "task", "default"),
                     env={},
                     volumes=[],
                     image="img",
@@ -978,6 +1000,7 @@ class TestLaunchPreparedSupervisorWiring:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={
                 "TEROK_TOKEN_BROKER_PORT": "1",
                 "TEROK_SSH_SIGNER_PORT": "2",
@@ -1026,6 +1049,7 @@ class TestLaunchPreparedSupervisorWiring:
             return_value=fixed,
         ):
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={
                     "TEROK_GATE_TOKEN": "terok-g-fixed",
                     "TEROK_GATE_SOCKET": CONTAINER_GATE_SOCKET,
@@ -1070,6 +1094,7 @@ class TestLaunchPreparedSupervisorWiring:
             return_value=fixed,
         ):
             runner.launch_prepared(
+                broker_context=BrokerContext("project", "task", "default"),
                 env={
                     "TEROK_GATE_PORT": "3",
                     "TEROK_GATE_SOCKET": CONTAINER_GATE_SOCKET,
@@ -1174,6 +1199,7 @@ class TestLaunchPreparedSupervisorWiring:
         runner = AgentRunner(sandbox=sandbox)
 
         runner.launch_prepared(
+            broker_context=BrokerContext("project", "task", "default"),
             env={},
             volumes=[],
             image="img",
@@ -1544,6 +1570,9 @@ def _mock_sandbox() -> Mock:
 
     sandbox = Mock()
     sandbox.config = SandboxConfig()
+    sandbox.runtime.image.return_value.labels.return_value = {
+        INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL
+    }
     sandbox.pre_start_args.return_value = []
     sandbox.stream_logs.return_value = True
     sandbox.wait_for_exit.return_value = 0

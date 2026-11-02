@@ -60,6 +60,8 @@ from typing import Any
 from jinja2 import BaseLoader, Environment
 from terok_util import find_host_tool, podman_pull_always_args, require_host_tool
 
+from terok_executor.task_files import INPUTS_PROTOCOL, INPUTS_PROTOCOL_LABEL
+
 # ── Vocabulary ──
 
 DEFAULT_BASE_IMAGE = "fedora:44"
@@ -884,6 +886,8 @@ def render_l1(
             "install_dev_snippets": dev_snippets,
             "installed_agents_csv": ",".join(selected),
             "agents_label": AGENTS_LABEL,
+            "inputs_protocol_label": INPUTS_PROTOCOL_LABEL,
+            "inputs_protocol": INPUTS_PROTOCOL,
             "installed_env_path": INSTALLED_ENV_PATH,
             "agent_protocols_path": AGENT_PROTOCOLS_PATH,
             "provider_protocols_path": PROVIDER_PROTOCOLS_PATH,

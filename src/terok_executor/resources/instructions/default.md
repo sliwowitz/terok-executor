@@ -71,3 +71,21 @@ Report your current work phase by writing to `/home/dev/.terok/work-status.yml`:
 
 Valid statuses: planning, coding, testing, debugging, reviewing, documenting, done, blocked, error.
 Update this file when transitioning between work phases. Set `done` with a summary when finished.
+
+## Task inputs and writable state
+
+`/home/dev/.terok/input/` contains host-authored prompts, instructions, and
+wrapper scripts. All tasks mount this directory read-only.
+Do not rename or edit these inputs. Initial-prompt delivery creates the
+empty `/home/dev/.terok/events/initial-prompt.consumed` marker; the original prompt
+remains unchanged. Session pointers and work-status reports stay writable
+under `/home/dev/.terok/`. Vendor configuration and transcript directories
+remain shared and writable as configured.
+
+Host readers reject symlinks, hardlinks, nonregular files, and oversized
+configuration entries. Keep files consumed by the host as ordinary files;
+errors identify the entry to repair rather than following its target.
+
+Sealed tasks retain only these narrow live channels: read-only task inputs
+and writable prompt acknowledgements under `/home/dev/.terok/events/`.
+Other task state and vendor configuration remain isolated copies.

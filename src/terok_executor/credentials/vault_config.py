@@ -23,15 +23,21 @@ resolved centrally — agent YAMLs only need to reference the tokens.
 
 from __future__ import annotations
 
-import errno
 import json
 import logging
-import os
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from terok_util import (
+    UnsafePathError,
+    open_untrusted_directory,
+    read_untrusted_bytes,
+    remove_untrusted_file,
+    write_untrusted_bytes,
+)
 
 if TYPE_CHECKING:
     from jinja2 import Environment
@@ -42,6 +48,8 @@ _logger = logging.getLogger(__name__)
 
 _MANAGED_CONFIG_FILENAME = ".terok-managed-config.json"
 """Sidecar file that records config values last written by terok."""
+
+_MAX_SHARED_CONFIG_BYTES = 4 * 1024 * 1024
 
 _MANAGED_CONFIG_VERSION = 1
 """Schema version for :data:`_MANAGED_CONFIG_FILENAME`."""
@@ -152,7 +160,8 @@ def write_vault_config(name: str, credential_set: str = "default") -> None:
     location = resolve_vault_location(SandboxConfig().token_broker_port)
 
     shared_dir = mounts_dir() / auth_info.host_dir_name
-    shared_dir.mkdir(parents=True, exist_ok=True)
+    with open_untrusted_directory(shared_dir, create=True):
+        pass
     config_path = _safe_config_path(shared_dir, patch["file"])
 
     if "yaml_set" in patch:
@@ -245,7 +254,8 @@ def apply_shared_config_patches(
             if route is not None:
                 patch = _resolve_patch(patch, route, cred_key, credential_set)
             shared_dir = mounts_base / host_dir
-            shared_dir.mkdir(parents=True, exist_ok=True)
+            with open_untrusted_directory(shared_dir, create=True):
+                pass
             config_path = _safe_config_path(shared_dir, patch["file"])
 
             if "yaml_set" in patch:
@@ -297,84 +307,37 @@ def resolve_vault_location(token_broker_port: int | None = None) -> VaultLocatio
 
 
 def _safe_config_path(shared_dir: Path, filename: str) -> Path:
-    """Resolve *filename* inside *shared_dir*, rejecting traversal attempts.
-
-    Raises [`ConfigPatchError`][terok_executor.credentials.vault_config.ConfigPatchError] if the resolved path escapes the
-    intended directory (absolute paths, ``..`` components, symlinks).
-
-    Note: this check is TOCTOU-racy against a container that can plant
-    symlinks between the check here and the subsequent write.  Callers
-    MUST use `_read_nofollow` / `_write_nofollow` to open
-    the final file, so a symlink planted in the race window is rejected
-    at open() time (``ELOOP``) instead of being silently followed.
-    """
+    """Keep patch names relative; secure I/O rejects filesystem indirection."""
     rel = Path(filename)
     if rel.is_absolute() or ".." in rel.parts:
         raise ConfigPatchError(f"invalid patch file path: {filename!r}")
-
-    target = (shared_dir / rel).resolve(strict=False)
-    base = shared_dir.resolve(strict=True)
-    if base not in target.parents and target != base:
-        raise ConfigPatchError(f"patch target {target} escapes shared dir {base}")
-    return target
+    return shared_dir / rel
 
 
 def _read_nofollow(path: Path) -> bytes | None:
-    """Read *path* refusing to follow symlinks; return ``None`` if missing.
-
-    The shared config directories are bind-mounted read-write into task
-    containers, so an attacker can plant a symlink between the
-    `_safe_config_path` check and this read.  ``O_NOFOLLOW``
-    rejects that at open() time.
-    """
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    """Read bounded regular shared configuration, returning None when absent."""
     try:
-        fd = os.open(path, flags)
+        return read_untrusted_bytes(path, max_bytes=_MAX_SHARED_CONFIG_BYTES)
     except FileNotFoundError:
         return None
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise ConfigPatchError(f"refusing to read through symlink at {path}") from exc
-        raise
-    try:
-        chunks: list[bytes] = []
-        while chunk := os.read(fd, 65536):
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        os.close(fd)
+    except UnsafePathError as exc:
+        raise ConfigPatchError(str(exc)) from exc
 
 
 def _write_nofollow(path: Path, data: bytes) -> None:
-    """Write *data* to *path* refusing to follow symlinks.
-
-    A planted symlink at *path* is rejected with [`ConfigPatchError`][terok_executor.credentials.vault_config.ConfigPatchError]
-    (via ``ELOOP``) rather than silently followed — protecting against a
-    compromised container redirecting the executor's write to an
-    arbitrary operator-owned file (CWE-367 / CWE-59).
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    """Replace shared configuration without modifying existing destination inodes."""
     try:
-        fd = os.open(path, flags, 0o644)
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise ConfigPatchError(f"refusing to write through symlink at {path}") from exc
-        raise
-    try:
-        os.write(fd, data)
-    finally:
-        os.close(fd)
+        write_untrusted_bytes(path, data)
+    except UnsafePathError as exc:
+        raise ConfigPatchError(str(exc)) from exc
 
 
 def _delete_nofollow(path: Path) -> None:
-    """Delete *path* without following symlinks; ignore missing files."""
+    """Remove a regular managed entry relative to its verified parent."""
     try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except IsADirectoryError as exc:
-        raise ConfigPatchError(f"refusing to delete directory at {path}") from exc
+        remove_untrusted_file(path)
+    except UnsafePathError as exc:
+        raise ConfigPatchError(str(exc)) from exc
 
 
 @lru_cache(maxsize=1)

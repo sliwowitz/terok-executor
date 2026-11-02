@@ -9,7 +9,7 @@
 # the real codex-acp adapter.
 #
 # Instructions: -c model_instructions_file flag points the adapter at
-# /home/dev/.terok/instructions.md (per-task, written by
+# /home/dev/.terok/input/instructions.md (per-task, written by
 # prepare_agent_config_dir on the host).  Same mechanism as the headless wrapper.
 #
 # Unlike other agents, Codex has no env var for approval policy — only
@@ -37,8 +37,8 @@ _args=()
 if [[ "${TEROK_UNRESTRICTED:-}" == "1" ]]; then
     _args+=(-c approval_policy=never -c sandbox_mode=danger-full-access)
 fi
-if [[ -f /home/dev/.terok/instructions.md ]]; then
-    _args+=(-c 'model_instructions_file="/home/dev/.terok/instructions.md"')
+if [[ -f /home/dev/.terok/input/instructions.md ]]; then
+    _args+=(-c 'model_instructions_file="/home/dev/.terok/input/instructions.md"')
 fi
 
 exec npx @zed-industries/codex-acp "${_prov_args[@]}" "${_args[@]}" "$@"

@@ -51,7 +51,7 @@ _SCOPE_ENV = "TEROK_PI_PROVIDER"
 _BASE_VAR = re.compile(r"^TEROK_PROVIDER_([A-Za-z0-9]+)_BASE_")
 """Materialized handle ``TEROK_PROVIDER_<NAME>_BASE_<PROTO>`` — one per usable provider."""
 
-_INSTRUCTIONS_PATH = "/home/dev/.terok/instructions.md"
+_INSTRUCTIONS_PATH = "/home/dev/.terok/input/instructions.md"
 """Container path of the resolved terok per-task system instructions."""
 
 

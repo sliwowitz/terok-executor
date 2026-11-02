@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-TOKEN_FILE="${TOAD_TOKEN_FILE:-/home/dev/.terok/toad.token}"
+TOKEN_FILE="${TOAD_TOKEN_FILE:-/home/dev/.terok/input/toad.token}"
 PUBLIC_PORT="${TOAD_PUBLIC_PORT:-8080}"
 INTERNAL_PORT="${TOAD_INTERNAL_PORT:-8081}"
 
