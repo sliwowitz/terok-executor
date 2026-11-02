@@ -80,6 +80,26 @@ Rebuild the agent image and recreate the task container to install the hook
 helper and ACP adapter. Initial instructions, first-prompt delivery, and
 wrapper agent history remain unchanged.
 
+### Vibe task instructions
+
+Resolved task instructions are mounted read-only at `~/.vibe/AGENTS.md`,
+inside the shared Vibe directory. Each container sees its own task's file;
+shared settings, hooks, and transcript storage stay unchanged. Vibe adds this
+file to its **system instructions**, separately from the first user message
+and without replacing its selected agent profile or built-in prompt.
+Sealed tasks receive a private copy at the same path instead of a bind mount.
+
+An existing shared `~/.vibe/AGENTS.md` is hidden in the task container, not
+overwritten; startup warns when it contains instructions. Manage those
+instructions through terok's global/project instructions configuration or
+TUI instead. Repository `AGENTS.md` files are still loaded normally.
+
+Vibe's explicit `include_project_context = false` setting (or
+`VIBE_INCLUDE_PROJECT_CONTEXT=false`) also disables its user-level `AGENTS.md`
+loading and is not overridden. A custom `VIBE_HOME` changes where Vibe looks
+and therefore bypasses this mount. Rebuild the agent image and recreate task
+containers to adopt the new ACP wrapper and instruction mount.
+
 ### Harness-driven providers
 
 Curated OpenAI-compatible endpoints driven through the OpenCode

@@ -32,10 +32,12 @@ from terok_executor.vault_addr import (
     LOOPBACK_VAULT_TLS_PORT,
     VAULT_TLS_CERT,
 )
-from tests.constants import EXAMPLE_PROVIDER_HOST, EXAMPLE_PROVIDER_UPSTREAM
+from tests.constants import CONTAINER_HOME, EXAMPLE_PROVIDER_HOST, EXAMPLE_PROVIDER_UPSTREAM
 from tests.unit.conftest import TEST_VAULT_PASSPHRASE
 
 _EXAMPLE_MODEL = "example-chat"
+_VIBE_INSTRUCTIONS_PATH = str(CONTAINER_HOME / ".vibe" / "AGENTS.md")
+_INSTRUCTIONS_FILENAME = "instructions.md"
 
 
 def _find_vol(volumes: tuple[VolumeSpec, ...], container_path: str) -> VolumeSpec | None:
@@ -408,6 +410,7 @@ class TestAgentConfigMount:
     def test_agent_config_mounted_when_set(self, workspace, envs_dir, roster, tmp_path):
         cfg_dir = tmp_path / "agent-config"
         cfg_dir.mkdir()
+        (cfg_dir / _INSTRUCTIONS_FILENAME).write_text("Task instructions")
         spec = _spec(workspace, envs_dir, agent_config_dir=cfg_dir)
         result = assemble_container_env(spec, roster, caller_manages_vault=True)
         vol = _find_vol(result.volumes, "/home/dev/.terok")
@@ -418,6 +421,118 @@ class TestAgentConfigMount:
     def test_no_agent_config_when_none(self, base_spec, roster):
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
         assert _find_vol(result.volumes, "/home/dev/.terok") is None
+        assert _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH) is None
+
+    @pytest.mark.parametrize("instructions", ["Task instructions", ""])
+    def test_vibe_instructions_are_private_read_only_even_for_another_default_agent(
+        self, workspace, envs_dir, roster, tmp_path, instructions
+    ):
+        """Any installed Vibe sees the task file without sharing or rewriting it."""
+        config_dir = tmp_path / "agent-config"
+        config_dir.mkdir()
+        source = config_dir / _INSTRUCTIONS_FILENAME
+        source.write_text(instructions)
+        result = assemble_container_env(
+            _spec(workspace, envs_dir, agent_config_dir=config_dir),
+            roster,
+            caller_manages_vault=True,
+        )
+
+        volume = _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH)
+        assert volume is not None
+        assert volume.host_path == source
+        assert volume.read_only is True
+        assert volume.sharing == "private"
+        assert source.read_text() == instructions
+        shared_volume = _find_vol(result.volumes, str(CONTAINER_HOME / ".vibe"))
+        assert result.volumes.index(shared_volume) < result.volumes.index(volume)
+
+    def test_no_vibe_mount_without_vibe_in_roster(self, workspace, envs_dir, roster, tmp_path):
+        """A roster without Vibe does not acquire a Vibe-specific mount."""
+        roster = dataclasses.replace(
+            roster, _mounts=tuple(mount for mount in roster.mounts if mount.provider != "vibe")
+        )
+        result = assemble_container_env(
+            _spec(workspace, envs_dir, agent_config_dir=tmp_path / "agent-config"),
+            roster,
+            caller_manages_vault=True,
+        )
+        assert _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH) is None
+
+    def test_tasks_sharing_vibe_home_mount_their_own_instructions(
+        self, workspace, envs_dir, roster, tmp_path
+    ):
+        """The shared destination never makes another task's file the source."""
+        sources = []
+        for task_id in ("first", "second"):
+            config_dir = tmp_path / task_id / "agent-config"
+            config_dir.mkdir(parents=True)
+            source = config_dir / _INSTRUCTIONS_FILENAME
+            source.write_text(task_id)
+            result = assemble_container_env(
+                _spec(workspace, envs_dir, task_id=task_id, agent_config_dir=config_dir),
+                roster,
+                caller_manages_vault=True,
+            )
+            volume = _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH)
+            assert volume is not None
+            assert volume.host_path == source
+            assert volume.host_path.read_text() == task_id
+            sources.append(volume.host_path)
+        assert sources[0] != sources[1]
+
+    @pytest.mark.parametrize("native_content", [None, "", "Native Vibe instructions"])
+    def test_native_instructions_warn_without_merging_or_changing_shared_file(
+        self, workspace, envs_dir, roster, tmp_path, caplog, native_content
+    ):
+        """Only existing native instructions need a migration warning, not empty placeholders."""
+        vibe_mount = next(mount for mount in roster.mounts if mount.provider == "vibe")
+        native = envs_dir / vibe_mount.host_dir / Path(_VIBE_INSTRUCTIONS_PATH).name
+        if native_content is not None:
+            native.parent.mkdir()
+            native.write_text(native_content)
+        config_dir = tmp_path / "agent-config"
+        config_dir.mkdir()
+        source = config_dir / _INSTRUCTIONS_FILENAME
+        source.write_text("Task instructions")
+
+        assemble_container_env(
+            _spec(workspace, envs_dir, agent_config_dir=config_dir),
+            roster,
+            caller_manages_vault=True,
+        )
+
+        assert source.read_text() == "Task instructions"
+        if native_content is None:
+            assert not native.exists()
+        else:
+            assert native.read_text() == native_content
+        warnings = [record.message for record in caplog.records if "masked" in record.message]
+        assert bool(warnings) == bool(native_content)
+        if warnings:
+            assert str(native) in warnings[0]
+            assert "global/project instruction configuration" in warnings[0]
+            assert "TUI" in warnings[0]
+
+    def test_vibe_mount_uses_roster_paths(self, workspace, envs_dir, roster, tmp_path):
+        """Custom roster mount locations are respected without a separate Vibe home override."""
+        custom_home = CONTAINER_HOME / "custom-vibe"
+        roster = dataclasses.replace(
+            roster,
+            _mounts=tuple(
+                dataclasses.replace(mount, container_path=str(custom_home))
+                if mount.provider == "vibe"
+                else mount
+                for mount in roster.mounts
+            ),
+        )
+        result = assemble_container_env(
+            _spec(workspace, envs_dir, agent_config_dir=tmp_path / "agent-config"),
+            roster,
+            caller_manages_vault=True,
+        )
+        assert _find_vol(result.volumes, str(custom_home / "AGENTS.md")) is not None
+        assert _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH) is None
 
 
 # ---------------------------------------------------------------------------
