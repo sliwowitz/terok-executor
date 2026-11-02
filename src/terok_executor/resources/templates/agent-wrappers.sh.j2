@@ -208,17 +208,8 @@
 {%- endmacro -%}
 
 {%- macro vibe_subshell_setup() -%}
-{{ '            ' }}# ── Vibe: yolo + per-task instructions + workspace trust ──
+{{ '            ' }}# ── Vibe: yolo + workspace trust ──
             export VIBE_BYPASS_TOOL_PERMISSIONS=true
-            if [ -f "/home/dev/.terok/instructions.md" ] && [ -n "${TASK_ID:-}" ]; then
-                local _vibe_prompt_id="terok-task-${TASK_ID}"
-                local _vibe_prompts_dir="${HOME}/.vibe/prompts"
-                local _vibe_prompt_file="${_vibe_prompts_dir}/${_vibe_prompt_id}.md"
-                mkdir -p "${_vibe_prompts_dir}"
-                cp "/home/dev/.terok/instructions.md" "${_vibe_prompt_file}"
-                export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"
-                trap 'rm -f "${_vibe_prompt_file}"' EXIT
-            fi
             _terok_trust_workspace_for_vibe "/workspace"
 {%- endmacro -%}
 

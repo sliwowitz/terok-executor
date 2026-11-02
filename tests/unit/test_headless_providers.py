@@ -211,21 +211,12 @@ class TestGenerateAgentWrapper:
         wrapper = _provider_wrapper("vibe")
         assert "export VIBE_BYPASS_TOOL_PERMISSIONS=true" in wrapper
 
-    def test_vibe_wrapper_injects_per_task_system_prompt(self) -> None:
-        """``vibe()`` writes a per-task prompt + exports VIBE_SYSTEM_PROMPT_ID.
-
-        Pinned per #47 follow-up — the CLI path needs the same prompt-id
-        injection the ACP wrapper does.  Per-task naming keeps parallel
-        containers from clobbering each other in the shared ~/.vibe
-        prompts dir; the EXIT trap removes the file when the subshell
-        exits so finished tasks don't leave cruft.
-        """
+    def test_vibe_wrapper_leaves_system_prompt_selection_to_vibe(self) -> None:
+        """Mounted AGENTS.md instructions need no persona override or shared prompt copy."""
         wrapper = _provider_wrapper("vibe")
-        assert f'cp "{CONTAINER_INSTRUCTIONS_PATH}"' in wrapper
-        assert 'export VIBE_SYSTEM_PROMPT_ID="${_vibe_prompt_id}"' in wrapper
-        # Per-task id and EXIT-cleanup trap.
-        assert '_vibe_prompt_id="terok-task-${TASK_ID}"' in wrapper
-        assert "trap 'rm -f \"${_vibe_prompt_file}\"' EXIT" in wrapper
+        assert f'cp "{CONTAINER_INSTRUCTIONS_PATH}"' not in wrapper
+        assert "VIBE_SYSTEM_PROMPT_ID" not in wrapper
+        assert "_vibe_prompt" not in wrapper
 
     def test_vibe_wrapper_trusts_workspace(self) -> None:
         """``vibe()`` adds /workspace to ~/.vibe/trusted_folders.toml.
@@ -259,12 +250,7 @@ class TestGenerateAgentWrapper:
         assert "flock -x 200" in all_wrappers
 
     def test_non_vibe_wrappers_lack_vibe_setup_block(self) -> None:
-        """Only vibe gets the yolo / prompt-id / trust block.
-
-        Empty list for non-vibe providers in
-        ``_vibe_subshell_setup_block`` keeps the rendered wrapper
-        unchanged for every other agent.
-        """
+        """Only Vibe gets its tool-permission override and workspace trust."""
         for name in AGENTS:
             if name == "vibe":
                 continue

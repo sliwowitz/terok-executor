@@ -398,26 +398,51 @@ class TestVibeTaskSessions:
         assert len(tomllib.loads((shared / "hooks.toml").read_text())["hooks"]) == 2
 
     def test_old_pointer_does_not_block_initial_prompt(self, harness: Harness) -> None:
-        """Unverified legacy pointers are ignored; instructions and first prompt survive."""
+        """Unverified legacy pointers cannot block the first user message."""
         _install_vibe_hook(harness)
         harness.stub("vibe")
         harness.session("vibe-session.txt", "foreign")
         harness.session("initial-prompt.txt", "FIRST PROMPT")
-        harness.session("instructions.md", "TASK INSTRUCTIONS")
-        stub = harness.bin / "vibe"
-        stub.write_text(
-            stub.read_text().replace(
-                'echo "VENDOR USAGE"', 'cat "$HOME/.vibe/prompts/$VIBE_SYSTEM_PROMPT_ID.md"'
-            )
-        )
         result = harness.run("vibe")
         assert result.returncode == 0, result.stderr
         assert harness.calls == ["ARGV:FIRST PROMPT"]
-        assert "TASK INSTRUCTIONS" in result.stdout
         assert (harness.terok_dir / "initial-prompt.consumed.txt").exists()
         assert not (harness.terok_dir / _VIBE_RECORD).exists()
         assert "Automatic resume is unavailable" in result.stderr
         assert harness.history.read_text() == "vibe\n"
+
+    @pytest.mark.parametrize("entrypoint", ("cli", "timed", "acp"))
+    @pytest.mark.parametrize(
+        "settings",
+        (
+            {},
+            {
+                "VIBE_SYSTEM_PROMPT_ID": "user-prompt",
+                "VIBE_DEFAULT_AGENT": "user-agent",
+                "VIBE_INCLUDE_PROJECT_CONTEXT": "false",
+            },
+        ),
+    )
+    def test_instruction_mount_needs_no_wrapper_overrides(
+        self, harness: Harness, entrypoint: str, settings: dict[str, str]
+    ) -> None:
+        """Instructions neither replace user settings nor become an initial user prompt."""
+        harness.session("instructions.md", "TASK INSTRUCTIONS")
+        harness.stub("vibe-acp" if entrypoint == "acp" else "vibe")
+        if entrypoint == "acp":
+            result = harness.acp("vibe", env=settings)
+        else:
+            args = ("--terok-timeout", "5") if entrypoint == "timed" else ()
+            result = harness.run("vibe", *args, env=settings)
+
+        assert result.returncode == 0, result.stderr
+        assert harness.calls == ["ARGV:"]
+        for name in ("VIBE_SYSTEM_PROMPT_ID", "VIBE_DEFAULT_AGENT", "VIBE_INCLUDE_PROJECT_CONTEXT"):
+            if name in settings:
+                assert f"{name}={settings[name]}" in result.stdout
+            else:
+                assert f"{name}=" not in result.stdout
+        assert not (harness.home / ".vibe" / "prompts").exists()
 
     def test_hook_capture_survives_failure_and_fresh_launch(self, harness: Harness) -> None:
         """An agent failure does not erase a captured ID; an explicit fresh run replaces it."""

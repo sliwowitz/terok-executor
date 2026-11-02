@@ -5,28 +5,11 @@
 
 # ACP wrapper for Mistral Vibe.
 #
-# Sets up per-agent git identity and injects terok task instructions
-# before exec-ing the real vibe-acp adapter.
+# Sets up per-agent git identity, session capture, and workspace trust
+# before running the real vibe-acp adapter.
 #
-# Instructions injection: Vibe exposes a swappable system-prompt slot
-# via the VIBE_SYSTEM_PROMPT_ID env var (mistral-vibe's
-# vibe.core.config._settings.system_prompt_id, resolved against
-# $VIBE_HOME/prompts/<id>.md without trust requirements).  We write the
-# terok instructions to that directory under a per-task id and point
-# Vibe at it.  Only the persona/behavior slot is replaced — Vibe still
-# composes tool-call schemas, OS info, model name, project context,
-# and user/project AGENTS.md on top (see vibe/core/system_prompt.py
-# get_universal_system_prompt for the full assembly).
-#
-# Replaces (not appends) Vibe's default cli.md persona: terseness
-# rules, phased workflow, banned phrases, "no emoji", etc.  This is
-# fine because that slot is *designed* to be swapped — Vibe itself
-# ships cli/explore/tests/lean as alternative personas in the same
-# slot (vibe/core/prompts/).  Future enhancement (not implemented):
-# offer a chooser among Vibe's vendored personas and prepend the
-# chosen one to the terok-task instructions so users who like a
-# specific Vibe persona keep it.  Keep this minimal until someone
-# asks for it.
+# Task instructions arrive through the container's read-only
+# ~/.vibe/AGENTS.md mount, independently of the selected agent profile.
 #
 # Unrestricted mode: VIBE_BYPASS_TOOL_PERMISSIONS env var is set at
 # container level via vibe.yaml's ``auto_approve.env``.  VibeConfig
@@ -48,20 +31,6 @@ if ! python3 /usr/local/share/terok/terok-vibe-session.py install; then
     echo "terok: Vibe session hooks unavailable; no shared-history auto-discovery." >&2
 fi
 rm -f "$TEROK_SESSION_FILE"
-
-_TEROK_INSTR="/home/dev/.terok/instructions.md"
-_VIBE_PROMPTS_DIR="${HOME}/.vibe/prompts"
-
-if [[ -f "$_TEROK_INSTR" && -n "${TASK_ID:-}" ]]; then
-    # Per-task id so parallel tasks don't clobber each other in the
-    # shared ~/.vibe mount.  Cleanup on EXIT bounds growth of the
-    # shared prompts dir to currently-running tasks.
-    _PROMPT_ID="terok-task-${TASK_ID}"
-    mkdir -p "$_VIBE_PROMPTS_DIR"
-    cp "$_TEROK_INSTR" "$_VIBE_PROMPTS_DIR/${_PROMPT_ID}.md"
-    export VIBE_SYSTEM_PROMPT_ID="$_PROMPT_ID"
-    trap 'rm -f "$_VIBE_PROMPTS_DIR/${_PROMPT_ID}.md"' EXIT
-fi
 
 # Trust the container's workspace so Vibe's HarnessFilesManager walks
 # the project's AGENTS.md chain into the system prompt.  ACP has no
@@ -91,10 +60,7 @@ _terok_trust_workspace_for_vibe() {
 }
 _terok_trust_workspace_for_vibe /workspace
 
-# No exec: keep the trap alive so the per-task prompt file is removed
-# even on a clean shutdown.  Bash forwards SIGINT/SIGTERM to the
-# foreground child by default; vibe-acp's exit code propagates as our
-# own.
+# Stay alive to report missing session capture after the adapter exits.
 _rc=0
 vibe-acp "$@" || _rc=$?
 if [[ ! -s "$TEROK_SESSION_FILE" ]]; then

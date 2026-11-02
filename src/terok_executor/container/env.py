@@ -66,6 +66,10 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+_CONTAINER_AGENT_CONFIG = "/home/dev/.terok"
+_INSTRUCTIONS_FILENAME = "instructions.md"
+_VIBE_INSTRUCTIONS_FILENAME = "AGENTS.md"
+
 
 # ── Vocabulary ──
 
@@ -385,9 +389,7 @@ def assemble_container_env(
 
     # 10. Agent config mount
     if spec.agent_config_dir:
-        volumes.append(
-            VolumeSpec(spec.agent_config_dir, "/home/dev/.terok", sharing=Sharing.PRIVATE)
-        )
+        volumes += _agent_config_mounts(spec.agent_config_dir, roster, mounts_base)
 
     # 11. Unrestricted mode
     if spec.unrestricted:
@@ -502,6 +504,37 @@ def _shared_config_mounts(
         specs.append(VolumeSpec(host_file, container_file, read_only=True))
 
     return specs
+
+
+def _agent_config_mounts(
+    config_dir: Path, roster: AgentRoster, mounts_base: Path
+) -> list[VolumeSpec]:
+    """Expose task configuration and Vibe's task-local system instructions.
+
+    Vibe reads its user-level ``AGENTS.md`` into system context. A private
+    file mount keeps instructions separate from the shared settings and
+    history, without replacing the selected agent profile.
+    """
+    volumes = [VolumeSpec(config_dir, _CONTAINER_AGENT_CONFIG, sharing=Sharing.PRIVATE)]
+    for mount in roster.mounts:
+        if mount.provider != "vibe":
+            continue
+        native_instructions = mounts_base / mount.host_dir / _VIBE_INSTRUCTIONS_FILENAME
+        if native_instructions.is_file() and native_instructions.stat().st_size:
+            _logger.warning(
+                "%s is masked by task instructions. Use terok's global/project instruction "
+                "configuration or the TUI instead.",
+                native_instructions,
+            )
+        volumes.append(
+            VolumeSpec(
+                config_dir / _INSTRUCTIONS_FILENAME,
+                f"{mount.container_path}/{_VIBE_INSTRUCTIONS_FILENAME}",
+                read_only=True,
+                sharing=Sharing.PRIVATE,
+            )
+        )
+    return volumes
 
 
 def _clamp_credential_mode(host_file: Path) -> None:
