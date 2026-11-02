@@ -2395,8 +2395,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.7.0a7.dev536+gca1b1f53e"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2F1315-rootless-storage#ca1b1f53ec69c18b6a306ee2fdc99c372fa5881e" }
+version = "0.7.0a7.dev537+g820d818ce"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2F1315-rootless-storage#820d818cec4f420c0e24338ff86f03192af295e5" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
