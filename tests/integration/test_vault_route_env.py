@@ -57,6 +57,7 @@ def test_provider_credential_reaches_the_container_as_a_phantom_token(
         db.close()
 
     spec = ContainerEnvSpec(
+        agent_config_dir=executor_env.task_dir / "agent-config",
         task_id=TASK_ID,
         agent_name="claude",
         envs_dir=executor_env.mounts_dir,

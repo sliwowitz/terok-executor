@@ -14,7 +14,9 @@ Usage::
     from terok_executor import AgentRoster
 
     result = assemble_container_env(
-        ContainerEnvSpec(task_id="abc", agent_name="claude"),
+        ContainerEnvSpec(
+            task_id="abc", agent_name="claude", agent_config_dir=Path("task/agent-config")
+        ),
         AgentRoster.shared(),
     )
     # result.env, result.volumes
@@ -97,6 +99,9 @@ class ContainerEnvSpec:
 
     agent_name: str
     """Agent name (e.g. ``"claude"``, ``"codex"``)."""
+
+    agent_config_dir: Path
+    """Prepared writable task state; its sibling inputs hold safe credential snapshots."""
 
     # -- Workspace location --------------------------------------------------
 
@@ -214,11 +219,6 @@ class ContainerEnvSpec:
     ``"Europe/Prague"``) to override, including to pin the container to
     UTC for reproducible runs.  If neither detection nor an override
     yields a zone, ``TZ`` is not set and the image default applies."""
-
-    # -- Agent config ------------------------------------------------------
-
-    agent_config_dir: Path | None = None
-    """Pre-prepared agent config directory (→ ``/home/dev/.terok:Z``)."""
 
     # -- Shared task directory (multi-agent IPC) ---------------------------
 
@@ -345,11 +345,6 @@ def assemble_container_env(
 
     # 8. Shared config mounts from roster
     mounts_base = spec.envs_dir or _mounts_dir()
-    volumes += _shared_config_mounts(
-        roster,
-        mounts_base,
-        expose_credential_providers=spec.expose_credential_providers,
-    )
 
     # 8b. Re-apply vault config patches (idempotent — ensures shared mount
     #     dirs contain correct vault addresses even after state wipe).
@@ -368,6 +363,12 @@ def assemble_container_env(
         providers=spec.enabled_vault_patch_providers,
         disabled_providers=spec.disabled_vault_patch_providers,
         credential_set=spec.credential_set,
+    )
+    volumes += _shared_config_mounts(
+        roster,
+        mounts_base,
+        expose_credential_providers=spec.expose_credential_providers,
+        inputs_dir=agent_input_dir(spec.agent_config_dir.parent),
     )
 
     # 9. Vault
@@ -399,8 +400,7 @@ def assemble_container_env(
         )
 
     # 10. Agent config mount
-    if spec.agent_config_dir:
-        volumes += _agent_config_mounts(spec.agent_config_dir, roster, mounts_base)
+    volumes += _agent_config_mounts(spec.agent_config_dir, roster, mounts_base)
 
     # 11. Unrestricted mode
     if spec.unrestricted:
@@ -469,6 +469,7 @@ def _shared_config_mounts(
     roster: AgentRoster,
     mounts_base: Path,
     *,
+    inputs_dir: Path,
     expose_credential_providers: frozenset[str] = frozenset(),
 ) -> list[VolumeSpec]:
     """Derive shared volume specs from the agent roster.
@@ -477,16 +478,13 @@ def _shared_config_mounts(
     provider mounts and explicit ``mounts:`` YAML sections.  Creates host
     directories on demand.
 
-    For mounts that carry a [`MountDef.credential_file`][terok_executor.roster.loader.MountDef.credential_file],
-    a read-only file mount is layered on top of the shared directory so an
-    in-container ``/login`` cannot rewrite the host-side phantom token
-    (terok-ai/terok#873).  We ``touch()`` the host-side credential file
-    when missing so podman has a real bind source — otherwise podman
-    materialises the destination inside the container's userns as root
-    with mode 0700, leaving the file unreadable to the agent (and breaking
-    e.g. ``gh`` whose ``hosts.yml`` is normally absent on fresh installs).
-    Credential files are created — and pre-existing ones re-clamped —
-    owner-only, because glab aborts on a ``config.yml`` looser than 0600.
+    Credential shadows are bounded snapshots in the host-owned task inputs,
+    mounted read-only over each vendor's credential path. A file in the writable
+    vendor directory must never become a bind source: a task could replace it
+    with a host-target symlink after validation but before Podman resolves it.
+    The snapshot protects pathname resolution; vendor content remains untrusted.
+    Missing credentials produce empty snapshots. Existing vendor credentials
+    are re-clamped owner-only because glab rejects loose permissions.
 
     Providers in *expose_credential_providers* keep the writable mount —
     used by terok's experimental ``expose_oauth_token`` mode where the
@@ -514,12 +512,13 @@ def _shared_config_mounts(
             continue
 
         try:
-            read_untrusted_bytes(host_file, max_bytes=MAX_CREDENTIAL_BYTES)
+            credential = read_untrusted_bytes(host_file, max_bytes=MAX_CREDENTIAL_BYTES)
         except FileNotFoundError:
-            write_untrusted_bytes(host_file, b"")
-
+            credential = b""
+        snapshot = inputs_dir / "credential-shadows" / m.host_dir / m.credential_file
+        write_untrusted_bytes(snapshot, credential)
         container_file = f"{m.container_path}/{m.credential_file}"
-        specs.append(VolumeSpec(host_file, container_file, read_only=True))
+        specs.append(VolumeSpec(snapshot, container_file, sharing=Sharing.PRIVATE, read_only=True))
 
     return specs
 

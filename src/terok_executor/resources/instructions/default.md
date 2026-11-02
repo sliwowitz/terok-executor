@@ -75,7 +75,7 @@ Update this file when transitioning between work phases. Set `done` with a summa
 ## Task inputs and writable state
 
 `/home/dev/.terok/input/` contains host-authored prompts, instructions, and
-wrapper scripts. All tasks mount this directory read-only.
+wrapper scripts, and host-owned credential snapshots. All tasks mount this directory read-only.
 Do not rename or edit these inputs. Initial-prompt delivery creates the
 empty `/home/dev/.terok/events/initial-prompt.consumed` marker; the original prompt
 remains unchanged. Session pointers and work-status reports stay writable

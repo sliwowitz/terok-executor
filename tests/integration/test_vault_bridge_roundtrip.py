@@ -233,6 +233,7 @@ def test_generated_base_url_reaches_the_vault_via_the_socat_bridge(
     finally:
         db.close()
     spec = ContainerEnvSpec(
+        agent_config_dir=executor_env.task_dir / "agent-config",
         task_id=TASK_ID,
         agent_name="claude",
         envs_dir=executor_env.mounts_dir,

@@ -206,6 +206,9 @@ def executor_env(
         workspace_dir=tmp_path / "workspace",
     )
     env.mounts_dir.mkdir(parents=True, exist_ok=True)
+    inputs = env.task_dir / "agent-inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    (inputs / "instructions.md").write_text("Integration task instructions")
     env.task_dir.mkdir(parents=True, exist_ok=True)
     env.workspace_dir.mkdir(parents=True, exist_ok=True)
     env.cfg.db_path.parent.mkdir(parents=True, exist_ok=True)

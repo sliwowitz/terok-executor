@@ -91,7 +91,15 @@ repair it as an ordinary file rather than linking it to another host path.
 | `agent-config/` | `/home/dev/.terok/` | Writable session pointers and status |
 
 Wrappers, instructions, initial and headless prompts, review notices, and the
-Toad access token belong in `agent-inputs/`. An initial prompt is immutable.
+Toad access token belong in `agent-inputs/`. Read-only credential shadows are
+bounded snapshots under `agent-inputs/credential-shadows/`; Podman never binds
+a credential file from the writable vendor directory. Swapping the vendor
+entry after its safe read cannot redirect the later bind. Exposed credentials
+and vendor settings that require writes retain their ordinary shared mount.
+Snapshots preserve vendor data; they do not grant broker authorization.
+Credential snapshots are read-only bind mounts in shared mode and file overlays
+after vendor-directory copies in sealed mode; their host source remains outside
+writable mounts in both modes. An initial prompt is immutable.
 The wrapper atomically creates the empty `initial-prompt.consumed` marker in
 `agent-events/` before passing the prompt to the agent. The banner only displays
 pending prompts; it does not claim them. The marker acknowledges delivery, not

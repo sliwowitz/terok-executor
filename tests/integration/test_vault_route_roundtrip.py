@@ -114,6 +114,7 @@ def test_generated_phantom_round_trips_to_the_real_key(
 
     # 2. Executor assembles the container env — this mints the phantom for the route.
     spec = ContainerEnvSpec(
+        agent_config_dir=executor_env.task_dir / "agent-config",
         task_id=TASK_ID,
         agent_name="claude",
         envs_dir=executor_env.mounts_dir,

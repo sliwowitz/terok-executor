@@ -78,7 +78,7 @@ def agent_config_volumes(agent_config_dir: Path) -> tuple[VolumeSpec, ...]:
 
     inputs = agent_input_dir(agent_config_dir.parent)
     events = agent_event_dir(agent_config_dir.parent)
-    for directory in (inputs, events):
+    for directory in (agent_config_dir, inputs, events):
         with open_untrusted_directory(directory, create=True):
             pass
     return (
