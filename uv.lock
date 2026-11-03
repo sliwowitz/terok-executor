@@ -2395,8 +2395,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.7.0a9.dev541+gd62d29552"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fcontainer-boundaries#d62d2955246326142fc6f2474a1d98379424fdf5" }
+version = "0.7.0a9.dev542+g6ed2e90e8"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fcontainer-boundaries#6ed2e90e84074f390eca0b9ba15cea3bb183537e" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
@@ -2415,8 +2415,8 @@ dependencies = [
 
 [[package]]
 name = "terok-shield"
-version = "0.10.0a5.dev419+g32ad23d20"
-source = { git = "https://github.com/sliwowitz/terok-shield?rev=fix%2Fcontainer-boundaries#32ad23d20b257cdc87346b516178386008938518" }
+version = "0.10.0a5.dev420+g30b0edbb7"
+source = { git = "https://github.com/sliwowitz/terok-shield?rev=fix%2Fcontainer-boundaries#30b0edbb73f65a02ea1d92426629357c9339a5a0" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },

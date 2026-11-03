@@ -1675,7 +1675,8 @@ def test_credential_bind_source_survives_vendor_symlink_swap(roster, tmp_path):
     assert shadow.host_path.is_relative_to(inputs)
     assert shadow.host_path != vendor
     assert shadow.host_path.read_bytes() == b'{"phantom": true}'
-    assert shadow.read_only and not shadow.live
+    assert shadow.read_only
+    assert not shadow.live
     assert vendor.is_symlink()
     assert outside.read_bytes() == b"Never bind this host secret"
 

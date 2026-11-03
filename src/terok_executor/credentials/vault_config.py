@@ -161,6 +161,7 @@ def write_vault_config(name: str, credential_set: str = "default") -> None:
 
     shared_dir = mounts_dir() / auth_info.host_dir_name
     with open_untrusted_directory(shared_dir, create=True):
+        # Acquisition creates and validates the shared root before selecting a config file.
         pass
     config_path = _safe_config_path(shared_dir, patch["file"])
 
@@ -255,6 +256,7 @@ def apply_shared_config_patches(
                 patch = _resolve_patch(patch, route, cred_key, credential_set)
             shared_dir = mounts_base / host_dir
             with open_untrusted_directory(shared_dir, create=True):
+                # Acquisition validates the shared root before any patch-specific operation.
                 pass
             config_path = _safe_config_path(shared_dir, patch["file"])
 

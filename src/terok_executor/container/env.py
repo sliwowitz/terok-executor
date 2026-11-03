@@ -499,6 +499,7 @@ def _shared_config_mounts(
     for m in roster.mounts:
         host_dir = mounts_base / m.host_dir
         with open_untrusted_directory(host_dir, create=True):
+            # Acquisition itself creates and validates the mount source; no mutation is needed.
             pass
         specs.append(VolumeSpec(host_dir, m.container_path))
 

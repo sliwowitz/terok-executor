@@ -81,6 +81,7 @@ def agent_config_volumes(agent_config_dir: Path) -> tuple[VolumeSpec, ...]:
     events = agent_event_dir(agent_config_dir.parent)
     for directory in (agent_config_dir, inputs, events):
         with open_untrusted_directory(directory, create=True):
+            # Acquisition itself prepares each mount root without following task-created links.
             pass
     return (
         VolumeSpec(agent_config_dir, CONTAINER_AGENT_CONFIG, sharing=Sharing.PRIVATE),

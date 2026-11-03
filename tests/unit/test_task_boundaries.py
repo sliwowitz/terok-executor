@@ -43,16 +43,29 @@ def prompt_protocol():
     return runpy.run_path(str(helper))["pending_prompt"]
 
 
+def test_task_input_public_exports_keep_their_defining_objects():
+    """Grouped lazy exports retain every task-input name and its defining object."""
+    import terok_executor
+    from terok_executor import task_files
+
+    for name in task_files.__all__:
+        assert name in terok_executor.__all__
+        assert getattr(terok_executor, name) is getattr(task_files, name)
+
+
 def test_inputs_and_acknowledgements_are_live_but_vendor_state_is_not(tmp_path):
     """Sealed tasks expose only their explicit input and acknowledgement channels."""
     state, inputs, events = agent_config_volumes(tmp_path / "agent-config")
-    assert not state.read_only and not state.live
+    assert not state.read_only
+    assert not state.live
     assert inputs.host_path == agent_input_dir(tmp_path)
     assert inputs.container_path == CONTAINER_AGENT_INPUTS
-    assert inputs.read_only and inputs.live
+    assert inputs.read_only
+    assert inputs.live
     assert events.host_path == agent_event_dir(tmp_path)
     assert events.container_path == CONTAINER_AGENT_EVENTS
-    assert not events.read_only and events.live
+    assert not events.read_only
+    assert events.live
 
 
 def test_initial_prompt_is_late_published_immutable_and_consumed_once(tmp_path, prompt_protocol):
@@ -85,8 +98,9 @@ def test_consumption_refuses_unsafe_marker(tmp_path, prompt_protocol, entry):
     victim = tmp_path / "outside"
     victim.touch()
     _plant(marker, victim, entry)
+    inputs, events = agent_input_dir(tmp_path), agent_event_dir(tmp_path)
     with pytest.raises(ValueError, match="regular file"):
-        prompt_protocol(agent_input_dir(tmp_path), agent_event_dir(tmp_path), claim=True)
+        prompt_protocol(inputs, events, claim=True)
     assert victim.read_bytes() == b""
 
 

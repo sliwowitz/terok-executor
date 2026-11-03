@@ -1239,6 +1239,7 @@ def _apply_post_capture_state(
         raise ValueError(f"Invalid host_dir_name: {host_dir_name!r}")
     target_dir = mounts_root / host_rel
     with open_untrusted_directory(target_dir, create=True):
+        # Acquisition validates the capture destination even when there are no patches.
         pass
 
     for filename, patch in patches.items():

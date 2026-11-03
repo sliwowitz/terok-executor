@@ -797,10 +797,11 @@ class TestLaunchPrepared:
         sandbox = _mock_sandbox()
         sandbox.run.side_effect = GpuConfigError("no CDI")
         runner = AgentRunner(sandbox=sandbox)
+        broker_context = BrokerContext("project", "task", "default")
 
         with pytest.raises(BuildError, match="no CDI"):
             runner.launch_prepared(
-                broker_context=BrokerContext("project", "task", "default"),
+                broker_context=broker_context,
                 env={},
                 volumes=[],
                 image="img",
@@ -976,6 +977,7 @@ class TestLaunchPreparedSupervisorWiring:
 
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
+        broker_context = BrokerContext("project", "task", "default")
 
         with patch(
             "terok_executor.integrations.sandbox.write_sidecar",
@@ -983,7 +985,7 @@ class TestLaunchPreparedSupervisorWiring:
         ):
             with pytest.raises(BuildError, match="refusing to launch an unsupervised container"):
                 runner.launch_prepared(
-                    broker_context=BrokerContext("project", "task", "default"),
+                    broker_context=broker_context,
                     env={},
                     volumes=[],
                     image="img",

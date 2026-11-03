@@ -76,6 +76,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     task_dir = spec.tasks_root / str(spec.task_id)
     agent_config_dir = task_dir / "agent-config"
     with open_untrusted_directory(agent_config_dir, create=True):
+        # Acquisition creates and validates writable state; instructions belong elsewhere.
         pass
     inputs_dir = agent_input_dir(task_dir)
 
