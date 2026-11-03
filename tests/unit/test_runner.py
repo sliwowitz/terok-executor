@@ -16,6 +16,7 @@ from terok_executor.integrations.sandbox import (
     CONTAINER_GATE_SOCKET,
     CONTAINER_RUNTIME_DIR,
     BrokerContext,
+    ImageInspection,
 )
 from terok_executor.task_files import INPUTS_PROTOCOL, INPUTS_PROTOCOL_LABEL
 
@@ -445,9 +446,9 @@ class TestAgentRunner:
         reservation.__exit__.return_value = None
         runtime_mock = _Mock()
         runtime_mock.reserve_port.return_value = reservation
-        runtime_mock.image.return_value.labels.return_value = {
-            INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL
-        }
+        runtime_mock.image.return_value.inspect.return_value = ImageInspection(
+            id="image-id", labels={INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+        )
 
         with (
             patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"),
@@ -1572,9 +1573,9 @@ def _mock_sandbox() -> Mock:
 
     sandbox = Mock()
     sandbox.config = SandboxConfig()
-    sandbox.runtime.image.return_value.labels.return_value = {
-        INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL
-    }
+    sandbox.runtime.image.return_value.inspect.return_value = ImageInspection(
+        id="image-id", labels={INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    )
     sandbox.pre_start_args.return_value = []
     sandbox.stream_logs.return_value = True
     sandbox.wait_for_exit.return_value = 0

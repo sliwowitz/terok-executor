@@ -9,6 +9,7 @@ import pytest
 from terok_util import UnsafePathError
 
 from terok_executor.container.inject import inject_prompt
+from terok_executor.integrations.sandbox import ContainerInspection, ImageInspection
 from terok_executor.task_files import (
     CONTAINER_AGENT_INPUTS,
     INPUTS_PROTOCOL,
@@ -23,9 +24,17 @@ def sandbox(tmp_path):
     """Provide inspected task identity and mounts without launching a container."""
     sandbox = MagicMock()
     container = sandbox.runtime.container.return_value
-    container.env = {"TEROK_CONTAINER_PROTOCOL": TASK_INPUT_PROTOCOL}
-    container.image.labels.return_value = {INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    container.image.inspect.return_value = ImageInspection(
+        id="image-id", labels={INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    )
     container.mounts = [(str(tmp_path), CONTAINER_AGENT_INPUTS)]
+    container.inspect.return_value = ContainerInspection(
+        id="container-id",
+        state="exited",
+        image=container.image,
+        env={"TEROK_CONTAINER_PROTOCOL": TASK_INPUT_PROTOCOL},
+        mounts=tuple(container.mounts),
+    )
     with patch("terok_executor.container.inject.Sandbox", return_value=sandbox):
         yield sandbox
 

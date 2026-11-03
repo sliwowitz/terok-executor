@@ -21,7 +21,13 @@ from terok_util import (
 )
 
 if TYPE_CHECKING:
-    from .integrations.sandbox import Container, Image, VolumeSpec
+    from .integrations.sandbox import (
+        Container,
+        ContainerInspection,
+        Image,
+        ImageInspection,
+        VolumeSpec,
+    )
 
 CONTAINER_AGENT_INPUTS = "/home/dev/.terok/input"
 CONTAINER_AGENT_CONFIG = "/home/dev/.terok"
@@ -35,6 +41,10 @@ TASK_INPUT_PROTOCOL = "4"
 MAX_PROMPT_BYTES = 120 * 1024
 
 
+class InputProtocolMismatch(RuntimeError):
+    """A successful runtime inspection proves that task inputs use an obsolete protocol."""
+
+
 def agent_input_dir(task_dir: Path) -> Path:
     """Return the host-only input directory beside the task's writable configuration."""
     return task_dir / "agent-inputs"
@@ -45,15 +55,31 @@ def agent_event_dir(task_dir: Path) -> Path:
     return task_dir / "agent-events"
 
 
-def require_task_input_protocol(container: Container) -> None:
-    """Refuse to resume retained containers with the old writable-input contract."""
-    image = container.image
+def require_task_input_protocol(
+    container: Container, *, inspection: ContainerInspection | None = None
+) -> None:
+    """Refuse obsolete task inputs without treating inspection failures as upgrade requests.
+
+    Reuse *inspection* when the caller has already observed the retained
+    container. Only [`InputProtocolMismatch`][terok_executor.InputProtocolMismatch]
+    establishes a reason to recreate; unavailable runtime data must abort
+    without discarding retained state.
+    """
+    from .integrations.sandbox import RuntimeInspectionError
+
+    observed = inspection if inspection is not None else container.inspect()
+    if observed is None:
+        raise RuntimeInspectionError(f"Cannot verify task {container.name!r}: container is absent")
+    if observed.image is None:
+        raise RuntimeInspectionError(
+            f"Cannot verify task {container.name!r}: originating image is unavailable"
+        )
+    image = _inspect_protocol_image(observed.image)
     if (
-        container.env.get("TEROK_CONTAINER_PROTOCOL") != TASK_INPUT_PROTOCOL
-        or image is None
-        or image.labels().get(INPUTS_PROTOCOL_LABEL) != INPUTS_PROTOCOL
+        observed.env.get("TEROK_CONTAINER_PROTOCOL") != TASK_INPUT_PROTOCOL
+        or image.labels.get(INPUTS_PROTOCOL_LABEL) != INPUTS_PROTOCOL
     ):
-        raise RuntimeError(
+        raise InputProtocolMismatch(
             f"Task container {container.name!r} uses an obsolete input protocol. "
             "Rebuild the agent and project images, then recreate the task. "
             "Its shared vendor configuration and session files can be retained."
@@ -62,8 +88,8 @@ def require_task_input_protocol(container: Container) -> None:
 
 def require_image_input_protocol(image: Image) -> None:
     """Reject obsolete images before an orchestrator removes a retained task."""
-    if image.labels().get(INPUTS_PROTOCOL_LABEL) != INPUTS_PROTOCOL:
-        raise RuntimeError(
+    if _inspect_protocol_image(image).labels.get(INPUTS_PROTOCOL_LABEL) != INPUTS_PROTOCOL:
+        raise InputProtocolMismatch(
             f"Image {image.ref!r} lacks the read-only task-input protocol. "
             "Rebuild the agent and project images, then recreate the task."
         )
@@ -114,11 +140,22 @@ def write_initial_prompt(task_dir: Path, prompt: str) -> None:
             raise ValueError("Initial prompt is immutable; create a new task")
 
 
+def _inspect_protocol_image(image: Image) -> ImageInspection:
+    """Require a successful image observation before deciding protocol compatibility."""
+    from .integrations.sandbox import RuntimeInspectionError
+
+    inspected = image.inspect()
+    if inspected is None:
+        raise RuntimeInspectionError(f"Cannot verify image {image.ref!r}: image is absent")
+    return inspected
+
+
 __all__ = [
     "CONTAINER_AGENT_INPUTS",
     "INITIAL_PROMPT_CONSUMED_FILENAME",
     "INITIAL_PROMPT_FILENAME",
     "MAX_PROMPT_BYTES",
+    "InputProtocolMismatch",
     "agent_config_volumes",
     "agent_input_dir",
     "agent_event_dir",

@@ -9,9 +9,10 @@ import json
 import os
 import runpy
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from importlib import resources
 from pathlib import Path
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from terok_util import UnsafePathError
@@ -19,6 +20,11 @@ from terok_util import UnsafePathError
 from terok_executor import MAX_PROMPT_BYTES
 from terok_executor.credentials.auth import _apply_post_capture_state
 from terok_executor.credentials.extractors import extract_credential
+from terok_executor.integrations.sandbox import (
+    ContainerInspection,
+    ImageInspection,
+    RuntimeInspectionError,
+)
 from terok_executor.provider.agents import _inject_opencode_instructions, _write_session_hook
 from terok_executor.task_files import (
     CONTAINER_AGENT_EVENTS,
@@ -28,9 +34,11 @@ from terok_executor.task_files import (
     INPUTS_PROTOCOL,
     INPUTS_PROTOCOL_LABEL,
     TASK_INPUT_PROTOCOL,
+    InputProtocolMismatch,
     agent_config_volumes,
     agent_event_dir,
     agent_input_dir,
+    require_image_input_protocol,
     require_task_input_protocol,
     write_initial_prompt,
 )
@@ -41,6 +49,26 @@ def prompt_protocol():
     """Load the same standalone helper installed into agent images."""
     helper = resources.files("terok_executor") / "resources/scripts/terok-initial-prompt.py"
     return runpy.run_path(str(helper))["pending_prompt"]
+
+
+@pytest.fixture
+def retained_container():
+    """Provide strict observations independently of best-effort runtime properties."""
+    image = Mock()
+    image.ref = "image-id"
+    image.inspect.return_value = ImageInspection(
+        id=image.ref, labels={INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    )
+    container = Mock()
+    container.name = "task"
+    container.inspect.return_value = ContainerInspection(
+        id="container-id",
+        state="exited",
+        image=image,
+        env={"TEROK_CONTAINER_PROTOCOL": TASK_INPUT_PROTOCOL},
+        mounts=(),
+    )
+    return container
 
 
 def test_task_input_public_exports_keep_their_defining_objects():
@@ -163,17 +191,65 @@ def test_shared_config_rejects_symlinked_parent(tmp_path):
     assert (outside / "settings.json").read_text() == "{}"
 
 
-def test_retained_input_protocol_requires_current_container_and_image():
+@pytest.mark.parametrize("target", ["container", "image"])
+@pytest.mark.parametrize("value", [None, "obsolete"])
+def test_retained_input_protocol_requires_current_container_and_image(
+    retained_container, target, value
+):
     """An image update does not upgrade an existing container's frozen contract."""
-    image = SimpleNamespace(labels=lambda: {INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL})
-    container = SimpleNamespace(name="task", image=image, env={})
-    with pytest.raises(RuntimeError, match="recreate"):
-        require_task_input_protocol(container)
-    container.env["TEROK_CONTAINER_PROTOCOL"] = TASK_INPUT_PROTOCOL
-    require_task_input_protocol(container)
-    container.image = None
-    with pytest.raises(RuntimeError, match="rebuild|Rebuild"):
-        require_task_input_protocol(container)
+    observed = retained_container.inspect.return_value
+    fields, key = (
+        (observed.env, "TEROK_CONTAINER_PROTOCOL")
+        if target == "container"
+        else (observed.image.inspect.return_value.labels, INPUTS_PROTOCOL_LABEL)
+    )
+    if value is None:
+        del fields[key]
+    else:
+        fields[key] = value
+    with pytest.raises(InputProtocolMismatch, match="recreate"):
+        require_task_input_protocol(retained_container)
+
+
+def test_current_input_protocol_reuses_supplied_container_observation(retained_container):
+    """A restart decision can share one coherent observation with protocol validation."""
+    observed = retained_container.inspect.return_value
+    require_task_input_protocol(retained_container, inspection=observed)
+    retained_container.inspect.assert_not_called()
+    observed.image.inspect.assert_called_once_with()
+
+
+def test_current_input_protocol_inspects_container_by_default(retained_container):
+    """Existing callers get strict observations without supplying their own snapshot."""
+    require_task_input_protocol(retained_container)
+    retained_container.inspect.assert_called_once_with()
+
+
+@pytest.mark.parametrize("target", ["container", "image"])
+@pytest.mark.parametrize("failure", ["timeout", "nonzero exit", "malformed JSON"])
+def test_protocol_inspection_failure_is_not_an_upgrade_request(retained_container, target, failure):
+    """Uncertain runtime data propagates unchanged instead of authorizing recreation."""
+    observed = retained_container.inspect.return_value
+    handle = retained_container if target == "container" else observed.image
+    error = RuntimeInspectionError(failure)
+    handle.inspect.side_effect = error
+    with pytest.raises(RuntimeInspectionError) as caught:
+        require_task_input_protocol(retained_container)
+    assert caught.value is error
+
+
+@pytest.mark.parametrize("missing", ["container", "origin", "image"])
+def test_unavailable_protocol_metadata_is_not_a_confirmed_mismatch(retained_container, missing):
+    """Absent retained objects cannot masquerade as an inspected obsolete protocol."""
+    observed = retained_container.inspect.return_value
+    if missing == "container":
+        retained_container.inspect.return_value = None
+    elif missing == "origin":
+        retained_container.inspect.return_value = replace(observed, image=None)
+    else:
+        observed.image.inspect.return_value = None
+    with pytest.raises(RuntimeInspectionError, match="absent|unavailable"):
+        require_task_input_protocol(retained_container)
 
 
 def _plant(path: Path, victim: Path, entry: str) -> None:
@@ -270,12 +346,23 @@ def test_prompt_helper_limit_matches_host_and_rejects_before_claim(tmp_path, pro
     assert not (events / INITIAL_PROMPT_CONSUMED_FILENAME).exists()
 
 
-def test_image_protocol_preflight_rejects_old_images():
+def test_image_protocol_preflight_rejects_old_images(retained_container):
     """An orchestrator can preserve its retained task until a suitable image exists."""
-    from terok_executor.task_files import require_image_input_protocol
-
-    image = SimpleNamespace(ref="old-agent", labels=lambda: {})
-    with pytest.raises(RuntimeError, match="Rebuild"):
+    image = retained_container.inspect.return_value.image
+    image.inspect.return_value.labels.clear()
+    with pytest.raises(InputProtocolMismatch, match="Rebuild"):
         require_image_input_protocol(image)
-    image.labels = lambda: {INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    image.inspect.return_value.labels[INPUTS_PROTOCOL_LABEL] = INPUTS_PROTOCOL
     require_image_input_protocol(image)
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_image_protocol_preflight_preserves_uncertain_image_failure(retained_container, missing):
+    """An unavailable replacement image aborts preflight without claiming incompatibility."""
+    image = retained_container.inspect.return_value.image
+    if missing:
+        image.inspect.return_value = None
+    else:
+        image.inspect.side_effect = RuntimeInspectionError("timeout")
+    with pytest.raises(RuntimeInspectionError):
+        require_image_input_protocol(image)

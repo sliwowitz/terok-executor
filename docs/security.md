@@ -125,6 +125,9 @@ Restarting cannot replace their old writable-input mounts. Old images and
 containers fail with an actionable recreation error. Shared vendor settings and
 sessions can be retained, but symlinked or hardlinked host-consumed files must be
 replaced with ordinary files. There is no unsafe one-time migration exception.
+Protocol checks use strict runtime observations: only a confirmed protocol mismatch
+justifies recreation. Failed inspection or unavailable container/image metadata
+aborts the operation instead of treating uncertainty as an obsolete task.
 The orchestrator must not import legacy agent-writable prompt text as authoritative
 host instructions. Authorization sidecars also require the explicit credential
 scope, subject, and credential set from token issuance; legacy sidecars are not
