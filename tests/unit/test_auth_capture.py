@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from terok_sandbox import CODEX_SHARED_OAUTH_MARKER, PHANTOM_CREDENTIALS_MARKER, CredentialDB
+from terok_util import UnsafePathError
 
 from terok_executor.credentials.auth import (
     _apply_post_capture_state,
@@ -306,7 +307,7 @@ class TestWriteClaudeCredentialsFile:
         _write_claude_credentials_file({"type": "oauth"}, target)
         assert (target / "_claude-config" / ".credentials.json").is_file()
 
-    def test_replaces_symlink_without_touching_target(self, tmp_path: Path) -> None:
+    def test_rejects_symlink_without_touching_target(self, tmp_path: Path) -> None:
         """No-follow writes replace a hostile mount symlink instead of following it."""
         victim = tmp_path / "victim.json"
         victim.write_text("do not overwrite")
@@ -315,13 +316,11 @@ class TestWriteClaudeCredentialsFile:
         dest = cred_dir / ".credentials.json"
         dest.symlink_to(victim)
 
-        _write_claude_credentials_file({"type": "oauth"}, tmp_path)
+        with pytest.raises(UnsafePathError):
+            _write_claude_credentials_file({"type": "oauth"}, tmp_path)
 
         assert victim.read_text() == "do not overwrite"
-        assert not dest.is_symlink()
-        assert json.loads(dest.read_text())["claudeAiOauth"]["accessToken"] == (
-            PHANTOM_CREDENTIALS_MARKER
-        )
+        assert dest.is_symlink()
 
 
 class TestApplyPostCaptureState:
@@ -493,9 +492,7 @@ class TestCaptureAppliesPostCaptureState:
         # No .claude.json should exist — post_capture_state is empty
         assert not (mounts / "_claude-config" / ".claude.json").exists()
 
-    def test_capture_degrades_to_warning_on_post_capture_error(
-        self, tmp_path: Path, capsys
-    ) -> None:
+    def test_capture_refuses_unsafe_post_capture_entry(self, tmp_path: Path, capsys) -> None:
         """Post-capture state failure logs a warning but doesn't abort capture."""
         from terok_executor.credentials.auth import AuthProvider
 
@@ -526,14 +523,10 @@ class TestCaptureAppliesPostCaptureState:
             mock_cfg_cls.return_value.open_credential_db = lambda **_kw: CredentialDB(
                 db_path, passphrase=TEST_VAULT_PASSPHRASE
             )
-            # Should NOT raise — error is caught and printed
-            _capture_credentials(
-                "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
-            )
-
-        err = capsys.readouterr().err
-        assert "Warning" in err
-        assert "post_capture_state" in err
+            with pytest.raises(UnsafePathError, match="regular file"):
+                _capture_credentials(
+                    "claude", tmp_path, "default", mounts_base=mounts, auth_provider=provider
+                )
 
         # Verify credentials were still stored in the DB (under provider key).
         db = CredentialDB(db_path, passphrase=TEST_VAULT_PASSPHRASE)
@@ -753,7 +746,7 @@ class TestCodexOAuthMountWriter:
         data = json.loads((codex_dir / "auth.json").read_text())
         assert data["tokens"]["access_token"] == CODEX_SHARED_OAUTH_MARKER
 
-    def test_expose_replaces_symlink_without_touching_target(self, tmp_path: Path) -> None:
+    def test_expose_rejects_symlink_without_touching_target(self, tmp_path: Path) -> None:
         """Exposed copy mode writes through the same no-follow destination helper."""
         auth_dir = tmp_path / "auth"
         auth_dir.mkdir()
@@ -768,11 +761,11 @@ class TestCodexOAuthMountWriter:
         dest = codex_dir / "auth.json"
         dest.symlink_to(victim)
 
-        _codex_oauth_mount_writer(auth_dir, mounts, payload, expose_token=True)
+        with pytest.raises(UnsafePathError):
+            _codex_oauth_mount_writer(auth_dir, mounts, payload, expose_token=True)
 
         assert victim.read_text() == "do not overwrite"
-        assert not dest.is_symlink()
-        assert json.loads(dest.read_text()) == payload
+        assert dest.is_symlink()
 
     def test_expose_raises_when_file_missing(self, tmp_path: Path) -> None:
         """Raises FileNotFoundError when exposed and no auth.json."""

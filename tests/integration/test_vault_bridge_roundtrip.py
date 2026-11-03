@@ -43,7 +43,7 @@ import pytest
 from aiohttp import web
 
 from terok_executor.container.env import ContainerEnvSpec, assemble_container_env
-from terok_executor.integrations.sandbox import RunSpec, VolumeSpec
+from terok_executor.integrations.sandbox import BrokerContext, RunSpec, VolumeSpec
 from terok_executor.roster import AgentRoster
 from terok_executor.vault_addr import CONTAINER_VAULT_SOCKET, LOOPBACK_VAULT_PORT
 from tests.constants import (
@@ -75,7 +75,15 @@ class _ThreadedVault:
     the phantom resolved to the real key.
     """
 
-    def __init__(self, db_path: Path, routes_path: Path, socket_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        routes_path: Path,
+        socket_path: Path,
+        *,
+        broker_context: BrokerContext,
+    ) -> None:
+        self._broker_context = broker_context
         self._db_path = db_path
         self._routes_path = routes_path
         self._socket_path = socket_path
@@ -146,7 +154,11 @@ class _ThreadedVault:
             )
         )
 
-        broker_runner = web.AppRunner(_build_app(str(self._db_path), str(self._routes_path)))
+        broker_runner = web.AppRunner(
+            _build_app(
+                str(self._db_path), str(self._routes_path), broker_context=self._broker_context
+            )
+        )
         await broker_runner.setup()
         self._runners.append(broker_runner)
         broker_site = web.UnixSite(broker_runner, path=str(self._socket_path))
@@ -233,6 +245,7 @@ def test_generated_base_url_reaches_the_vault_via_the_socat_bridge(
     finally:
         db.close()
     spec = ContainerEnvSpec(
+        agent_config_dir=executor_env.task_dir / "agent-config",
         task_id=TASK_ID,
         agent_name="claude",
         envs_dir=executor_env.mounts_dir,
@@ -255,7 +268,10 @@ def test_generated_base_url_reaches_the_vault_via_the_socat_bridge(
     )
     host_socket = tmp_path / "vault.sock"
     with _ThreadedVault(
-        executor_env.cfg.db_path, tmp_path / "broker-routes.json", host_socket
+        executor_env.cfg.db_path,
+        tmp_path / "broker-routes.json",
+        host_socket,
+        broker_context=result.broker_context,
     ) as vault:
         name = launch_with_vault_socket(host_socket, result.env, result.volumes)
 

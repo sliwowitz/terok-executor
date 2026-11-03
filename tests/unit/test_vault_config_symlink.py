@@ -49,7 +49,7 @@ class TestWriteNofollow:
         path = tmp_path / "config.toml"
         path.symlink_to(victim)
 
-        with pytest.raises(ConfigPatchError, match="refusing to write"):
+        with pytest.raises(ConfigPatchError, match="regular file"):
             _write_nofollow(path, b"ATTACKER")
 
         # Victim file was not touched.
@@ -72,7 +72,7 @@ class TestReadNofollow:
         secret.write_bytes(b"SECRET")
         link = tmp_path / "config.yml"
         link.symlink_to(secret)
-        with pytest.raises(ConfigPatchError, match="refusing to read"):
+        with pytest.raises(ConfigPatchError, match="unsafe path"):
             _read_nofollow(link)
 
 
@@ -91,7 +91,7 @@ class TestApplyPatchesSymlinkSafety:
             "toml_match": {"name": "mistral"},
             "toml_set": {"base_url": "{{ vault_url }}"},
         }
-        with pytest.raises(ConfigPatchError, match="symlink"):
+        with pytest.raises(ConfigPatchError, match="unsafe path"):
             _apply_toml_patch(config, patch, _TEST_LOCATION)
         assert victim.read_bytes() == b"UNCHANGED"
 
@@ -105,7 +105,7 @@ class TestApplyPatchesSymlinkSafety:
             "file": "config.yml",
             "yaml_set": {"http_unix_socket": "{{ vault_socket }}"},
         }
-        with pytest.raises(ConfigPatchError, match="symlink"):
+        with pytest.raises(ConfigPatchError, match="unsafe path"):
             _apply_yaml_patch(config, patch, _TEST_LOCATION)
         assert victim.read_bytes() == b"UNCHANGED"
 

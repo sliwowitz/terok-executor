@@ -59,7 +59,7 @@ class TestGenerateClaudeWrapper:
     def test_wrapper_includes_append_system_prompt(self) -> None:
         """Wrapper injects --append-system-prompt via a runtime file guard."""
         wrapper = generate_agent_wrapper(AGENTS["claude"])
-        assert "[ -f /home/dev/.terok/instructions.md ]" in wrapper
+        assert "[ -f /home/dev/.terok/input/instructions.md ]" in wrapper
         assert "--append-system-prompt" in wrapper
 
     def test_wrapper_timeout_support(self) -> None:
@@ -99,8 +99,8 @@ class TestGenerateClaudeWrapper:
     def test_wrapper_picks_up_initial_prompt(self) -> None:
         """Wrapper consumes initial-prompt.txt one-shot, gated on no resume."""
         wrapper = generate_agent_wrapper(AGENTS["claude"])
-        assert "/home/dev/.terok/initial-prompt.txt" in wrapper
-        assert "/home/dev/.terok/initial-prompt.consumed.txt" in wrapper
+        assert "/home/dev/.terok/input/initial-prompt.txt" in wrapper
+        assert "terok-initial-prompt.py claim" in wrapper
         # Resume always wins — pickup is skipped if the session file is present.
         assert f"[ ! -s {CONTAINER_CLAUDE_SESSION_PATH} ]" in wrapper
 
@@ -373,7 +373,9 @@ class TestPrepareAgentConfigDir:
             )
             (tmp_path / "tasks" / "t1").mkdir(parents=True)
             d = prepare_agent_config_dir(spec)
-            assert (d / "instructions.md").read_text(encoding="utf-8") == "Custom."
+            assert (d.parent / "agent-inputs" / "instructions.md").read_text(
+                encoding="utf-8"
+            ) == "Custom."
 
     @unittest.mock.patch("terok_executor.provider.agents._write_session_hook")
     def test_default_instructions_when_none(self, _mock: object, tmp_path: Path) -> None:
@@ -382,7 +384,9 @@ class TestPrepareAgentConfigDir:
             spec = self._make_spec(tmp_path / "tasks", "t2", mounts_base=Path(envs))
             (tmp_path / "tasks" / "t2").mkdir(parents=True)
             d = prepare_agent_config_dir(spec)
-            assert "conventions" in (d / "instructions.md").read_text(encoding="utf-8")
+            assert "conventions" in (d.parent / "agent-inputs" / "instructions.md").read_text(
+                encoding="utf-8"
+            )
 
     @unittest.mock.patch("terok_executor.provider.agents._write_session_hook")
     def test_wrapper_has_append_system_prompt(self, _mock: object, tmp_path: Path) -> None:
@@ -393,7 +397,7 @@ class TestPrepareAgentConfigDir:
             )
             (tmp_path / "tasks" / "t3").mkdir(parents=True)
             d = prepare_agent_config_dir(spec)
-            wrapper = (d / "terok-executor.sh").read_text(encoding="utf-8")
+            wrapper = (d.parent / "agent-inputs" / "terok-executor.sh").read_text(encoding="utf-8")
             assert "--append-system-prompt" in wrapper
 
 

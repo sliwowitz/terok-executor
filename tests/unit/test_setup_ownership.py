@@ -14,7 +14,7 @@ from terok_util import SetupCheck, SetupDowngradeError, SetupRequiredError, Setu
 from terok_executor import sandbox as setup
 from terok_executor.commands import _handle_run, _handle_setup, _handle_start, _handle_uninstall
 from terok_executor.container.runner import AgentRunner
-from terok_executor.integrations.sandbox import SandboxConfig
+from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig
 
 
 @pytest.fixture
@@ -180,7 +180,13 @@ def test_library_guard_precedes_launch_mutation(
             runner.run_web(repo=None)
         else:
             runner.launch_prepared(
-                env={}, volumes=[], image="fixture", command=[], name="fixture", task_dir=tmp_path
+                broker_context=BrokerContext("scope", "task", "default"),
+                env={},
+                volumes=[],
+                image="fixture",
+                command=[],
+                name="fixture",
+                task_dir=tmp_path,
             )
     check.assert_called_once_with(cfg, live=True)
     allocate.assert_not_called()

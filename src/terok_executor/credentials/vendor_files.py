@@ -35,6 +35,10 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, RootModel, ValidationError
+from terok_util import UnsafePathError, read_untrusted_text
+
+MAX_CREDENTIAL_BYTES = 1024 * 1024
+"""Maximum bytes accepted from a container-produced credential file."""
 
 # ── Reusable building blocks ──────────────────────────────────────────────
 
@@ -193,8 +197,10 @@ def load_vendor_json[T: BaseModel](model: type[T], path: Path) -> T | None:
     [`ValidationError`][pydantic_core.ValidationError] explicitly.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read_untrusted_text(path, max_bytes=MAX_CREDENTIAL_BYTES)
         data = json.loads(text)
+    except UnsafePathError:
+        raise
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
     return model.model_validate(data)
@@ -213,7 +219,9 @@ def load_vendor_yaml[T: BaseModel](model: type[T], path: Path) -> T | None:
 
     yaml = YAML(typ="safe")
     try:
-        data = yaml.load(path)
+        data = yaml.load(read_untrusted_text(path, max_bytes=MAX_CREDENTIAL_BYTES))
+    except UnsafePathError:
+        raise
     except (OSError, UnicodeDecodeError, YAMLError):
         return None
     return model.model_validate(data)

@@ -24,6 +24,7 @@ from terok_executor.container.env import (
 from terok_executor.integrations.sandbox import (
     CONTAINER_SSH_SIGNER_SOCKET,
     CONTAINER_VAULT_SOCKET,
+    BrokerContext,
 )
 from terok_executor.roster import AgentRoster
 from terok_executor.roster.types import Provider, ProviderAuth, ProviderModel, VaultRoute
@@ -122,6 +123,7 @@ def base_spec(workspace: Path, envs_dir: Path) -> ContainerEnvSpec:
     """Minimal spec with only required fields (all dirs tmp-backed)."""
     return ContainerEnvSpec(
         task_id="test-123",
+        agent_config_dir=envs_dir.parent / "task" / "agent-config",
         agent_name="claude",
         workspace_host_path=workspace,
         envs_dir=envs_dir,
@@ -132,6 +134,7 @@ def _spec(workspace: Path, envs_dir: Path, **overrides) -> ContainerEnvSpec:
     """Shorthand for a tmp-backed spec with overrides."""
     defaults = {
         "task_id": "t1",
+        "agent_config_dir": envs_dir.parent / "task" / "agent-config",
         "agent_name": "claude",
         "workspace_host_path": workspace,
         "envs_dir": envs_dir,
@@ -179,7 +182,7 @@ class TestBaseEnv:
         from terok_executor.container.env import CONTAINER_PROTOCOL
 
         result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
-        assert CONTAINER_PROTOCOL == 3
+        assert CONTAINER_PROTOCOL == 4
         assert result.env["TEROK_CONTAINER_PROTOCOL"] == str(CONTAINER_PROTOCOL)
 
 
@@ -365,7 +368,12 @@ class TestWorkspaceVolume:
 
     def test_in_container_workspace_mounts_nothing(self, envs_dir, roster):
         """No workspace_host_path → no /workspace volume (writable-layer cell)."""
-        spec = ContainerEnvSpec(task_id="t1", agent_name="claude", envs_dir=envs_dir)
+        spec = ContainerEnvSpec(
+            task_id="t1",
+            agent_name="claude",
+            envs_dir=envs_dir,
+            agent_config_dir=envs_dir.parent / "task" / "agent-config",
+        )
         result = assemble_container_env(spec, roster, caller_manages_vault=True)
         assert _find_vol(result.volumes, "/workspace") is None
         assert result.env["REPO_ROOT"] == "/workspace"
@@ -418,10 +426,10 @@ class TestAgentConfigMount:
         assert vol.host_path == cfg_dir
         assert vol.sharing == "private"
 
-    def test_no_agent_config_when_none(self, base_spec, roster):
-        result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
-        assert _find_vol(result.volumes, "/home/dev/.terok") is None
-        assert _find_vol(result.volumes, _VIBE_INSTRUCTIONS_PATH) is None
+    def test_task_input_location_is_required(self):
+        """An env-only caller cannot silently fall back to writable credential bind sources."""
+        with pytest.raises(TypeError, match="agent_config_dir"):
+            ContainerEnvSpec(task_id="task", agent_name="claude")
 
     @pytest.mark.parametrize("instructions", ["Task instructions", ""])
     def test_vibe_instructions_are_private_read_only_even_for_another_default_agent(
@@ -430,7 +438,8 @@ class TestAgentConfigMount:
         """Any installed Vibe sees the task file without sharing or rewriting it."""
         config_dir = tmp_path / "agent-config"
         config_dir.mkdir()
-        source = config_dir / _INSTRUCTIONS_FILENAME
+        source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(instructions)
         result = assemble_container_env(
             _spec(workspace, envs_dir, agent_config_dir=config_dir),
@@ -467,7 +476,8 @@ class TestAgentConfigMount:
         for task_id in ("first", "second"):
             config_dir = tmp_path / task_id / "agent-config"
             config_dir.mkdir(parents=True)
-            source = config_dir / _INSTRUCTIONS_FILENAME
+            source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+            source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(task_id)
             result = assemble_container_env(
                 _spec(workspace, envs_dir, task_id=task_id, agent_config_dir=config_dir),
@@ -493,7 +503,8 @@ class TestAgentConfigMount:
             native.write_text(native_content)
         config_dir = tmp_path / "agent-config"
         config_dir.mkdir()
-        source = config_dir / _INSTRUCTIONS_FILENAME
+        source = config_dir.parent / "agent-inputs" / _INSTRUCTIONS_FILENAME
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("Task instructions")
 
         assemble_container_env(
@@ -1429,7 +1440,7 @@ class TestConfigPatchSecurity:
                 "terok_executor.integrations.sandbox.SandboxConfig",
                 return_value=SandboxConfig(token_broker_port=18731),
             ),
-            pytest.raises(ConfigPatchError, match="Failed to apply"),
+            pytest.raises(ConfigPatchError, match="regular file"),
         ):
             apply_shared_config_patches(roster, tmp_path)
 
@@ -1438,48 +1449,55 @@ class TestSharedConfigMountsUnit:
     """Unit tests for the internal shared mount builder."""
 
     def test_creates_host_dirs(self, roster, tmp_path):
-        mounts = _shared_config_mounts(roster, tmp_path)
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         assert len(mounts) > 0
         assert (tmp_path / "_claude-config").is_dir()
 
     def test_deduplicates_by_host_dir(self, roster, tmp_path):
-        mounts = _shared_config_mounts(roster, tmp_path)
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         # Directory mounts (rw shared dir) must be unique by host path; ro
         # credential shadows are layered on top and reuse the parent.
         dir_paths = [str(m.host_path) for m in mounts if not m.read_only]
         assert len(dir_paths) == len(set(dir_paths))
 
     def test_all_use_shared_label(self, roster, tmp_path):
-        mounts = _shared_config_mounts(roster, tmp_path)
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         for m in mounts:
-            assert m.sharing == "shared", f"Expected sharing='shared', got: {m.sharing}"
+            assert m.sharing == ("private" if m.read_only else "shared")
 
     def test_credential_file_layered_ro_when_host_has_phantom(self, roster, tmp_path):
-        """Host has the phantom credential — ro bind sources from it."""
+        """Host has the phantom credential — ro bind sources from its safe snapshot."""
         host_cred = tmp_path / "_claude-config" / ".credentials.json"
         host_cred.parent.mkdir(parents=True)
         host_cred.write_text('{"phantom": true}')
 
-        mounts = _shared_config_mounts(roster, tmp_path)
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         cred = next(
             (m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"),
             None,
         )
         assert cred is not None
         assert cred.read_only is True
-        assert cred.host_path == host_cred
+        assert cred.host_path != host_cred
+        assert cred.host_path.read_text() == host_cred.read_text()
 
-    def test_credential_file_touched_when_host_absent(self, roster, tmp_path):
-        """Host has no credential — touch an empty file at the natural path so
-        podman doesn't materialise the bind target as root with mode 0700."""
-        mounts = _shared_config_mounts(roster, tmp_path)
+    def test_empty_credential_snapshot_when_host_absent(self, roster, tmp_path):
+        """A missing vendor credential produces an empty host-owned snapshot."""
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         cred = next(
             (m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"),
             None,
         )
         assert cred is not None
         assert cred.read_only is True
-        assert cred.host_path == tmp_path / "_claude-config" / ".credentials.json"
+        assert (
+            cred.host_path
+            == tmp_path
+            / "agent-inputs"
+            / "credential-shadows"
+            / "_claude-config"
+            / ".credentials.json"
+        )
         assert cred.host_path.exists()
         assert cred.host_path.stat().st_size == 0
 
@@ -1489,14 +1507,21 @@ class TestSharedConfigMountsUnit:
             roster,
             tmp_path,
             expose_credential_providers=frozenset({"claude"}),
+            inputs_dir=tmp_path / "agent-inputs",
         )
         cred = [m for m in mounts if m.container_path == "/home/dev/.claude/.credentials.json"]
         assert cred == []
 
     def test_credential_file_created_owner_only(self, roster, tmp_path):
         """A freshly touched credential file must be 0600 — glab aborts on looser."""
-        _shared_config_mounts(roster, tmp_path)
-        cred = tmp_path / "_claude-config" / ".credentials.json"
+        _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
+        cred = (
+            tmp_path
+            / "agent-inputs"
+            / "credential-shadows"
+            / "_claude-config"
+            / ".credentials.json"
+        )
         assert stat.S_IMODE(cred.stat().st_mode) == 0o600
 
     def test_existing_loose_credential_file_reclamped(self, roster, tmp_path):
@@ -1511,7 +1536,7 @@ class TestSharedConfigMountsUnit:
         host_cred.write_text("hosts:\n  gitlab.com:\n    token: t\n")
         host_cred.chmod(0o644)
 
-        _shared_config_mounts(roster, tmp_path)
+        _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
 
         assert stat.S_IMODE(host_cred.stat().st_mode) == 0o600
         assert "gitlab.com" in host_cred.read_text()
@@ -1523,7 +1548,7 @@ class TestSharedConfigMountsUnit:
         host_cred.write_text("hosts: {}\n")
         host_cred.chmod(0o400)
 
-        _shared_config_mounts(roster, tmp_path)
+        _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
 
         assert stat.S_IMODE(host_cred.stat().st_mode) == 0o400
 
@@ -1533,7 +1558,7 @@ class TestSharedConfigMountsUnit:
         glab's config.yml is both credentials and settings, rewritten on
         startup, so the shadow would abort it — only the rw dir mount remains.
         """
-        mounts = _shared_config_mounts(roster, tmp_path)
+        mounts = _shared_config_mounts(roster, tmp_path, inputs_dir=tmp_path / "agent-inputs")
         shadow = [m for m in mounts if m.container_path == "/home/dev/.config/glab-cli/config.yml"]
         assert shadow == []
         dir_mount = [m for m in mounts if m.container_path == "/home/dev/.config/glab-cli"]
@@ -1598,4 +1623,76 @@ class TestEgressProjection:
         from terok_executor.container.env import ContainerEnvResult
         from terok_executor.roster.types import EgressProjection
 
-        assert ContainerEnvResult(env={}, volumes=()).egress == EgressProjection()
+        assert (
+            ContainerEnvResult(
+                env={}, volumes=(), broker_context=BrokerContext("project", "task", "default")
+            ).egress
+            == EgressProjection()
+        )
+
+
+def test_broker_context_matches_exact_issued_token_namespace(workspace, envs_dir, roster, tmp_path):
+    """Sidecar authorization uses the identical nondefault namespace as issued tokens."""
+    cfg = _make_vault_db(tmp_path, credential_set="selected-set")
+    spec = _spec(
+        workspace, envs_dir, credential_scope="actual-scope", credential_set="selected-set"
+    )
+    with patch("terok_executor.integrations.sandbox.SandboxConfig", return_value=cfg):
+        result = assemble_container_env(spec, roster)
+    assert result.broker_context == BrokerContext("actual-scope", spec.task_id, "selected-set")
+    db = cfg.open_credential_db()
+    try:
+        record = db.lookup_token(result.env["ANTHROPIC_API_KEY"])
+    finally:
+        db.close()
+    assert record["scope"] == result.broker_context.scope
+    assert record["subject"] == result.broker_context.subject
+    assert record["credential_set"] == result.broker_context.credential_set
+
+
+def test_credential_bind_source_survives_vendor_symlink_swap(roster, tmp_path):
+    """A task swapping its credential after host read cannot redirect Podman's later bind."""
+    from terok_util import read_untrusted_bytes
+
+    vendor = tmp_path / "mounts" / "_claude-config" / ".credentials.json"
+    vendor.parent.mkdir(parents=True)
+    vendor.write_bytes(b'{"phantom": true}')
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"Never bind this host secret")
+    inputs = tmp_path / "task" / "agent-inputs"
+
+    def read_then_swap(path, **kwargs):
+        """Deterministically substitute the attack between safe read and runtime bind."""
+        content = read_untrusted_bytes(path, **kwargs)
+        if path == vendor:
+            path.unlink()
+            path.symlink_to(outside)
+        return content
+
+    with patch("terok_executor.container.env.read_untrusted_bytes", side_effect=read_then_swap):
+        volumes = _shared_config_mounts(roster, tmp_path / "mounts", inputs_dir=inputs)
+    shadow = next(v for v in volumes if v.container_path == "/home/dev/.claude/.credentials.json")
+    assert shadow.host_path.is_relative_to(inputs)
+    assert shadow.host_path != vendor
+    assert shadow.host_path.read_bytes() == b'{"phantom": true}'
+    assert shadow.read_only
+    assert not shadow.live
+    assert vendor.is_symlink()
+    assert outside.read_bytes() == b"Never bind this host secret"
+
+
+def test_credential_snapshot_follows_config_materialization(base_spec, roster):
+    """A custom provider's config patch can share the credential file without a stale snapshot."""
+    credential = base_spec.envs_dir / "_claude-config" / ".credentials.json"
+
+    def materialize(*args, **kwargs):
+        """Write the provider's final config before snapshots are captured."""
+        credential.parent.mkdir(parents=True)
+        credential.write_bytes(b'{"materialized": true}')
+
+    with patch("terok_executor.credentials.vault_config.apply_shared_config_patches", materialize):
+        result = assemble_container_env(base_spec, roster, caller_manages_vault=True)
+    shadow = next(
+        v for v in result.volumes if v.container_path == "/home/dev/.claude/.credentials.json"
+    )
+    assert shadow.host_path.read_bytes() == b'{"materialized": true}'

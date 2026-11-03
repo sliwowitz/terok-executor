@@ -63,7 +63,7 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 
-from terok_executor.integrations.sandbox import RunSpec, VolumeSpec
+from terok_executor.integrations.sandbox import BrokerContext, RunSpec, VolumeSpec
 from terok_executor.vault_addr import CONTAINER_VAULT_SOCKET, LOOPBACK_VAULT_PORT
 from tests.constants import CONTAINER_WORKSPACE_DIR, INTEGRATION_VAULT_PASSPHRASE
 
@@ -91,7 +91,15 @@ class _TrappingVault:
     synchronous test can assert on them while codex runs.
     """
 
-    def __init__(self, db_path: Path, routes_path: Path, socket_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        routes_path: Path,
+        socket_path: Path,
+        *,
+        broker_context: BrokerContext,
+    ) -> None:
+        self._broker_context = broker_context
         self._db_path = db_path
         self._routes_path = routes_path
         self._socket_path = socket_path
@@ -179,7 +187,11 @@ class _TrappingVault:
             )
         )
 
-        broker_runner = web.AppRunner(_build_app(str(self._db_path), str(self._routes_path)))
+        broker_runner = web.AppRunner(
+            _build_app(
+                str(self._db_path), str(self._routes_path), broker_context=self._broker_context
+            )
+        )
         await broker_runner.setup()
         self._runners.append(broker_runner)
         broker_site = web.UnixSite(broker_runner, path=str(self._socket_path))
@@ -229,10 +241,13 @@ def test_real_codex_phantom_swaps_and_reaches_the_vault(
     from terok_sandbox.config import SandboxConfig
 
     # 1. Seed the real credential + mint a phantom for the openai route.
+    broker_context = BrokerContext(CREDENTIAL_SCOPE, "codex-handshake", CREDENTIAL_SET)
     db = executor_env.cfg.open_credential_db()
     try:
         db.store_credential(CREDENTIAL_SET, PROVIDER, {"type": "api_key", "key": REAL_SECRET})
-        phantom = db.create_token(CREDENTIAL_SCOPE, "codex-handshake", CREDENTIAL_SET, PROVIDER)
+        phantom = db.create_token(
+            broker_context.scope, broker_context.subject, broker_context.credential_set, PROVIDER
+        )
     finally:
         db.close()
     assert phantom != REAL_SECRET
@@ -260,7 +275,12 @@ def test_real_codex_phantom_swaps_and_reaches_the_vault(
     host_socket = tmp_path / "vault.sock"
     name = unique_container_name("codex-handshake")
 
-    with _TrappingVault(executor_env.cfg.db_path, tmp_path / "routes.json", host_socket) as vault:
+    with _TrappingVault(
+        executor_env.cfg.db_path,
+        tmp_path / "routes.json",
+        host_socket,
+        broker_context=broker_context,
+    ) as vault:
         # 4. Launch real codex via the real Sandbox.run path, with .codex config + the
         #    vault socket bind-mounted where CONTAINER_VAULT_SOCKET expects it.
         executor_env.sandbox().run(

@@ -1,72 +1,85 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for sealed-container injection helpers."""
+"""Follow-ups use the same live host-owned channel in shared and sealed tasks."""
 
-from __future__ import annotations
-
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from terok_executor.container.inject import inject_agent_config, inject_prompt
+import pytest
+from terok_util import UnsafePathError
+
+from terok_executor.container.inject import inject_prompt
+from terok_executor.integrations.sandbox import ContainerInspection, ImageInspection
+from terok_executor.task_files import (
+    CONTAINER_AGENT_INPUTS,
+    INPUTS_PROTOCOL,
+    INPUTS_PROTOCOL_LABEL,
+    MAX_PROMPT_BYTES,
+    TASK_INPUT_PROTOCOL,
+)
 
 
-class TestInjectAgentConfig:
-    """Verify inject_agent_config delegates to Sandbox.copy_to."""
+@pytest.fixture
+def sandbox(tmp_path):
+    """Provide inspected task identity and mounts without launching a container."""
+    sandbox = MagicMock()
+    container = sandbox.runtime.container.return_value
+    container.image.inspect.return_value = ImageInspection(
+        id="image-id", labels={INPUTS_PROTOCOL_LABEL: INPUTS_PROTOCOL}
+    )
+    container.mounts = [(str(tmp_path), CONTAINER_AGENT_INPUTS)]
+    container.inspect.return_value = ContainerInspection(
+        id="container-id",
+        state="exited",
+        image=container.image,
+        env={"TEROK_CONTAINER_PROTOCOL": TASK_INPUT_PROTOCOL},
+        mounts=tuple(container.mounts),
+    )
+    with patch("terok_executor.container.inject.Sandbox", return_value=sandbox):
+        yield sandbox
 
-    def test_copies_config_dir_into_container(self, tmp_path: Path) -> None:
-        """Config dir is copied to /home/dev/.terok via podman cp."""
-        mock_sandbox = MagicMock()
-        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
-            inject_agent_config("my-ctr", tmp_path)
 
-        mock_sandbox.copy_to.assert_called_once_with("my-ctr", tmp_path, "/home/dev/.terok")
+@pytest.mark.parametrize(
+    "prompt", ["Fix the test", "Behebe den Fehler — Ünïcödé", "One\nTwo\nThree"]
+)
+def test_followup_is_published_verbatim(tmp_path, sandbox, prompt):
+    """Atomic host publication replaces unsafe container-side copies."""
+    inject_prompt("task", prompt)
+    assert (tmp_path / "prompt.txt").read_text() == prompt
+    sandbox.copy_to.assert_not_called()
 
 
-class TestInjectPrompt:
-    """Verify inject_prompt writes a temp file and copies it in."""
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_followup_accepts_exact_byte_limit(tmp_path, sandbox, character):
+    """The maximum UTF-8 byte count works without counting code points instead."""
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")))
+    inject_prompt("task", prompt)
+    assert (tmp_path / "prompt.txt").read_text() == prompt
 
-    def test_prompt_text_reaches_container(self) -> None:
-        """Prompt text is written to a temp file then podman-cp'd."""
-        mock_sandbox = MagicMock()
-        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
-            inject_prompt("sealed-ctr", "Fix the flaky test")
 
-        mock_sandbox.copy_to.assert_called_once()
-        _name, src, dest = mock_sandbox.copy_to.call_args[0]
-        assert _name == "sealed-ctr"
-        assert dest == "/home/dev/.terok/prompt.txt"
-        # The temp file is cleaned up, but we can verify the Path was correct
-        assert isinstance(src, Path)
-        assert src.name == "prompt.txt"
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_followup_size_is_validated_before_runtime_access(tmp_path, sandbox, character):
+    """Reject oversized text before touching the container or its published inputs."""
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")) + 1)
+    with pytest.raises(ValueError, match="120 KiB"):
+        inject_prompt("task", prompt)
+    sandbox.runtime.container.assert_not_called()
+    assert not (tmp_path / "prompt.txt").exists()
 
-    def test_prompt_text_encoding(self) -> None:
-        """Non-ASCII prompt text is written with UTF-8 encoding."""
-        written_content = None
 
-        def capture_copy(container, src, dest):
-            nonlocal written_content
-            # Read the temp file before it's cleaned up
-            written_content = src.read_text(encoding="utf-8")
+def test_missing_input_mount_requires_recreation(sandbox):
+    """Legacy containers cannot fall back to writing a writable task path."""
+    sandbox.runtime.container.return_value.mounts = []
+    with pytest.raises(RuntimeError, match="recreate"):
+        inject_prompt("task", "Instruction")
+    sandbox.copy_to.assert_not_called()
 
-        mock_sandbox = MagicMock()
-        mock_sandbox.copy_to.side_effect = capture_copy
-        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
-            inject_prompt("ctr", "Behebe den Fehler — Ünïcödé")
 
-        assert written_content == "Behebe den Fehler — Ünïcödé"
-
-    def test_multiline_prompt(self) -> None:
-        """Multi-line prompts are preserved verbatim."""
-        written_content = None
-
-        def capture_copy(container, src, dest):
-            nonlocal written_content
-            written_content = src.read_text(encoding="utf-8")
-
-        mock_sandbox = MagicMock()
-        mock_sandbox.copy_to.side_effect = capture_copy
-        with patch("terok_executor.integrations.sandbox.Sandbox", return_value=mock_sandbox):
-            inject_prompt("ctr", "Line one\nLine two\nLine three")
-
-        assert written_content == "Line one\nLine two\nLine three"
+def test_followup_rejects_unsafe_host_destination(tmp_path, sandbox):
+    """Even a poisoned host input entry cannot redirect follow-up publication."""
+    outside = tmp_path / "outside"
+    outside.write_text("Unchanged")
+    (tmp_path / "prompt.txt").symlink_to(outside)
+    with pytest.raises(UnsafePathError):
+        inject_prompt("task", "Instruction")
+    assert outside.read_text() == "Unchanged"

@@ -14,7 +14,9 @@ Usage::
     from terok_executor import AgentRoster
 
     result = assemble_container_env(
-        ContainerEnvSpec(task_id="abc", agent_name="claude"),
+        ContainerEnvSpec(
+            task_id="abc", agent_name="claude", agent_config_dir=Path("task/agent-config")
+        ),
         AgentRoster.shared(),
     )
     # result.env, result.volumes
@@ -30,16 +32,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from terok_util import (
+    UnsafePathError,
+    open_untrusted_directory,
+    read_untrusted_bytes,
+    write_untrusted_bytes,
+)
+
 from terok_executor._util import detect_host_timezone
+from terok_executor.credentials.vendor_files import MAX_CREDENTIAL_BYTES
 from terok_executor.integrations.sandbox import (
     CONTAINER_SSH_SIGNER_SOCKET,
     CONTAINER_VAULT_SOCKET,
+    BrokerContext,
     Sharing,
     VolumeSpec,
 )
 from terok_executor.roster.types import EgressProjection
+from terok_executor.task_files import TASK_INPUT_PROTOCOL, agent_config_volumes, agent_input_dir
 
-CONTAINER_PROTOCOL = 3
+CONTAINER_PROTOCOL = int(TASK_INPUT_PROTOCOL)
 """Version of the host↔container env/script contract.
 
 Emitted to every container as ``TEROK_CONTAINER_PROTOCOL``, and stamped on
@@ -48,12 +60,10 @@ long-lived container was built against.  Bumped on breaking changes to the
 env-var or script-interface contract, not on every release.  Old containers
 on protocol N keep running; new containers get protocol N+1.
 
-Protocol 3 records terok-sandbox #491, which moved each service's socket
-into its own ``/run/terok`` subdirectory and so changed the values of
-``TEROK_VAULT_SOCKET`` / ``TEROK_SSH_SIGNER_SOCKET`` / ``TEROK_GATE_SOCKET``.
-A container stamped below that starts anyway and is warned about, never
-refused — [`MIN_RUNTIME_PROTOCOL`][terok_sandbox.supervision.MIN_RUNTIME_PROTOCOL]
-is the matching floor, so the two constants move together."""
+Protocol 4 separates host-authored inputs from writable task state and binds
+credential services to the exact task authorization context. Retained tasks
+must be recreated after rebuilding their images; restarting cannot change
+their mount topology."""
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import (
@@ -66,7 +76,6 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-_CONTAINER_AGENT_CONFIG = "/home/dev/.terok"
 _INSTRUCTIONS_FILENAME = "instructions.md"
 _VIBE_INSTRUCTIONS_FILENAME = "AGENTS.md"
 
@@ -90,6 +99,9 @@ class ContainerEnvSpec:
 
     agent_name: str
     """Agent name (e.g. ``"claude"``, ``"codex"``)."""
+
+    agent_config_dir: Path
+    """Prepared writable task state; its sibling inputs hold safe credential snapshots."""
 
     # -- Workspace location --------------------------------------------------
 
@@ -208,11 +220,6 @@ class ContainerEnvSpec:
     UTC for reproducible runs.  If neither detection nor an override
     yields a zone, ``TZ`` is not set and the image default applies."""
 
-    # -- Agent config ------------------------------------------------------
-
-    agent_config_dir: Path | None = None
-    """Pre-prepared agent config directory (→ ``/home/dev/.terok:Z``)."""
-
     # -- Shared task directory (multi-agent IPC) ---------------------------
 
     shared_dir: Path | None = None
@@ -246,6 +253,9 @@ class ContainerEnvResult:
 
     volumes: tuple[VolumeSpec, ...]
     """Typed volume specs — the sandbox decides whether to mount or inject."""
+
+    broker_context: BrokerContext
+    """Authorization namespace used for this task's credential token issuance."""
 
     egress: EgressProjection = field(default_factory=EgressProjection)
     """Roster-derived egress projection — shield's generated t20 / t30 tiers.
@@ -287,6 +297,7 @@ def assemble_container_env(
     """
     from terok_executor.paths import mounts_dir as _mounts_dir
 
+    broker_context = BrokerContext(spec.credential_scope, spec.task_id, spec.credential_set)
     env: dict[str, str] = {}
     volumes: list[VolumeSpec] = []
 
@@ -334,11 +345,6 @@ def assemble_container_env(
 
     # 8. Shared config mounts from roster
     mounts_base = spec.envs_dir or _mounts_dir()
-    volumes += _shared_config_mounts(
-        roster,
-        mounts_base,
-        expose_credential_providers=spec.expose_credential_providers,
-    )
 
     # 8b. Re-apply vault config patches (idempotent — ensures shared mount
     #     dirs contain correct vault addresses even after state wipe).
@@ -357,6 +363,12 @@ def assemble_container_env(
         providers=spec.enabled_vault_patch_providers,
         disabled_providers=spec.disabled_vault_patch_providers,
         credential_set=spec.credential_set,
+    )
+    volumes += _shared_config_mounts(
+        roster,
+        mounts_base,
+        expose_credential_providers=spec.expose_credential_providers,
+        inputs_dir=agent_input_dir(spec.agent_config_dir.parent),
     )
 
     # 9. Vault
@@ -388,8 +400,7 @@ def assemble_container_env(
         )
 
     # 10. Agent config mount
-    if spec.agent_config_dir:
-        volumes += _agent_config_mounts(spec.agent_config_dir, roster, mounts_base)
+    volumes += _agent_config_mounts(spec.agent_config_dir, roster, mounts_base)
 
     # 11. Unrestricted mode
     if spec.unrestricted:
@@ -413,7 +424,12 @@ def assemble_container_env(
     #     they are skipped (they need the direct route).
     egress = roster.compose_egress(exposed_credential_providers=spec.expose_credential_providers)
 
-    return ContainerEnvResult(env=env, volumes=tuple(volumes), egress=egress)
+    return ContainerEnvResult(
+        env=env,
+        volumes=tuple(volumes),
+        egress=egress,
+        broker_context=broker_context,
+    )
 
 
 # ── Private helpers ──
@@ -453,6 +469,7 @@ def _shared_config_mounts(
     roster: AgentRoster,
     mounts_base: Path,
     *,
+    inputs_dir: Path,
     expose_credential_providers: frozenset[str] = frozenset(),
 ) -> list[VolumeSpec]:
     """Derive shared volume specs from the agent roster.
@@ -461,16 +478,13 @@ def _shared_config_mounts(
     provider mounts and explicit ``mounts:`` YAML sections.  Creates host
     directories on demand.
 
-    For mounts that carry a [`MountDef.credential_file`][terok_executor.roster.loader.MountDef.credential_file],
-    a read-only file mount is layered on top of the shared directory so an
-    in-container ``/login`` cannot rewrite the host-side phantom token
-    (terok-ai/terok#873).  We ``touch()`` the host-side credential file
-    when missing so podman has a real bind source — otherwise podman
-    materialises the destination inside the container's userns as root
-    with mode 0700, leaving the file unreadable to the agent (and breaking
-    e.g. ``gh`` whose ``hosts.yml`` is normally absent on fresh installs).
-    Credential files are created — and pre-existing ones re-clamped —
-    owner-only, because glab aborts on a ``config.yml`` looser than 0600.
+    Credential shadows are bounded snapshots in the host-owned task inputs,
+    mounted read-only over each vendor's credential path. A file in the writable
+    vendor directory must never become a bind source: a task could replace it
+    with a host-target symlink after validation but before Podman resolves it.
+    The snapshot protects pathname resolution; vendor content remains untrusted.
+    Missing credentials produce empty snapshots. Existing vendor credentials
+    are re-clamped owner-only because glab rejects loose permissions.
 
     Providers in *expose_credential_providers* keep the writable mount —
     used by terok's experimental ``expose_oauth_token`` mode where the
@@ -484,7 +498,9 @@ def _shared_config_mounts(
 
     for m in roster.mounts:
         host_dir = mounts_base / m.host_dir
-        host_dir.mkdir(parents=True, exist_ok=True)
+        with open_untrusted_directory(host_dir, create=True):
+            # Acquisition itself creates and validates the mount source; no mutation is needed.
+            pass
         specs.append(VolumeSpec(host_dir, m.container_path))
 
         if not m.credential_file:
@@ -496,12 +512,14 @@ def _shared_config_mounts(
         if m.writable or m.provider in expose_credential_providers:
             continue
 
-        host_file.parent.mkdir(parents=True, exist_ok=True)
-        if not host_file.exists():
-            host_file.touch(mode=0o600)
-
+        try:
+            credential = read_untrusted_bytes(host_file, max_bytes=MAX_CREDENTIAL_BYTES)
+        except FileNotFoundError:
+            credential = b""
+        snapshot = inputs_dir / "credential-shadows" / m.host_dir / m.credential_file
+        write_untrusted_bytes(snapshot, credential)
         container_file = f"{m.container_path}/{m.credential_file}"
-        specs.append(VolumeSpec(host_file, container_file, read_only=True))
+        specs.append(VolumeSpec(snapshot, container_file, sharing=Sharing.PRIVATE, read_only=True))
 
     return specs
 
@@ -515,7 +533,7 @@ def _agent_config_mounts(
     file mount keeps instructions separate from the shared settings and
     history, without replacing the selected agent profile.
     """
-    volumes = [VolumeSpec(config_dir, _CONTAINER_AGENT_CONFIG, sharing=Sharing.PRIVATE)]
+    volumes = list(agent_config_volumes(config_dir))
     for mount in roster.mounts:
         if mount.provider != "vibe":
             continue
@@ -528,7 +546,7 @@ def _agent_config_mounts(
             )
         volumes.append(
             VolumeSpec(
-                config_dir / _INSTRUCTIONS_FILENAME,
+                agent_input_dir(config_dir.parent) / _INSTRUCTIONS_FILENAME,
                 f"{mount.container_path}/{_VIBE_INSTRUCTIONS_FILENAME}",
                 read_only=True,
                 sharing=Sharing.PRIVATE,
@@ -538,29 +556,22 @@ def _agent_config_mounts(
 
 
 def _clamp_credential_mode(host_file: Path) -> None:
-    """Strip group/other permission bits from an existing credential file.
-
-    Releases up to 0.2.x ``touch()``-ed credential files with the umask
-    default (0644), and those files persist in the shared mounts across
-    upgrades.  glab refuses to start when its ``config.yml`` is looser
-    than 0600, so every launch re-clamps to owner-only — idempotent, and
-    never *adds* bits (a deliberately read-only 0400 file stays 0400).
-
-    Opens with ``O_NOFOLLOW`` + ``fchmod`` so a symlink planted in the
-    container-writable shared dir cannot redirect the chmod to an
-    arbitrary operator-owned file (CWE-59).  The clamp is best-effort:
-    any open failure (missing file, planted symlink, permissions) leaves
-    the file as-is rather than aborting container assembly — a file we
-    cannot even open is not one the old ``touch()`` created loose.
-    """
+    """Clamp a regular shared credential without following task-controlled links."""
     try:
-        fd = os.open(host_file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except OSError:
+        with open_untrusted_directory(host_file.parent) as directory:
+            fd = os.open(
+                host_file.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+            )
+    except FileNotFoundError:
         return
+    except OSError as exc:
+        raise UnsafePathError(f"Unsafe credential file {host_file}: {exc.strerror}") from exc
     try:
-        st = os.fstat(fd)
-        if stat.S_ISREG(st.st_mode) and stat.S_IMODE(st.st_mode) & 0o077:
-            os.fchmod(fd, stat.S_IMODE(st.st_mode) & ~0o077)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise UnsafePathError(f"Credential file is not a single regular file: {host_file}")
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            os.fchmod(fd, stat.S_IMODE(info.st_mode) & ~0o077)
     finally:
         os.close(fd)
 

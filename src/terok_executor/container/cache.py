@@ -15,12 +15,15 @@ The public entry point is [`seed_workspace_from_clone_cache`][terok_executor.con
 from __future__ import annotations
 
 import logging
+import os
 import shutil
+import stat
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from terok_util import require_host_tool
+from terok_util import UnsafePathError, open_untrusted_directory, require_host_tool
 
 if TYPE_CHECKING:
     from terok_executor.integrations.sandbox import SandboxConfig
@@ -58,6 +61,8 @@ def seed_workspace_from_clone_cache(
     try:
         _logger.info("Seeding workspace from clone cache: %s → %s", cache_dir, workspace_path)
         _copy_tree(cache_dir, workspace_path)
+    except UnsafePathError:
+        raise
     except (OSError, shutil.Error, subprocess.CalledProcessError) as exc:
         _logger.warning("Clone cache seed failed (non-fatal): %s", exc)
         _wipe_workspace_contents(workspace_path)
@@ -88,20 +93,24 @@ def _resolve_cache_dir(scope: str, cfg: SandboxConfig | None) -> Path | None:
 
 
 def _copy_tree(src: Path, dst: Path) -> None:
-    """Copy *src* into *dst* using ``cp --reflink=auto`` for CoW speed.
-
-    Falls back to [`shutil.copytree`][shutil.copytree] when ``cp`` is unavailable.
-    """
-    try:
-        subprocess.run(
-            [require_host_tool("cp"), "--reflink=auto", "-a", f"{src}/.", str(dst)],
-            check=True,
-            capture_output=True,
-            timeout=300,
-        )
-    except FileNotFoundError:
-        # cp not available (unlikely on Linux, but be safe)
-        shutil.copytree(str(src), str(dst), dirs_exist_ok=True)
+    """Stage the cache privately, then publish entries without traversing destination links."""
+    with open_untrusted_directory(dst, create=True) as destination:
+        if set(os.listdir(destination)) - {".new-task-marker"}:
+            raise UnsafePathError(f"Refusing to seed a nonempty task workspace: {dst}")
+        with tempfile.TemporaryDirectory(prefix=".terok-seed-", dir=dst.parent) as temporary:
+            staged = Path(temporary)
+            try:
+                subprocess.run(
+                    [require_host_tool("cp"), "--reflink=auto", "-a", f"{src}/.", str(staged)],
+                    check=True,
+                    capture_output=True,
+                    timeout=300,
+                )
+            except FileNotFoundError:
+                shutil.copytree(src, staged, symlinks=True, dirs_exist_ok=True)
+            with open_untrusted_directory(staged) as source:
+                for name in os.listdir(source):
+                    os.rename(name, name, src_dir_fd=source, dst_dir_fd=destination)
 
 
 def _rewrite_origin(workspace_path: Path, url: str) -> None:
@@ -130,8 +139,13 @@ def _wipe_workspace_contents(workspace_path: Path) -> None:
 
     The init script requires an empty workspace for ``git clone``.
     """
-    for child in workspace_path.iterdir():
-        try:
-            shutil.rmtree(child) if child.is_dir() else child.unlink()
-        except OSError:
-            pass
+    with open_untrusted_directory(workspace_path) as directory:
+        for name in os.listdir(directory):
+            try:
+                info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    shutil.rmtree(name, dir_fd=directory)
+                else:
+                    os.unlink(name, dir_fd=directory)
+            except OSError:
+                pass

@@ -151,3 +151,49 @@ class TestSeedWorkspaceFromCloneCache:
         assert result is False
         # Entire workspace must be empty for fallback clone
         assert not any(ws.iterdir())
+
+
+def test_fallback_refuses_existing_destination_symlink(tmp_path):
+    """The shutil fallback cannot copy through task-planted destination links."""
+    import pytest
+    from terok_util import UnsafePathError
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "file").write_text("Replacement")
+    target = tmp_path / "target"
+    target.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("Unchanged")
+    (target / "file").symlink_to(outside)
+    with patch("terok_executor.container.cache.subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(UnsafePathError, match="nonempty"):
+            _copy_tree(source, target)
+    assert outside.read_text() == "Unchanged"
+
+
+def test_fallback_preserves_source_symlinks_instead_of_dereferencing(tmp_path):
+    """A repository symlink is copied as a symlink, not as outside file contents."""
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("Private")
+    (source / "link").symlink_to(outside)
+    target = tmp_path / "target"
+    target.mkdir()
+    with patch("terok_executor.container.cache.subprocess.run", side_effect=FileNotFoundError):
+        _copy_tree(source, target)
+    assert (target / "link").is_symlink()
+
+
+def test_cleanup_unlinks_directory_symlink_without_touching_target(tmp_path):
+    """Cleanup stays inside the pinned task directory."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "file").write_text("Unchanged")
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "link").symlink_to(outside, target_is_directory=True)
+    _wipe_workspace_contents(target)
+    assert (outside / "file").read_text() == "Unchanged"
+    assert not list(target.iterdir())

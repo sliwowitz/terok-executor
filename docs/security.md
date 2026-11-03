@@ -72,3 +72,63 @@ every action with the user.
 All containers run under rootless Podman — no daemon, no root privileges.
 Combined with SELinux labeling, this limits what a compromised agent can
 reach on the host filesystem.
+
+
+## Host inputs and shared vendor state
+
+The host treats container-writable paths as untrusted. Shared vendor
+configuration and transcripts remain shared and writable. Host readers and
+writers reject symlinks in any path component, hardlinked files, directories,
+FIFOs, and other nonregular entries. Reads are bounded: credential files to
+1 MiB and merged vendor configuration to 4 MiB. Writes replace files atomically
+rather than modifying an existing inode. Errors identify the unsafe entry;
+repair it as an ordinary file rather than linking it to another host path.
+
+| Host task directory | Container location | Access |
+| --- | --- | --- |
+| `agent-inputs/` | `/home/dev/.terok/input/` | Host-written, container read-only |
+| `agent-events/` | `/home/dev/.terok/events/` | Narrow writable acknowledgement channel |
+| `agent-config/` | `/home/dev/.terok/` | Writable session pointers and status |
+
+Wrappers, instructions, initial and headless prompts, review notices, and the
+Toad access token belong in `agent-inputs/`. Read-only credential shadows are
+bounded snapshots under `agent-inputs/credential-shadows/`; Podman never binds
+a credential file from the writable vendor directory. Swapping the vendor
+entry after its safe read cannot redirect the later bind. Exposed credentials
+and vendor settings that require writes retain their ordinary shared mount.
+Snapshots preserve vendor data; they do not grant broker authorization.
+Credential snapshots are read-only bind mounts in shared mode and file overlays
+after vendor-directory copies in sealed mode; their host source remains outside
+writable mounts in both modes. An initial prompt is immutable.
+The wrapper atomically creates the empty `initial-prompt.consumed` marker in
+`agent-events/` before passing the prompt to the agent. The banner only displays
+pending prompts; it does not claim them. The marker acknowledges delivery, not
+successful agent execution. Deleting or forging it can affect delivery but
+cannot replace the host-authored prompt.
+
+Prompts are limited to 120 KiB of UTF-8 data, including the appended newline
+for initial prompts. This leaves headroom below the Linux per-argument limit:
+the existing agent launch paths deliver a prompt as one command-line argument.
+Oversized prompts fail before publication or acknowledgement.
+
+Input and event **directory** mounts remain live in sealed mode, so publication
+after background startup and prompt acknowledgement are visible immediately.
+This is a narrow exception to copied state, alongside the existing live service
+channels. Other task state and vendor files remain isolated copies in sealed
+mode. Atomic host publication is visible through directory mounts; an individual
+file mount would retain an obsolete inode.
+
+### Upgrade requirements
+
+Rebuild the agent and project images and recreate retained task containers.
+Restarting cannot replace their old writable-input mounts. Old images and
+containers fail with an actionable recreation error. Shared vendor settings and
+sessions can be retained, but symlinked or hardlinked host-consumed files must be
+replaced with ordinary files. There is no unsafe one-time migration exception.
+Protocol checks use strict runtime observations: only a confirmed protocol mismatch
+justifies recreation. Failed inspection or unavailable container/image metadata
+aborts the operation instead of treating uncertainty as an obsolete task.
+The orchestrator must not import legacy agent-writable prompt text as authoritative
+host instructions. Authorization sidecars also require the explicit credential
+scope, subject, and credential set from token issuance; legacy sidecars are not
+assigned a guessed namespace.

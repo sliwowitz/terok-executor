@@ -28,10 +28,11 @@ from typing import IO, TYPE_CHECKING, cast
 from terok_util import require_host_tool, require_setup
 
 from terok_executor._util import detect_host_timezone
-from terok_executor.integrations.sandbox import SandboxConfig, Sharing, VolumeSpec
+from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig, Sharing, VolumeSpec
 from terok_executor.paths import container_state_dir
 from terok_executor.roster.types import EgressProjection
 from terok_executor.sandbox import check_setup
+from terok_executor.task_files import CONTAINER_AGENT_INPUTS, require_image_input_protocol
 
 from .build import BuildError, ImageBuilder
 
@@ -448,6 +449,7 @@ class AgentRunner:
         command: list[str],
         name: str,
         task_dir: Path,
+        broker_context: BrokerContext,
         gpus: bool | str | Sequence[str] | None = None,
         gpu: bool | None = None,
         memory: str | None = None,
@@ -481,7 +483,8 @@ class AgentRunner:
 
         In sealed isolation mode (*sealed=True*), the sandbox splits the
         launch into ``create`` → ``copy_to`` → ``start`` instead of a
-        single ``run`` — no host↔container bind mounts remain after startup.
+        single ``run``. Host-authored inputs and the narrow acknowledgement
+        directory remain live; other task state and vendor configuration are copied.
 
         Args:
             env: Environment variables injected into the container.
@@ -490,6 +493,7 @@ class AgentRunner:
             command: Command + args to execute as PID 1.
             name: Container name (must be unique on the host).
             task_dir: Per-task directory used for per-container shield state.
+            broker_context: Exact authorization namespace from environment assembly.
             gpus: GPU vendors to pass through — ``"all"``/``True``
                 (every vendor detected on the host), ``"nvidia"``,
                 ``"amd"``, ``"intel"``, a comma-separated string, or a
@@ -509,7 +513,7 @@ class AgentRunner:
                 it exits (``--rm``); the default keeps it for
                 ``start``/``rm``, matching ``podman run``.
             unrestricted: When False, adds ``--security-opt no-new-privileges``.
-            sealed: Enable sealed isolation (no bind mounts).
+            sealed: Copy ordinary volumes; retain only explicit live channels.
             hooks: Optional lifecycle callbacks fired around the launch.
             extra_args: Additional raw ``podman run`` flags (e.g. port publishing).
             hostname: Override the in-container hostname (podman ``--hostname``).
@@ -594,6 +598,11 @@ class AgentRunner:
             raise BuildError(str(exc)) from exc
 
         self._require_host_setup()
+        if any(volume.container_path == CONTAINER_AGENT_INPUTS for volume in volumes):
+            try:
+                require_image_input_protocol(self.runtime.image(image))
+            except RuntimeError as exc:
+                raise BuildError(str(exc)) from exc
         cfg = self.sandbox.config
 
         # Per-container socket dir / TCP ports.  Allocated here so the
@@ -673,6 +682,7 @@ class AgentRunner:
             project_id=project_id,
             task_id=task_id,
             dossier_path=dossier_path,
+            broker_context=broker_context,
             gate_base_path=str(cfg.gate_base_path) if gate_active else None,
             gate_token=env["TEROK_GATE_TOKEN"] if gate_active else None,
             gate_port=per_container.gate_port if gate_active else None,
@@ -992,6 +1002,7 @@ class AgentRunner:
 
         mounts_base = mounts_dir()
 
+        broker_context = BrokerContext("standalone", task_id, "default")
         if is_tool:
             # Sidecar tools: minimal env, no shared mounts, real API key
             env: dict[str, str] = {
@@ -1065,6 +1076,7 @@ class AgentRunner:
                 per_container=per_container,
             )
             env = dict(result.env)
+            broker_context = result.broker_context
             egress = result.egress
             if provision.gate_token is not None:
                 # The launch path wires this into the supervisor sidecar.
@@ -1109,6 +1121,7 @@ class AgentRunner:
             command=command,
             name=cname,
             task_dir=task_dir,
+            broker_context=broker_context,
             gpus=gpus,
             memory=memory,
             cpus=cpus,

@@ -16,9 +16,5 @@ if [ -t 1 ] && [ -z "$_TEROK_BANNER_SHOWN" ]; then
     ' "$_terok_agent_history" 2>/dev/null || true
   fi
   unset _terok_agent_history
-  if [ -s /home/dev/.terok/initial-prompt.txt ]; then
-    printf '\033[1;33m📝 Initial prompt\033[0m \033[2m(/home/dev/.terok/initial-prompt.txt)\033[0m\n'
-    cat /home/dev/.terok/initial-prompt.txt
-    printf '\n\n'
-  fi
+  python3 /usr/local/share/terok/terok-initial-prompt.py show || true
 fi

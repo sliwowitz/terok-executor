@@ -135,13 +135,18 @@
 {%- endif %}
 {%- if c.is_codex %}
     local _instr_args=()
-    [ -f /home/dev/.terok/instructions.md ] && \
-        _instr_args+=(-c 'model_instructions_file="/home/dev/.terok/instructions.md"')
+    [ -f /home/dev/.terok/input/instructions.md ] && \
+        _instr_args+=(-c 'model_instructions_file="/home/dev/.terok/input/instructions.md"')
 {%- endif %}
     # Pick up the task's initial prompt as the first message (one-shot).
-    if [ -z "$_timeout" ] && [ $# -eq 0 ]{% if c.session_path %} && [ ! -s "$_session_file" ]{% endif %} && [ -s /home/dev/.terok/initial-prompt.txt ]; then
-        set -- {{ c.seed_prefix }}"$(cat /home/dev/.terok/initial-prompt.txt)"
-        mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
+    if [ -z "$_timeout" ] && [ $# -eq 0 ]{% if c.session_path %} && [ ! -s "$_session_file" ]{% endif %} && [ -s /home/dev/.terok/input/initial-prompt.txt ]; then
+        local _initial _claim_rc=0
+        _initial="$(python3 /usr/local/share/terok/terok-initial-prompt.py claim)" || _claim_rc=$?
+        if [ "$_claim_rc" -eq 0 ]; then
+            set -- {{ c.seed_prefix }}"$_initial"
+        elif [ "$_claim_rc" -ne 1 ]; then
+            return "$_claim_rc"
+        fi
     fi
     if [ -n "$_timeout" ]; then
         (
@@ -361,8 +366,8 @@ claude() {
     [ -r /usr/local/share/terok/terok-env-git-identity.sh ] && \
         . /usr/local/share/terok/terok-env-git-identity.sh
     _args+=(--add-dir "/")
-    [ -f /home/dev/.terok/instructions.md ] && \
-        _args+=(--append-system-prompt "$(cat /home/dev/.terok/instructions.md)")
+    [ -f /home/dev/.terok/input/instructions.md ] && \
+        _args+=(--append-system-prompt "$(cat /home/dev/.terok/input/instructions.md)")
     local _resumed=""
     if [ -z "$_new_session" ] && [ -s /home/dev/.terok/claude-session.txt ] && \
        { [ -n "$_timeout" ] || [ $# -eq 0 ]; }; then
@@ -370,9 +375,14 @@ claude() {
         _args+=(--resume "$_resumed")
     fi
     # Pick up the task's initial prompt as the first message (one-shot).
-    if [ -z "$_timeout" ] && [ $# -eq 0 ] && [ ! -s /home/dev/.terok/claude-session.txt ] && [ -s /home/dev/.terok/initial-prompt.txt ]; then
-        set -- "$(cat /home/dev/.terok/initial-prompt.txt)"
-        mv /home/dev/.terok/initial-prompt.txt /home/dev/.terok/initial-prompt.consumed.txt
+    if [ -z "$_timeout" ] && [ $# -eq 0 ] && [ ! -s /home/dev/.terok/claude-session.txt ] && [ -s /home/dev/.terok/input/initial-prompt.txt ]; then
+        local _initial _claim_rc=0
+        _initial="$(python3 /usr/local/share/terok/terok-initial-prompt.py claim)" || _claim_rc=$?
+        if [ "$_claim_rc" -eq 0 ]; then
+            set -- "$_initial"
+        elif [ "$_claim_rc" -ne 1 ]; then
+            return "$_claim_rc"
+        fi
     fi
     if [ -n "$_timeout" ]; then
         (

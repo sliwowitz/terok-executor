@@ -70,6 +70,7 @@ def test_credential_files_are_owner_only_in_the_container(
     assert seeded, "roster declares no credential files — the test would assert nothing"
 
     spec = ContainerEnvSpec(
+        agent_config_dir=executor_env.task_dir / "agent-config",
         task_id="cred-modes",
         agent_name="claude",
         envs_dir=executor_env.mounts_dir,

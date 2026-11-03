@@ -130,6 +130,19 @@ if TYPE_CHECKING:
         SharedMountStorageInfo as SharedMountStorageInfo,
         TaskStorageInfo as TaskStorageInfo,
     )
+    from .task_files import (
+        CONTAINER_AGENT_INPUTS as CONTAINER_AGENT_INPUTS,
+        INITIAL_PROMPT_CONSUMED_FILENAME as INITIAL_PROMPT_CONSUMED_FILENAME,
+        INITIAL_PROMPT_FILENAME as INITIAL_PROMPT_FILENAME,
+        MAX_PROMPT_BYTES as MAX_PROMPT_BYTES,
+        InputProtocolMismatch as InputProtocolMismatch,
+        agent_config_volumes as agent_config_volumes,
+        agent_event_dir as agent_event_dir,
+        agent_input_dir as agent_input_dir,
+        require_image_input_protocol as require_image_input_protocol,
+        require_task_input_protocol as require_task_input_protocol,
+        write_initial_prompt as write_initial_prompt,
+    )
 
 
 #: Public symbol → defining submodule (relative dotted path).  The single
@@ -146,6 +159,23 @@ _LAZY: dict[str, str] = {
     "CLIOverrides": ".provider.providers",
     "get_agent": ".provider.providers",
     "resolve_agent_value": ".provider.providers",
+    # Task input/state boundary
+    **dict.fromkeys(
+        (
+            "CONTAINER_AGENT_INPUTS",
+            "INITIAL_PROMPT_FILENAME",
+            "INITIAL_PROMPT_CONSUMED_FILENAME",
+            "MAX_PROMPT_BYTES",
+            "InputProtocolMismatch",
+            "agent_input_dir",
+            "agent_event_dir",
+            "agent_config_volumes",
+            "write_initial_prompt",
+            "require_task_input_protocol",
+            "require_image_input_protocol",
+        ),
+        ".task_files",
+    ),
     # Agent config preparation
     "AgentConfigSpec": ".provider.agents",
     "prepare_agent_config_dir": ".provider.agents",

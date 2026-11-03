@@ -408,7 +408,7 @@ class Agent:
         The command assumes:
 
         - ``init-ssh-and-repo.sh`` has already set up the workspace
-        - The prompt is in ``/home/dev/.terok/prompt.txt``
+        - The prompt is in ``/home/dev/.terok/input/prompt.txt``
         - For Claude, the ``claude()`` wrapper function is sourced via ``bash -l``
 
         Returns a bash command string suitable for ``["bash", "-lc", cmd]``.
@@ -442,7 +442,7 @@ class Agent:
             f"init-ssh-and-repo.sh &&"
             f" claude --terok-timeout {timeout}"
             f" -p "
-            '"$(cat /home/dev/.terok/prompt.txt)"'
+            '"$(cat /home/dev/.terok/input/prompt.txt)"'
             f"{flags} --output-format stream-json --verbose"
         )
 
@@ -496,7 +496,7 @@ class Agent:
         # Prompt — flag-based or positional
         if self.prompt_flag:
             parts.append(self.prompt_flag)
-        parts.append('"$(cat /home/dev/.terok/prompt.txt)"')
+        parts.append('"$(cat /home/dev/.terok/input/prompt.txt)"')
 
         return " ".join(parts)
 

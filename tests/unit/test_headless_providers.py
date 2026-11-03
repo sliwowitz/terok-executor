@@ -13,7 +13,6 @@ from terok_executor.provider.providers import (
     resolve_agent_value,
 )
 from terok_executor.provider.wrappers import (
-    INITIAL_PROMPT_CONSUMED_PATH,
     INITIAL_PROMPT_PATH,
     generate_agent_wrapper,
     generate_all_wrappers,
@@ -272,10 +271,8 @@ class TestGenerateAgentWrapper:
         for name in AGENTS:
             wrapper = _provider_wrapper(name)
             assert INITIAL_PROMPT_PATH in wrapper, f"{name} missing initial-prompt pickup"
-            assert INITIAL_PROMPT_CONSUMED_PATH in wrapper, f"{name} missing one-shot rename"
-            assert f'"$(cat {INITIAL_PROMPT_PATH})"' in wrapper, (
-                f"{name} should reference the prompt file in its set -- line"
-            )
+            assert "terok-initial-prompt.py claim" in wrapper, f"{name} missing atomic claim"
+            assert '"$_initial"' in wrapper, f"{name} must pass the claimed prompt"
 
     def test_initial_prompt_seed_shape_per_provider(self) -> None:
         """The seed argv routes the prompt through the right CLI surface.
@@ -286,9 +283,9 @@ class TestGenerateAgentWrapper:
         ``-p <prompt>`` / stdin as the only non-interactive seed forms.
         Everything else (Claude, Codex, Vibe, Pi) accepts a bare positional.
         """
-        bare = f'set -- "$(cat {INITIAL_PROMPT_PATH})"'
-        run = f'set -- run "$(cat {INITIAL_PROMPT_PATH})"'
-        dash_p = f'set -- -p "$(cat {INITIAL_PROMPT_PATH})"'
+        bare = 'set -- "$_initial"'
+        run = 'set -- run "$_initial"'
+        dash_p = 'set -- -p "$_initial"'
         expected: dict[str, str] = {
             "opencode": run,
             "copilot": dash_p,

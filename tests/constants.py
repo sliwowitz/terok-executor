@@ -42,7 +42,7 @@ CONTAINER_HOME = Path("/home/dev")
 CONTAINER_TEROK_DIR = CONTAINER_HOME / ".terok"
 """Container terok state/config directory used by wrapper assertions."""
 
-CONTAINER_INSTRUCTIONS_PATH = CONTAINER_TEROK_DIR / "instructions.md"
+CONTAINER_INSTRUCTIONS_PATH = CONTAINER_TEROK_DIR / "input" / "instructions.md"
 """Container instructions file path injected into agent configs."""
 
 CONTAINER_CLAUDE_SESSION_PATH = CONTAINER_TEROK_DIR / "claude-session.txt"

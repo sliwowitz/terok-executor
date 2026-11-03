@@ -29,12 +29,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.console import Console
-from terok_util import find_host_tool, podman_userns_args, require_host_tool
+from terok_util import (
+    UnsafePathError,
+    find_host_tool,
+    open_untrusted_directory,
+    podman_userns_args,
+    read_untrusted_bytes,
+    read_untrusted_text,
+    require_host_tool,
+    write_untrusted_bytes,
+)
 
 from terok_executor.integrations.sandbox import (
     CODEX_SHARED_OAUTH_MARKER,
     PHANTOM_CREDENTIALS_MARKER,
 )
+
+from .vendor_files import MAX_CREDENTIAL_BYTES
 
 # Two consoles so colored success messages flow to stdout while
 # colored errors / warnings flow to stderr.  Rich auto-disables colors
@@ -886,6 +897,8 @@ def _capture_credentials(
 
     try:
         cred_data = extract_credential(provider_name, auth_dir)
+    except UnsafePathError:
+        raise
     except Exception as exc:
         _err.print(
             f"\n[red]Error [auth]: could not extract credentials for {provider_name} "
@@ -947,6 +960,8 @@ def _capture_credentials(
             mounts_base = mounts_dir()
         try:
             post_capture(auth_dir, mounts_base, cred_data, expose_token)
+        except UnsafePathError:
+            raise
         except Exception as exc:  # noqa: BLE001
             _err.print(
                 f"[yellow]Warning: could not reconcile {provider_name} mount: {exc}[/yellow]"
@@ -960,6 +975,8 @@ def _capture_credentials(
                 auth_provider.post_capture_state,
                 mounts_base,
             )
+        except UnsafePathError:
+            raise
         except Exception as exc:  # noqa: BLE001
             _err.print(
                 f"[yellow]Warning: could not apply post_capture_state for "
@@ -993,11 +1010,11 @@ def _claude_oauth_mount_writer(
     """
     if expose_token:
         src = auth_dir / ".credentials.json"
-        if not src.is_file():
-            raise FileNotFoundError(f"No .credentials.json in {auth_dir}")
         dest_dir = mounts_base / "_claude-config"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        _write_bytes_nofollow(dest_dir / ".credentials.json", src.read_bytes())
+        _write_bytes_nofollow(
+            dest_dir / ".credentials.json",
+            read_untrusted_bytes(src, max_bytes=MAX_CREDENTIAL_BYTES),
+        )
         print("Real .credentials.json copied to shared Claude config mount.")
         print(
             "\nNote: Claude OAuth token is EXPOSED in the shared mount."
@@ -1035,12 +1052,9 @@ def _codex_oauth_mount_writer(
     """
     dest_dir = mounts_base / "_codex-config"
     dest_file = dest_dir / "auth.json"
-    dest_dir.mkdir(parents=True, exist_ok=True)
     if expose_token:
         src = auth_dir / "auth.json"
-        if not src.is_file():
-            raise FileNotFoundError(f"No auth.json in {auth_dir}")
-        _write_bytes_nofollow(dest_file, src.read_bytes())
+        _write_bytes_nofollow(dest_file, read_untrusted_bytes(src, max_bytes=MAX_CREDENTIAL_BYTES))
         _out.print("[green]Real auth.json copied to shared Codex config mount.[/green]")
         _out.print(
             "[yellow]\nNote: Codex OAuth token is EXPOSED in the shared mount."
@@ -1156,26 +1170,8 @@ def _build_codex_shared_id_token(raw_jwt: str) -> str:
 
 
 def _write_bytes_nofollow(path: Path, data: bytes) -> None:
-    """Atomically write *data* without following a pre-existing target symlink."""
-    import os
-    import uuid
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(tmp, flags, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+    """Replace a regular shared credential file without following filesystem links."""
+    write_untrusted_bytes(path, data)
 
 
 #: Maps provider name → post-capture mount reconciler.  OAuth-capable
@@ -1202,7 +1198,6 @@ def _write_claude_credentials_file(cred_data: dict, mounts_base: Path) -> None:
     import json
 
     claude_dir = mounts_base / "_claude-config"
-    claude_dir.mkdir(parents=True, exist_ok=True)
 
     creds = {
         "claudeAiOauth": {
@@ -1238,25 +1233,26 @@ def _apply_post_capture_state(
 
         mounts_base = mounts_dir()
 
-    mounts_root = mounts_base.resolve()
+    mounts_root = mounts_base
     host_rel = Path(host_dir_name)
     if host_rel.is_absolute() or ".." in host_rel.parts:
         raise ValueError(f"Invalid host_dir_name: {host_dir_name!r}")
-    target_dir = (mounts_root / host_rel).resolve()
-    target_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = mounts_root / host_rel
+    with open_untrusted_directory(target_dir, create=True):
+        # Acquisition validates the capture destination even when there are no patches.
+        pass
 
     for filename, patch in patches.items():
         rel = Path(filename)
         if rel.is_absolute() or ".." in rel.parts:
             raise ValueError(f"Invalid post_capture_state filename: {filename!r}")
-        path = (target_dir / rel).resolve()
+        path = target_dir / rel
         state: dict = {}
-        if path.is_file():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-                state = loaded if isinstance(loaded, dict) else {}
-            except (json.JSONDecodeError, OSError):
-                state = {}
+        try:
+            loaded = json.loads(read_untrusted_text(path, max_bytes=MAX_CREDENTIAL_BYTES))
+            state = loaded if isinstance(loaded, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
 
         if all(state.get(k) == v for k, v in patch.items()):
             continue  # already up to date

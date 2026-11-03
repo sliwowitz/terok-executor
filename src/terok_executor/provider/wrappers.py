@@ -32,13 +32,13 @@ from .providers import (
     Agent,
 )
 
-INITIAL_PROMPT_PATH = "/home/dev/.terok/initial-prompt.txt"
+INITIAL_PROMPT_PATH = "/home/dev/.terok/input/initial-prompt.txt"
 """Container path of the per-task initial prompt the TUI/CLI writes at launch."""
 
-INITIAL_PROMPT_CONSUMED_PATH = "/home/dev/.terok/initial-prompt.consumed.txt"
-"""Where the prompt file is moved after an agent picks it up (one-shot semantics)."""
+INITIAL_PROMPT_CONSUMED_PATH = "/home/dev/.terok/events/initial-prompt.consumed"
+"""Shared empty marker created when an agent claims the immutable initial prompt."""
 
-INSTRUCTIONS_PATH = "/home/dev/.terok/instructions.md"
+INSTRUCTIONS_PATH = "/home/dev/.terok/input/instructions.md"
 """Container path of the resolved terok per-task system instructions."""
 
 CONTAINER_WORKSPACE = "/workspace"
