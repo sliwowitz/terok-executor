@@ -70,7 +70,7 @@ def prepare_agent_config_dir(spec: AgentConfigSpec) -> Path:
     from .providers import get_agent as _get_agent
 
     if spec.prompt is not None and len(spec.prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
-        raise ValueError("Headless prompt exceeds the one-megabyte limit")
+        raise ValueError(f"Headless prompt exceeds the {MAX_PROMPT_BYTES // 1024} KiB limit")
     resolved = _get_agent(spec.agent, default_agent=spec.default_agent)
 
     task_dir = spec.tasks_root / str(spec.task_id)

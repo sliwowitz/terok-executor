@@ -31,7 +31,8 @@ INITIAL_PROMPT_CONSUMED_FILENAME = "initial-prompt.consumed"
 INPUTS_PROTOCOL_LABEL = "ai.terok.inputs-protocol"
 INPUTS_PROTOCOL = "1"
 TASK_INPUT_PROTOCOL = "4"
-MAX_PROMPT_BYTES = 1024 * 1024
+# Prompts travel as one argv element; leave headroom below Linux's 128 KiB cap.
+MAX_PROMPT_BYTES = 120 * 1024
 
 
 def agent_input_dir(task_dir: Path) -> Path:
@@ -99,7 +100,7 @@ def write_initial_prompt(task_dir: Path, prompt: str) -> None:
     content = prompt + "\n"
     data = content.encode("utf-8")
     if len(data) > MAX_PROMPT_BYTES:
-        raise ValueError("Initial prompt exceeds the one-megabyte limit")
+        raise ValueError(f"Initial prompt exceeds the {MAX_PROMPT_BYTES // 1024} KiB limit")
     directory = agent_input_dir(task_dir)
     with untrusted_file_lock(directory / ".initial-prompt.lock"):
         target = directory / INITIAL_PROMPT_FILENAME
@@ -116,6 +117,7 @@ __all__ = [
     "CONTAINER_AGENT_INPUTS",
     "INITIAL_PROMPT_CONSUMED_FILENAME",
     "INITIAL_PROMPT_FILENAME",
+    "MAX_PROMPT_BYTES",
     "agent_config_volumes",
     "agent_input_dir",
     "agent_event_dir",

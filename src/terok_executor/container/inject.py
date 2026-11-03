@@ -24,7 +24,7 @@ def inject_prompt(container_name: str, prompt_text: str) -> None:
     must be recreated instead of copying through a task-controlled pathname.
     """
     if len(prompt_text.encode("utf-8")) > MAX_PROMPT_BYTES:
-        raise ValueError("Prompt exceeds the one-megabyte limit")
+        raise ValueError(f"Prompt exceeds the {MAX_PROMPT_BYTES // 1024} KiB limit")
     container = Sandbox().runtime.container(container_name)
     require_task_input_protocol(container)
     for source, destination in container.mounts:

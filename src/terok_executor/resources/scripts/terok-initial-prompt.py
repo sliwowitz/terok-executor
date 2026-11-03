@@ -21,7 +21,7 @@ INPUTS = Path("/home/dev/.terok/input")
 STATE = Path("/home/dev/.terok/events")
 PROMPT = "initial-prompt.txt"
 CONSUMED = "initial-prompt.consumed"
-MAX_BYTES = 1024 * 1024
+MAX_BYTES = 120 * 1024
 
 
 def pending_prompt(inputs: Path, state: Path, *, claim: bool) -> str | None:
@@ -81,7 +81,7 @@ def _read_prompt(inputs: Path) -> str | None:
                 raise ValueError("initial-prompt.txt must be a single regular file")
             content = stream.read(MAX_BYTES + 1)
         if len(content) > MAX_BYTES:
-            raise ValueError("initial-prompt.txt exceeds the one-megabyte limit")
+            raise ValueError(f"initial-prompt.txt exceeds the {MAX_BYTES // 1024} KiB limit")
         return content.decode("utf-8")
     finally:
         os.close(directory)

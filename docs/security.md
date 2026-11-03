@@ -106,6 +106,11 @@ pending prompts; it does not claim them. The marker acknowledges delivery, not
 successful agent execution. Deleting or forging it can affect delivery but
 cannot replace the host-authored prompt.
 
+Prompts are limited to 120 KiB of UTF-8 data, including the appended newline
+for initial prompts. This leaves headroom below the Linux per-argument limit:
+the existing agent launch paths deliver a prompt as one command-line argument.
+Oversized prompts fail before publication or acknowledgement.
+
 Input and event **directory** mounts remain live in sealed mode, so publication
 after background startup and prompt acknowledgement are visible immediately.
 This is a narrow exception to copied state, alongside the existing live service

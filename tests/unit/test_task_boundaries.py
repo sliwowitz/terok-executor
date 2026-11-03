@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 from terok_util import UnsafePathError
 
+from terok_executor import MAX_PROMPT_BYTES
 from terok_executor.credentials.auth import _apply_post_capture_state
 from terok_executor.credentials.extractors import extract_credential
 from terok_executor.provider.agents import _inject_opencode_instructions, _write_session_hook
@@ -198,15 +199,61 @@ def test_shared_config_rejects_oversize_before_merge(tmp_path):
         _write_session_hook(config)
 
 
-def test_generated_headless_prompt_size_is_validated_before_publication(tmp_path):
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_generated_headless_prompt_size_is_validated_before_publication(tmp_path, character):
     """An oversize prompt cannot leave a partial prepared task input directory."""
     from terok_executor.provider.agents import AgentConfigSpec, prepare_agent_config_dir
-    from terok_executor.task_files import MAX_PROMPT_BYTES
 
-    spec = AgentConfigSpec(tasks_root=tmp_path, task_id="task", prompt="x" * (MAX_PROMPT_BYTES + 1))
-    with pytest.raises(ValueError, match="one-megabyte"):
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")) + 1)
+    spec = AgentConfigSpec(tasks_root=tmp_path, task_id="task", prompt=prompt)
+    with pytest.raises(ValueError, match="120 KiB"):
         prepare_agent_config_dir(spec)
     assert not (tmp_path / "task").exists()
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_generated_headless_prompt_accepts_exact_byte_limit(tmp_path, character):
+    """The documented byte boundary remains usable with multibyte text."""
+    from terok_executor.provider.agents import AgentConfigSpec, prepare_agent_config_dir
+
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")))
+    config = prepare_agent_config_dir(
+        AgentConfigSpec(
+            tasks_root=tmp_path, task_id="task", prompt=prompt, mounts_base=tmp_path / "mounts"
+        )
+    )
+    assert (agent_input_dir(config.parent) / "prompt.txt").read_text() == prompt
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_initial_prompt_byte_limit_includes_its_newline(tmp_path, prompt_protocol, character):
+    """A maximum-sized initial prompt is claimable; larger text is never published."""
+    quotient, remainder = divmod(MAX_PROMPT_BYTES - 1, len(character.encode("utf-8")))
+    prompt = character * quotient + "x" * remainder
+    agent_config_volumes(tmp_path / "accepted" / "agent-config")
+    write_initial_prompt(tmp_path / "accepted", prompt)
+    assert (
+        prompt_protocol(
+            agent_input_dir(tmp_path / "accepted"),
+            agent_event_dir(tmp_path / "accepted"),
+            claim=True,
+        )
+        == prompt + "\n"
+    )
+    with pytest.raises(ValueError, match="120 KiB"):
+        write_initial_prompt(tmp_path / "rejected", prompt + "x")
+    assert not (tmp_path / "rejected").exists()
+
+
+def test_prompt_helper_limit_matches_host_and_rejects_before_claim(tmp_path, prompt_protocol):
+    """An oversized immutable input is not acknowledged by the standalone image helper."""
+    assert prompt_protocol.__globals__["MAX_BYTES"] == MAX_PROMPT_BYTES < 128 * 1024
+    agent_config_volumes(tmp_path / "agent-config")
+    inputs, events = agent_input_dir(tmp_path), agent_event_dir(tmp_path)
+    (inputs / INITIAL_PROMPT_FILENAME).write_bytes(b"x" * (MAX_PROMPT_BYTES + 1))
+    with pytest.raises(ValueError, match="120 KiB"):
+        prompt_protocol(inputs, events, claim=True)
+    assert not (events / INITIAL_PROMPT_CONSUMED_FILENAME).exists()
 
 
 def test_image_protocol_preflight_rejects_old_images():

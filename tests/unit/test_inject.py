@@ -13,6 +13,7 @@ from terok_executor.task_files import (
     CONTAINER_AGENT_INPUTS,
     INPUTS_PROTOCOL,
     INPUTS_PROTOCOL_LABEL,
+    MAX_PROMPT_BYTES,
     TASK_INPUT_PROTOCOL,
 )
 
@@ -37,6 +38,24 @@ def test_followup_is_published_verbatim(tmp_path, sandbox, prompt):
     inject_prompt("task", prompt)
     assert (tmp_path / "prompt.txt").read_text() == prompt
     sandbox.copy_to.assert_not_called()
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_followup_accepts_exact_byte_limit(tmp_path, sandbox, character):
+    """The maximum UTF-8 byte count works without counting code points instead."""
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")))
+    inject_prompt("task", prompt)
+    assert (tmp_path / "prompt.txt").read_text() == prompt
+
+
+@pytest.mark.parametrize("character", ["x", "é"])
+def test_followup_size_is_validated_before_runtime_access(tmp_path, sandbox, character):
+    """Reject oversized text before touching the container or its published inputs."""
+    prompt = character * (MAX_PROMPT_BYTES // len(character.encode("utf-8")) + 1)
+    with pytest.raises(ValueError, match="120 KiB"):
+        inject_prompt("task", prompt)
+    sandbox.runtime.container.assert_not_called()
+    assert not (tmp_path / "prompt.txt").exists()
 
 
 def test_missing_input_mount_requires_recreation(sandbox):
