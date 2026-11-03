@@ -34,6 +34,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from terok_executor.container.env import ContainerEnvSpec, assemble_container_env
+from terok_executor.integrations.sandbox import BrokerContext
 from terok_executor.roster import AgentRoster
 from tests.constants import INTEGRATION_VAULT_PASSPHRASE
 
@@ -51,7 +52,9 @@ CREDENTIAL_SET = "default"
 TASK_ID = "vault-roundtrip"
 
 
-async def _real_key_seen_by_upstream(db_path: Path, routes_path: Path, phantom: str) -> str:
+async def _real_key_seen_by_upstream(
+    db_path: Path, routes_path: Path, phantom: str, *, broker_context: BrokerContext
+) -> str:
     """Run a mock upstream + a broker over *db_path*; return the auth header the mock saw.
 
     The broker resolves the phantom against executor's real SQLCipher DB and injects the
@@ -82,7 +85,7 @@ async def _real_key_seen_by_upstream(db_path: Path, routes_path: Path, phantom: 
         )
     )
 
-    broker_app = _build_app(str(db_path), str(routes_path))
+    broker_app = _build_app(str(db_path), str(routes_path), broker_context=broker_context)
     try:
         async with TestClient(TestServer(broker_app)) as client:
             resp = await client.get("/v1/messages", headers={"Authorization": f"Bearer {phantom}"})
@@ -146,7 +149,10 @@ def test_generated_phantom_round_trips_to_the_real_key(
 
     seen_auth = asyncio.run(
         _real_key_seen_by_upstream(
-            executor_env.cfg.db_path, tmp_path / "broker-routes.json", container_phantom
+            executor_env.cfg.db_path,
+            tmp_path / "broker-routes.json",
+            container_phantom,
+            broker_context=result.broker_context,
         )
     )
     assert seen_auth == f"Bearer {REAL_SECRET}", (

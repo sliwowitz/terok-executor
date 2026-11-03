@@ -2395,8 +2395,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.7.0a9.dev538+g6189a85ff"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fcontainer-boundaries#6189a85ff2cdcfea49c2f035998c2ccae0a5621e" }
+version = "0.7.0a9.dev539+ga3216f658"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=fix%2Fcontainer-boundaries#a3216f658aefa71350a506e5a6cc15fe03ff8e40" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
