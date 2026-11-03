@@ -34,7 +34,7 @@ dynamic = ["version"]
 # pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
     "terok-sandbox @ git+https://github.com/sliwowitz/terok-sandbox@fix/container-boundaries",
-    "terok-util @ git+https://github.com/sliwowitz/terok-util@fix/container-boundaries",
+    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl",
     "ruamel.yaml==0.19.1",
     "Jinja2~=3.1",
     "tomli-w~=1.2",
