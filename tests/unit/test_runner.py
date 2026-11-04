@@ -1747,3 +1747,24 @@ def _mock_sandbox() -> Mock:
         "-l",
     ]
     return sandbox
+
+
+class TestStreamHeadless:
+    """``run -p`` relays container output without handing the terminal to the task."""
+
+    def test_streamed_lines_are_terminal_safe(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Controls are escaped, colour is dropped off a terminal, bad bytes are replaced."""
+        proc = Mock(
+            stdout=[
+                b"before\x1b]52;c;cG9pc29u\x07\x9b2Jafter\r\n",
+                b"\x1b[32mok\x1b[0m done\n",
+                b"\xff\n",
+            ]
+        )
+        with patch("subprocess.Popen", return_value=proc):
+            AgentRunner._stream_headless("ctr", 1)
+
+        assert capsys.readouterr().out == (
+            "before\\x1b]52;c;cG9pc29u\\x07\\x9b2Jafter\nok done\n�\n"
+        )
+        proc.wait.assert_called_once_with(timeout=1)
