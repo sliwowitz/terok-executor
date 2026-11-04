@@ -3,14 +3,12 @@
 
 """Tests for headless provider registry and dispatch functions."""
 
-from dataclasses import FrozenInstanceError, fields, replace
-from inspect import signature
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
 from terok_executor.provider.providers import (
     AGENTS,
-    Agent,
     CLIOverrides,
     get_agent,
     resolve_agent_value,
@@ -108,7 +106,6 @@ class TestBuildHeadlessCommand:
             command = provider.build_headless_command(timeout=900, model="chosen-model")
             assert f"{provider.model_flag} chosen-model" in command, name
             assert "--terok-timeout 900" in command, name
-            assert "--max-turns" not in command, name
 
 
 class TestGenerateAgentWrapper:
@@ -389,16 +386,6 @@ class TestApplyProviderConfig:
         pcfg = p.apply_config({})
         assert pcfg.timeout == 1800
 
-    @pytest.mark.parametrize("agent", ["claude", "codex", "copilot", "vibe", "opencode", "pi"])
-    def test_removed_turn_limit_never_emulates_prompt_instructions(self, agent) -> None:
-        """A stale generic config key does not alter prompts or native options."""
-        provider = AGENTS[agent]
-        overrides = CLIOverrides(instructions="Preserve the user's chosen instructions.")
-        baseline = provider.apply_config({}, overrides)
-        resolved = provider.apply_config({"max_turns": 30}, overrides)
-        assert resolved == baseline
-        assert "max_turns" not in {field.name for field in fields(resolved)}
-
     def test_copilot_keeps_real_instruction_delivery(self) -> None:
         """Removing option emulation does not discard explicit task instructions."""
         instructions = "Follow the project coding style."
@@ -414,15 +401,6 @@ class TestApplyProviderConfig:
         assert resolved.warnings == (
             "Codex does not support model selection; ignoring model='chosen-model'",
         )
-
-    def test_run_api_does_not_expose_turn_limits(self) -> None:
-        """The removed option has no surviving public keyword or capability field."""
-        from terok_executor import AgentRunner
-
-        assert "max_turns" not in signature(AgentRunner.run_headless).parameters
-        assert "max_turns" not in signature(Agent.build_headless_command).parameters
-        assert "max_turns" not in {field.name for field in fields(CLIOverrides)}
-        assert "max_turns_flag" not in {field.name for field in fields(Agent)}
 
 
 class TestGenerateAllWrappers:

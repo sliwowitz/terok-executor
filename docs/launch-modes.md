@@ -10,10 +10,8 @@ terok-executor run claude . -p "Fix the failing test"
 terok-executor run claude . -p "Refactor auth" -m sonnet --timeout 900
 ```
 
-The agent processes the supplied message and streams its output to the
-terminal. It exits when finished or when the process reaches `--timeout`
-(default 1800 s). Model selection uses the agent's native option; executor
-does not translate unsupported controls into prompt instructions.
+Fire-and-forget: the agent runs autonomously and streams its output to the
+terminal. It exits when finished or at `--timeout` (default 1800 s).
 
 ## Interactive
 

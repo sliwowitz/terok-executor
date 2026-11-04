@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, TYPE_CHECKING, cast
 
-from terok_util import require_host_tool, require_setup
+from terok_util import require_host_tool, require_setup, sanitize_log_text
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig, Sharing, VolumeSpec
@@ -1387,10 +1387,10 @@ class AgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            stdout = cast(IO[bytes], proc.stdout)
-            for line in stdout:
-                sys.stdout.buffer.write(line)
-                sys.stdout.buffer.flush()
+            color = sys.stdout.isatty()
+            for raw in cast(IO[bytes], proc.stdout):
+                line = raw.decode("utf-8", errors="replace")
+                print(sanitize_log_text(line, color=color), end="", flush=True)
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.terminate()

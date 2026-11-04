@@ -53,20 +53,12 @@ depends_on = [
     "terok_executor.integrations.sandbox",
 ]
 
-# Writable-path resolver for the executor-owned slice of config.yml.
-# The read/write accessors themselves live on ExecutorConfigView; this
-# module hosts only the path helper they call.
-[[modules]]
-path = "terok_executor.config"
-depends_on = []
-
 # Pydantic schema for the executor's slice of config.yml.  Owns both
 # the schema and the read/write accessors for the image: section,
-# which is why it imports the sandbox YAML writer + the path helper.
+# which is why it imports the sandbox YAML writer.
 [[modules]]
 path = "terok_executor.config_schema"
 depends_on = [
-    "terok_executor.config",
     "terok_executor.integrations.sandbox",
 ]
 
