@@ -17,12 +17,13 @@ Gate is on by default (safe-by-default egress control).
 from __future__ import annotations
 
 import logging
+import posixpath
 import shlex
 import sys
 import uuid
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import IO, TYPE_CHECKING, cast
 
 from terok_util import require_host_tool, require_setup
@@ -32,7 +33,11 @@ from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig, Sh
 from terok_executor.paths import container_state_dir
 from terok_executor.roster.types import EgressProjection
 from terok_executor.sandbox import check_setup
-from terok_executor.task_files import CONTAINER_AGENT_INPUTS, require_image_input_protocol
+from terok_executor.task_files import (
+    CONTAINER_AGENT_INPUTS,
+    agent_input_dir,
+    require_image_input_protocol,
+)
 
 from .build import BuildError, ImageBuilder
 
@@ -489,10 +494,12 @@ class AgentRunner:
         Args:
             env: Environment variables injected into the container.
             volumes: Host↔container directory specs (sandbox decides mount vs inject).
+                Task inputs must use the reserved destination once, with a read-only,
+                live source at ``task_dir / "agent-inputs"``. Child overlays are refused.
             image: Image tag to run.
             command: Command + args to execute as PID 1.
             name: Container name (must be unique on the host).
-            task_dir: Per-task directory used for per-container shield state.
+            task_dir: Per-task directory containing shield state and host-owned inputs.
             broker_context: Exact authorization namespace from environment assembly.
             gpus: GPU vendors to pass through — ``"all"``/``True``
                 (every vendor detected on the host), ``"nvidia"``,
@@ -516,6 +523,8 @@ class AgentRunner:
             sealed: Copy ordinary volumes; retain only explicit live channels.
             hooks: Optional lifecycle callbacks fired around the launch.
             extra_args: Additional raw ``podman run`` flags (e.g. port publishing).
+                Advanced-user escape hatch; input-mount validation does not parse
+                these flags or constrain their mount overrides.
             hostname: Override the in-container hostname (podman ``--hostname``).
                 When ``None`` (default), podman assigns the short container ID.
             annotations: OCI annotations forwarded as ``--annotation k=v``;
@@ -577,8 +586,8 @@ class AgentRunner:
             The container name (same as *name*).
 
         Raises:
-            BuildError: When GPU was requested but the host has no functioning
-                NVIDIA CDI.
+            BuildError: When the input mount contract is invalid, the image
+                lacks the input protocol, or requested GPU support is unavailable.
         """
         from terok_executor.integrations.sandbox import (
             CONTAINER_GATE_SOCKET,
@@ -597,8 +606,11 @@ class AgentRunner:
         except ValueError as exc:
             raise BuildError(str(exc)) from exc
 
+        has_task_inputs = _validate_task_input_mounts(
+            volumes, task_dir, required="TEROK_CONTAINER_PROTOCOL" in env
+        )
         self._require_host_setup()
-        if any(volume.container_path == CONTAINER_AGENT_INPUTS for volume in volumes):
+        if has_task_inputs:
             try:
                 require_image_input_protocol(self.runtime.image(image))
             except RuntimeError as exc:
@@ -1033,7 +1045,6 @@ class AgentRunner:
             # Agent modes: full env assembly via canonical builder
             agent_config_dir = self._prepare_agent_config(
                 task_dir,
-                task_id,
                 agent,
                 prompt=prompt,
                 mounts_base=mounts_base,
@@ -1336,7 +1347,6 @@ class AgentRunner:
     def _prepare_agent_config(
         self,
         task_dir: Path,
-        task_id: str,
         agent: str,
         *,
         prompt: str | None = None,
@@ -1362,7 +1372,7 @@ class AgentRunner:
 
         spec = AgentConfigSpec(
             tasks_root=task_dir.parent,
-            task_id=task_id,
+            task_id=task_dir.name,
             prompt=prompt,
             agent=agent,
             instructions=resolved_instructions,
@@ -1415,6 +1425,33 @@ class AgentRunner:
 
 
 # ── Module-level helpers ────────────────────────────────────────────────
+
+
+def _validate_task_input_mounts(
+    volumes: Sequence[VolumeSpec], task_dir: Path, *, required: bool
+) -> bool:
+    """Require the reserved input mount and reject aliases or child overlays.
+
+    Return whether this launch has task inputs. Tools without the agent
+    contract can omit them. Parent configuration mounts and sibling paths
+    remain available; only the input subtree is reserved.
+    """
+    inputs = []
+    for volume in volumes:
+        destination = PurePosixPath(posixpath.normpath("/" + volume.container_path.lstrip("/")))
+        if destination.is_relative_to(CONTAINER_AGENT_INPUTS):
+            if volume.container_path != CONTAINER_AGENT_INPUTS:
+                raise BuildError(f"Task input path is reserved: {volume.container_path!r}")
+            inputs.append(volume)
+    if not inputs and not required:
+        return False
+    if len(inputs) != 1:
+        raise BuildError(f"Expected exactly one task input mount at {CONTAINER_AGENT_INPUTS}")
+    [volume] = inputs
+    expected = agent_input_dir(task_dir)
+    if volume.host_path != expected or not volume.read_only or not volume.live:
+        raise BuildError(f"Task input mount must use {expected} with read_only=True and live=True")
+    return True
 
 
 def _build_logs_cmd(

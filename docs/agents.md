@@ -216,6 +216,14 @@ identity.  Endpoint definitions (upstream URL, wire auth) live
 separately in `resources/providers/`, with user overrides in
 `~/.config/terok/providers/`.
 
+Host-side roster paths are relative to managed storage: `auth.host_dir` and
+`mounts[].host_dir` each name one directory without aliases such as `_cfg/.` or
+`./_cfg`, and `provider.credential_file` is a relative filename without `..`
+components. Nested filenames such as `nested/auth.json` remain valid; an empty
+credential filename means no credential file, while `.` is invalid. Invalid host
+paths fail during roster loading. Container-side paths such as `container_mount`
+and `container_path` are independent and may be absolute.
+
 ## Custom providers
 
 A provider is an LLM endpoint. It is not an agent that Terok installs. The YAML

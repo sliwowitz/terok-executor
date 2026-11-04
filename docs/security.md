@@ -90,6 +90,18 @@ repair it as an ordinary file rather than linking it to another host path.
 | `agent-events/` | `/home/dev/.terok/events/` | Narrow writable acknowledgement channel |
 | `agent-config/` | `/home/dev/.terok/` | Writable session pointers and status |
 
+Prepared agent launches validate their structured volume specs before host setup.
+The reserved input mount must appear once, use the task's `agent-inputs/` source,
+and be read-only and live. Aliases of its destination and mounts beneath it are
+rejected. The parent configuration mount and overrides of other `.terok`
+subdirectories remain supported. Tools without task inputs do not require this
+mount.
+
+Raw Podman arguments, including an orchestrator's `run.podman_args`, remain an
+advanced-user escape hatch. Input-mount validation does not parse or reinterpret
+them; operators are responsible for their mount overrides. Existing passthrough
+policies are unchanged.
+
 Wrappers, instructions, initial and headless prompts, review notices, and the
 Toad access token belong in `agent-inputs/`. Read-only credential shadows are
 bounded snapshots under `agent-inputs/credential-shadows/`; Podman never binds

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -17,8 +18,17 @@ from terok_executor.integrations.sandbox import (
     CONTAINER_RUNTIME_DIR,
     BrokerContext,
     ImageInspection,
+    VolumeSpec,
 )
-from terok_executor.task_files import INPUTS_PROTOCOL, INPUTS_PROTOCOL_LABEL
+from terok_executor.task_files import (
+    CONTAINER_AGENT_CONFIG,
+    CONTAINER_AGENT_INPUTS,
+    INPUTS_PROTOCOL,
+    INPUTS_PROTOCOL_LABEL,
+    TASK_INPUT_PROTOCOL,
+    agent_config_volumes,
+    agent_input_dir,
+)
 
 pytestmark = pytest.mark.usefixtures("fake_podman")
 
@@ -149,6 +159,21 @@ class TestAgentRunner:
             runner.run_headless("claude", None, workspace=tmp_path, prompt="test")
 
         load.assert_not_called()
+
+    @pytest.mark.parametrize("name", [None, "custom-task"])
+    def test_standalone_input_source_belongs_to_container_state(self, tmp_path, name):
+        """Default and named runs publish inputs under the state removed with that container."""
+        sandbox = _mock_sandbox()
+        runner = AgentRunner(sandbox=sandbox)
+        with patch.object(runner, "_ensure_images", return_value="terok-l1-cli:test"):
+            runner.run_headless(
+                "claude", None, workspace=tmp_path, prompt="test", name=name, follow=False
+            )
+        spec = sandbox.run.call_args.args[0]
+        inputs = next(v for v in spec.volumes if v.container_path == CONTAINER_AGENT_INPUTS)
+        assert inputs.host_path == agent_input_dir(spec.task_dir)
+        assert (inputs.host_path / "prompt.txt").read_text() == "test"
+        assert not (spec.task_dir.parent / spec.env["TASK_ID"]).exists()
 
     def test_mismatched_sandbox_and_runtime_rejected(self) -> None:
         """Passing a sandbox and a runtime from different backend types raises."""
@@ -576,6 +601,137 @@ class TestAgentRunner:
         spec = sandbox.run.call_args[0][0]
         assert spec.env["TEROK_SHARED_DIR"] == "/data"
         assert any(v.host_path == shared and v.container_path == "/data" for v in spec.volumes)
+
+
+@pytest.fixture
+def prepared_input_launch(tmp_path):
+    """Prepare a valid input contract without starting any runtime resources."""
+    sandbox = _mock_sandbox()
+    runner = AgentRunner(sandbox=sandbox)
+    kwargs = {
+        "broker_context": BrokerContext("project", "task", "default"),
+        "env": {"TEROK_CONTAINER_PROTOCOL": TASK_INPUT_PROTOCOL},
+        "volumes": list(agent_config_volumes(tmp_path / "agent-config")),
+        "image": "terok-l1-cli:test",
+        "command": [],
+        "name": "task",
+        "task_dir": tmp_path,
+    }
+    with patch.object(runner, "_require_host_setup") as setup:
+        yield sandbox, runner, setup, kwargs
+
+
+class TestPreparedInputMounts:
+    """Prepared launches must preserve the reserved host-owned input channel."""
+
+    @pytest.mark.parametrize("field", ["host_path", "read_only", "live"])
+    def test_invalid_input_contract_fails_before_setup(
+        self, prepared_input_launch, tmp_path, field
+    ):
+        from terok_executor.container.build import BuildError
+
+        sandbox, runner, setup, kwargs = prepared_input_launch
+        value = tmp_path / "unrelated" if field == "host_path" else False
+        kwargs["volumes"][1] = replace(kwargs["volumes"][1], **{field: value})
+        with pytest.raises(BuildError, match="input mount"):
+            runner.launch_prepared(**kwargs)
+        setup.assert_not_called()
+        sandbox.run.assert_not_called()
+
+    @pytest.mark.parametrize("protocol", ["", "obsolete", TASK_INPUT_PROTOCOL])
+    def test_declared_agent_contract_requires_input_mount(self, prepared_input_launch, protocol):
+        from terok_executor.container.build import BuildError
+
+        sandbox, runner, setup, kwargs = prepared_input_launch
+        kwargs["env"]["TEROK_CONTAINER_PROTOCOL"] = protocol
+        kwargs["volumes"].pop(1)
+        with pytest.raises(BuildError, match="exactly one"):
+            runner.launch_prepared(**kwargs)
+        setup.assert_not_called()
+        sandbox.run.assert_not_called()
+
+    def test_duplicate_input_mount_is_rejected(self, prepared_input_launch):
+        from terok_executor.container.build import BuildError
+
+        sandbox, runner, setup, kwargs = prepared_input_launch
+        kwargs["volumes"].append(kwargs["volumes"][1])
+        with pytest.raises(BuildError, match="exactly one"):
+            runner.launch_prepared(**kwargs)
+        setup.assert_not_called()
+        sandbox.run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "destination",
+        [
+            CONTAINER_AGENT_INPUTS + "/",
+            CONTAINER_AGENT_INPUTS + "/.",
+            CONTAINER_AGENT_INPUTS + "/nested/..",
+            CONTAINER_AGENT_CONFIG + "/other/../input",
+            CONTAINER_AGENT_INPUTS.replace("/.terok/", "//.terok//"),
+            "/" + CONTAINER_AGENT_INPUTS,
+            CONTAINER_AGENT_INPUTS + "/prompt.txt",
+            CONTAINER_AGENT_INPUTS + "/nested/instructions.md",
+            CONTAINER_AGENT_CONFIG + "/other/../input/prompt.txt",
+        ],
+    )
+    def test_input_aliases_and_child_overlays_are_rejected(
+        self, prepared_input_launch, tmp_path, destination
+    ):
+        from terok_executor.container.build import BuildError
+
+        sandbox, runner, setup, kwargs = prepared_input_launch
+        kwargs["volumes"].append(VolumeSpec(tmp_path / "override", destination))
+        with pytest.raises(BuildError, match="reserved"):
+            runner.launch_prepared(**kwargs)
+        setup.assert_not_called()
+        sandbox.run.assert_not_called()
+
+    @pytest.mark.parametrize("sealed", [False, True])
+    def test_valid_input_preserves_parent_and_unrelated_overrides(
+        self, prepared_input_launch, tmp_path, sealed
+    ):
+        sandbox, runner, _, kwargs = prepared_input_launch
+        siblings = [
+            VolumeSpec(tmp_path / "custom", CONTAINER_AGENT_CONFIG + "/custom"),
+            VolumeSpec(tmp_path / "inputs-extra", CONTAINER_AGENT_INPUTS + "-extra"),
+        ]
+        kwargs["volumes"].extend(siblings)
+        kwargs["sealed"] = sealed
+        runner.launch_prepared(**kwargs)
+        spec = sandbox.run.call_args.args[0]
+        assert all(volume in spec.volumes for volume in kwargs["volumes"])
+        sandbox.runtime.image.return_value.inspect.assert_called_once_with()
+
+    def test_supplied_input_is_checked_without_agent_marker(self, prepared_input_launch, tmp_path):
+        from terok_executor.container.build import BuildError
+
+        sandbox, runner, setup, kwargs = prepared_input_launch
+        kwargs["env"] = {}
+        kwargs["volumes"][1] = VolumeSpec(agent_input_dir(tmp_path), CONTAINER_AGENT_INPUTS)
+        with pytest.raises(BuildError, match="input mount"):
+            runner.launch_prepared(**kwargs)
+        setup.assert_not_called()
+        sandbox.run.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "destination", [CONTAINER_AGENT_INPUTS, CONTAINER_AGENT_CONFIG + "/custom"]
+    )
+    def test_raw_mount_arguments_remain_an_operator_escape_hatch(
+        self, prepared_input_launch, tmp_path, destination
+    ):
+        """Structured input checks do not reinterpret advanced-user Podman arguments."""
+        sandbox, runner, _, kwargs = prepared_input_launch
+        raw_args = ["-v", f"{tmp_path / 'override'}:{destination}/settings.json:rw"]
+        runner.launch_prepared(**kwargs, extra_args=raw_args)
+        assert sandbox.run.call_args.args[0].extra_args == tuple(raw_args)
+
+    def test_tool_without_input_skips_agent_image_protocol(self, prepared_input_launch, tmp_path):
+        sandbox, runner, _, kwargs = prepared_input_launch
+        kwargs["env"] = {"TASK_ID": "tool-task"}
+        kwargs["volumes"] = [VolumeSpec(tmp_path / "custom", CONTAINER_AGENT_CONFIG + "/custom")]
+        runner.launch_prepared(**kwargs)
+        sandbox.run.assert_called_once()
+        sandbox.runtime.image.assert_not_called()
 
 
 class TestLaunchPrepared:
