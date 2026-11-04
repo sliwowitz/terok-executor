@@ -1387,10 +1387,13 @@ class AgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
+            # Bytes in, bytes out: the terminal's text encoding never decides
+            # whether a task's line can be shown.
             color = sys.stdout.isatty()
             for raw in cast(IO[bytes], proc.stdout):
-                line = raw.decode("utf-8", errors="replace")
-                print(sanitize_log_text(line, color=color), end="", flush=True)
+                safe = sanitize_log_text(raw.decode("utf-8", errors="replace"), color=color)
+                sys.stdout.buffer.write(safe.encode("utf-8", errors="replace"))
+                sys.stdout.buffer.flush()
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.terminate()
