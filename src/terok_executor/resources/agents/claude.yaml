@@ -15,7 +15,6 @@ headless:
   prompt_flag: "-p"
   output_format_flags: ["--output-format", "stream-json"]
   model_flag: "--model"
-  max_turns_flag: "--max-turns"
   verbose_flag: "--verbose"
 
 auto_approve:

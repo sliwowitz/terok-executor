@@ -42,7 +42,7 @@ headless:
   # ``pi --mode json "<prompt>"`` — prompt is positional, JSON event
   # stream on stdout.  No permission gating in print/json modes (verified
   # in packages/coding-agent/src/modes/print-mode.ts); tools run as
-  # called.  No ``--max-turns`` / ``--verbose`` analogues in Pi.
+  # called.  No ``--verbose`` analogue in Pi.
   prompt_flag: ""
   model_flag: "--model"
   output_format_flags: ["--mode", "json"]

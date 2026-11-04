@@ -130,7 +130,6 @@ class RawHeadless(StrictModel):
     )
     prompt_flag: str = Field(default="-p", description='Flag for the prompt; ``""`` for positional')
     model_flag: str | None = Field(default=None, description="Flag for model override")
-    max_turns_flag: str | None = Field(default=None, description="Flag for maximum turns")
     verbose_flag: str | None = Field(default=None, description="Flag for verbose output")
     output_format_flags: list[str] = Field(
         default_factory=list, description="Flags for structured output"
@@ -716,7 +715,6 @@ class RawAgentYaml(StrictModel):
             auto_approve_flags=tuple(aa.flags),
             output_format_flags=tuple(hl.output_format_flags),
             model_flag=hl.model_flag,
-            max_turns_flag=hl.max_turns_flag,
             verbose_flag=hl.verbose_flag,
             supports_session_resume=sess.supports_resume,
             resume_flag=sess.resume_flag,

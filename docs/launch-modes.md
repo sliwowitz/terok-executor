@@ -7,12 +7,13 @@ interactive, and web — plus a separate tool runner for sidecars.
 
 ```bash
 terok-executor run claude . -p "Fix the failing test"
-terok-executor run claude . -p "Refactor auth" -m sonnet --max-turns 10
+terok-executor run claude . -p "Refactor auth" -m sonnet --timeout 900
 ```
 
-Fire-and-forget. The agent runs autonomously and streams output to the
-terminal. Exits when the agent finishes, hits `--max-turns`, or reaches
-`--timeout` (default 1800 s).
+The agent processes the supplied message and streams its output to the
+terminal. It exits when finished or when the process reaches `--timeout`
+(default 1800 s). Model selection uses the agent's native option; executor
+does not translate unsupported controls into prompt instructions.
 
 ## Interactive
 
@@ -85,4 +86,3 @@ even `rm`).
 | `--shared-dir <dir>` | Mount a host directory as shared IPC space (at `--shared-mount`, default `/shared`) |
 | `--timeout <seconds>` | Override the default timeout |
 | `-m <name>` | Model override (headless mode) |
-| `--max-turns <n>` | Limit agent turns (headless mode) |

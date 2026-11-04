@@ -34,6 +34,15 @@ def _run_cli(*args: str) -> tuple[str, str, int]:
     return stdout.getvalue(), stderr.getvalue(), code
 
 
+def test_run_rejects_removed_turn_limit_before_dispatch() -> None:
+    """An obsolete CLI option fails parsing instead of changing the task prompt."""
+    with patch("terok_executor.cli.CommandTree.dispatch") as dispatch:
+        _, err, code = _run_cli("run", "claude", ".", "-p", "Fix the bug", "--max-turns", "10")
+    assert code == 2
+    assert "unrecognized arguments: --max-turns 10" in err
+    dispatch.assert_not_called()
+
+
 class TestAgentsListCommand:
     """Verify ``terok-executor agents list`` output."""
 

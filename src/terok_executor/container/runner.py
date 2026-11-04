@@ -192,7 +192,6 @@ class AgentRunner:
         prompt: str,
         branch: str | None = None,
         model: str | None = None,
-        max_turns: int | None = None,
         timeout: int = 1800,
         gate: bool = True,
         name: str | None = None,
@@ -244,7 +243,6 @@ class AgentRunner:
             prompt=prompt,
             branch=branch,
             model=model,
-            max_turns=max_turns,
             timeout=timeout,
             gate=gate,
             name=name,
@@ -942,7 +940,6 @@ class AgentRunner:
         prompt: str | None = None,
         branch: str | None = None,
         model: str | None = None,
-        max_turns: int | None = None,
         timeout: int = 1800,
         gate: bool = True,
         name: str | None = None,
@@ -1102,9 +1099,7 @@ class AgentRunner:
                 tool_cmd += " " + " ".join(shlex.quote(a) for a in tool_args)
             command = ["bash", "-lc", tool_cmd]
         elif mode == "headless":
-            cmd_str = agent_spec.build_headless_command(
-                timeout=timeout, model=model, max_turns=max_turns
-            )
+            cmd_str = agent_spec.build_headless_command(timeout=timeout, model=model)
             command = ["bash", "-lc", cmd_str]
         elif mode == "interactive":
             command = [
