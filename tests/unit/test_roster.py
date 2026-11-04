@@ -22,7 +22,7 @@ from terok_executor.roster import (
 )
 from terok_executor.roster.loader import _load_bundled_agents
 from terok_executor.roster.schema import RawAgentYaml
-from tests.constants import CONTAINER_BIN_DIR, CONTAINER_TEROK_DIR
+from tests.constants import CONTAINER_BIN_DIR, CONTAINER_HOME, CONTAINER_TEROK_DIR, MOCK_BASE
 
 
 def _agent_provider(name: str, data: dict) -> Agent:
@@ -810,6 +810,70 @@ class TestStrictValidation:
     both in our own bundled files and in user overrides under
     ``~/.config/terok/agent/agents/``.
     """
+
+    @pytest.mark.parametrize("section", ["auth", "mounts"])
+    @pytest.mark.parametrize(
+        "host_dir",
+        [str(MOCK_BASE / "outside"), "..", "../outside", "nested/../safe", "nested/dir", "", "."],
+    )
+    def test_host_directory_requires_one_relative_segment(
+        self, section: str, host_dir: str
+    ) -> None:
+        """Host mount roots cannot escape or replace the managed shared directory."""
+        container_path = str(CONTAINER_HOME / ".custom")
+        data = (
+            {"auth": {"host_dir": host_dir, "container_mount": container_path}}
+            if section == "auth"
+            else {"mounts": [{"host_dir": host_dir, "container_path": container_path}]}
+        )
+
+        with pytest.raises(ValidationError, match="single directory segment"):
+            RawAgentYaml.model_validate(data)
+
+    @pytest.mark.parametrize(
+        "credential_file",
+        [str(MOCK_BASE / "secret.json"), "..", "../secret.json", "nested/../secret.json"],
+    )
+    def test_credential_file_cannot_escape_its_host_directory(self, credential_file: str) -> None:
+        """Even normalized traversal is refused before credential paths reach host I/O."""
+        data = {"provider": {"credential_file": credential_file}}
+
+        with pytest.raises(ValidationError, match="credential_file"):
+            RawAgentYaml.model_validate(data)
+
+    @pytest.mark.parametrize("credential_file", ["", ".env", "nested/auth.json"])
+    def test_relative_host_paths_preserve_absolute_container_paths(
+        self, credential_file: str
+    ) -> None:
+        """Host containment does not constrain the independent container mount namespace."""
+        container_path = str(CONTAINER_HOME / ".custom")
+        spec = RawAgentYaml.model_validate(
+            {
+                "auth": {"host_dir": "_custom-config", "container_mount": container_path},
+                "mounts": [{"host_dir": "_custom-data", "container_path": container_path}],
+                "provider": {"credential_file": credential_file},
+            }
+        )
+
+        assert spec.auth is not None
+        assert spec.auth.host_dir == "_custom-config"
+        assert spec.auth.container_mount == container_path
+        assert spec.mounts[0].host_dir == "_custom-data"
+        assert spec.mounts[0].container_path == container_path
+        assert spec.provider is not None
+        assert spec.provider.credential_file == credential_file
+
+    def test_load_roster_rejects_escaping_host_mount(self, tmp_path: Path) -> None:
+        """User overrides fail at schema loading, before their host paths are materialized."""
+        user_dir = tmp_path / "agents"
+        user_dir.mkdir()
+        (user_dir / "escape.yaml").write_text(
+            "kind: tool\nmounts:\n  - host_dir: ../outside\n"
+            f"    container_path: {CONTAINER_HOME / '.custom'}\n"
+        )
+        with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
+            with pytest.raises(ValueError, match="escape.*invalid roster YAML"):
+                load_roster()
 
     @pytest.mark.parametrize(
         "bad_data",

@@ -32,9 +32,19 @@ and matches the per-file YAML shape.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PositiveInt, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
 
 from terok_executor.credentials.auth import AuthKeyConfig, AuthProvider, api_key_command
 from terok_executor.provider.providers import Agent, Launcher, ProviderBinding
@@ -64,6 +74,18 @@ def _coerce_str_to_list(v: object) -> object:
 def _coerce_none_to_empty_dict(v: object) -> object:
     """Accept ``~``/``None`` in place of an empty mapping — YAML ergonomics."""
     return {} if v is None else v
+
+
+def _single_host_directory(value: str) -> str:
+    """Keep a shared mount directly below its managed host directory."""
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or len(path.parts) != 1:
+        raise ValueError("host_dir must be a single directory segment")
+    return value
+
+
+HostDirectory = Annotated[str, AfterValidator(_single_host_directory)]
+"""One relative shared-directory segment, matching the runtime auth contract."""
 
 
 StrOrStrList = Annotated[list[str], BeforeValidator(_coerce_str_to_list)]
@@ -217,7 +239,7 @@ class RawAuthKey(StrictModel):
 class RawAuth(StrictModel):
     """``auth:`` — credential-capture behavior (vendor login container or API-key prompt)."""
 
-    host_dir: str = Field(
+    host_dir: HostDirectory = Field(
         description="Single-segment dir under mounts_dir() (e.g. ``_codex-config``)"
     )
     container_mount: str = Field(description="Mount point inside the container")
@@ -329,7 +351,7 @@ class RawHelp(StrictModel):
 class RawMountSpec(StrictModel):
     """One entry in the ``mounts:`` list — explicit shared-config mount."""
 
-    host_dir: str
+    host_dir: HostDirectory
     container_path: str
     label: str | None = None
 
@@ -576,6 +598,15 @@ class RawProviderBinding(StrictModel):
     )
     credential_type: Literal["api_key", "oauth", "oauth_token", "pat"] = "api_key"
     config_patch: dict | None = None
+
+    @field_validator("credential_file")
+    @classmethod
+    def _relative_credential_file(cls, value: str) -> str:
+        """Keep optional credential files below their provider's shared host directory."""
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("credential_file must be relative without '..'")
+        return value
 
     def to_dataclass(self) -> ProviderBinding:
         """Project to a runtime [`ProviderBinding`][terok_executor.provider.providers.ProviderBinding]."""
