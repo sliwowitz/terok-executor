@@ -814,7 +814,20 @@ class TestStrictValidation:
     @pytest.mark.parametrize("section", ["auth", "mounts"])
     @pytest.mark.parametrize(
         "host_dir",
-        [str(MOCK_BASE / "outside"), "..", "../outside", "nested/../safe", "nested/dir", "", "."],
+        [
+            str(MOCK_BASE / "outside"),
+            "..",
+            "../outside",
+            "nested/../safe",
+            "nested/dir",
+            "",
+            ".",
+            "_cfg/.",
+            "./_cfg",
+            "_cfg//",
+            "_cfg/",
+            "./_cfg/.",
+        ],
     )
     def test_host_directory_requires_one_relative_segment(
         self, section: str, host_dir: str
@@ -840,6 +853,12 @@ class TestStrictValidation:
 
         with pytest.raises(ValidationError, match="credential_file"):
             RawAgentYaml.model_validate(data)
+
+    @pytest.mark.parametrize("credential_file", [".", "./", "././"])
+    def test_credential_file_cannot_name_the_shared_directory(self, credential_file: str) -> None:
+        """Only an empty filename disables credential handling; directory aliases are invalid."""
+        with pytest.raises(ValidationError, match="credential_file"):
+            RawAgentYaml.model_validate({"provider": {"credential_file": credential_file}})
 
     @pytest.mark.parametrize("credential_file", ["", ".env", "nested/auth.json"])
     def test_relative_host_paths_preserve_absolute_container_paths(
@@ -873,6 +892,23 @@ class TestStrictValidation:
         )
         with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
             with pytest.raises(ValueError, match="escape.*invalid roster YAML"):
+                load_roster()
+
+    @pytest.mark.parametrize("alias", ["_cfg/.", "./_cfg", "_cfg//"])
+    def test_load_roster_rejects_alias_of_credential_mount(
+        self, tmp_path: Path, alias: str
+    ) -> None:
+        """A second raw directory spelling cannot bypass credential-mount deduplication."""
+        user_dir = tmp_path / "agents"
+        user_dir.mkdir()
+        (user_dir / "aliased.yaml").write_text(
+            "kind: tool\nauth:\n  host_dir: _cfg\n"
+            f"  container_mount: {CONTAINER_HOME / '.custom'}\n"
+            "provider:\n  credential_file: auth.json\nmounts:\n"
+            f"  - host_dir: {alias}\n    container_path: {CONTAINER_HOME / '.alias'}\n"
+        )
+        with patch("terok_executor.roster.loader._user_agents_dir", return_value=user_dir):
+            with pytest.raises(ValueError, match="aliased.*invalid roster YAML"):
                 load_roster()
 
     @pytest.mark.parametrize(

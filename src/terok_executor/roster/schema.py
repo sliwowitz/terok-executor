@@ -79,13 +79,13 @@ def _coerce_none_to_empty_dict(v: object) -> object:
 def _single_host_directory(value: str) -> str:
     """Keep a shared mount directly below its managed host directory."""
     path = Path(value)
-    if path.is_absolute() or ".." in path.parts or len(path.parts) != 1:
-        raise ValueError("host_dir must be a single directory segment")
+    if path.is_absolute() or ".." in path.parts or len(path.parts) != 1 or path.name != value:
+        raise ValueError("host_dir must be a single directory segment without aliases")
     return value
 
 
 HostDirectory = Annotated[str, AfterValidator(_single_host_directory)]
-"""One relative shared-directory segment, matching the runtime auth contract."""
+"""One canonical relative shared-directory segment."""
 
 
 StrOrStrList = Annotated[list[str], BeforeValidator(_coerce_str_to_list)]
@@ -606,6 +606,8 @@ class RawProviderBinding(StrictModel):
         path = Path(value)
         if path.is_absolute() or ".." in path.parts:
             raise ValueError("credential_file must be relative without '..'")
+        if value and not path.parts:
+            raise ValueError("credential_file must name a file, not the shared directory")
         return value
 
     def to_dataclass(self) -> ProviderBinding:
