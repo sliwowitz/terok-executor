@@ -21,7 +21,7 @@ from terok_executor.roster import (
     load_roster,
 )
 from terok_executor.roster.loader import _load_bundled_agents
-from terok_executor.roster.schema import RawAgentYaml
+from terok_executor.roster.schema import RawAgentYaml, RawHeadless
 from tests.constants import CONTAINER_BIN_DIR, CONTAINER_HOME, CONTAINER_TEROK_DIR, MOCK_BASE
 
 
@@ -61,6 +61,11 @@ def _isolate_user_agents_dir(tmp_path: Path) -> None:
 
 class TestLoadBundledAgents:
     """Verify bundled agent YAML files are loadable and well-formed."""
+
+    def test_turn_limit_is_not_a_roster_capability(self) -> None:
+        """User roster overrides cannot restore a removed headless control."""
+        with pytest.raises(ValidationError, match="max_turns_flag"):
+            RawHeadless.model_validate({"max_turns_flag": "--max-turns"})
 
     def test_loads_all_bundled_agents(self) -> None:
         agents = _load_bundled_agents()
@@ -241,7 +246,6 @@ class TestDeserializeProvider:
         assert p.auto_approve_flags == ()
         assert p.output_format_flags == ("--output-format", "stream-json")
         assert p.model_flag == "--model"
-        assert p.max_turns_flag == "--max-turns"
         assert p.verbose_flag == "--verbose"
         assert p.supports_session_resume is True
         assert p.resume_flag == "--resume"
@@ -284,7 +288,7 @@ class TestDeserializeProvider:
         assert p.model_flag == "--agent"
 
     def test_pi_uses_json_mode_for_headless(self) -> None:
-        """Pi has no max-turns/verbose flags and emits its JSON event
+        """Pi has no verbose flag and emits its JSON event
         stream via positional prompt + ``--mode json``."""
         agents = _load_bundled_agents()
         p = _agent_provider("pi", agents["pi"])
@@ -294,7 +298,6 @@ class TestDeserializeProvider:
         assert p.prompt_flag == ""
         assert p.output_format_flags == ("--mode", "json")
         assert p.model_flag == "--model"
-        assert p.max_turns_flag is None
         assert p.verbose_flag is None
         assert p.supports_session_resume is True
         assert p.resume_flag == "--session"

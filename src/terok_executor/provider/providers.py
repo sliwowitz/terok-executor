@@ -27,20 +27,17 @@ class AgentRunConfig:
     """Resolved per-run config for a headless provider.
 
     Produced by [`Agent.apply_config`][terok_executor.provider.providers.Agent.apply_config]
-    after best-effort feature mapping.
+    from native options and task instructions.
     """
 
     model: str | None
     """Model override for providers that support it, else ``None``."""
 
-    max_turns: int | None
-    """Max turns for providers that support it, else ``None``."""
-
     timeout: int
     """Effective timeout in seconds."""
 
     prompt_extra: str
-    """Extra text to append to the prompt (best-effort feature analogues)."""
+    """Task instructions delivered through the prompt when needed."""
 
     warnings: tuple[str, ...]
     """Warnings about unsupported features (for user display)."""
@@ -52,9 +49,6 @@ class CLIOverrides:
 
     model: str | None = None
     """Explicit ``--model`` from CLI (takes precedence over config)."""
-
-    max_turns: int | None = None
-    """Explicit ``--max-turns`` from CLI."""
 
     timeout: int | None = None
     """Explicit ``--timeout`` from CLI."""
@@ -241,9 +235,6 @@ class Agent:
     model_flag: str | None
     """Flag for model override (``"--model"``, ``"--agent"``, or ``None``)."""
 
-    max_turns_flag: str | None
-    """Flag for maximum turns (``"--max-turns"`` or ``None``)."""
-
     verbose_flag: str | None
     """Flag for verbose output (``"--verbose"`` or ``None``)."""
 
@@ -331,18 +322,16 @@ class Agent:
         config: dict[str, Any],
         overrides: CLIOverrides | None = None,
     ) -> AgentRunConfig:
-        """Resolve config values for this provider with best-effort feature mapping.
+        """Resolve native run options and instruction delivery for this agent.
 
-        CLI flag *overrides* take precedence over *config* values.  When this
-        provider lacks a feature, an analogue is used where possible (e.g.
-        injecting max-turns guidance into the prompt), and a warning is
-        emitted for features that have no analogue.
+        CLI flag *overrides* take precedence over *config* values. Unsupported
+        model selection produces a warning, never an instruction in the prompt.
         """
         if overrides is None:
             overrides = CLIOverrides()
 
         warnings: list[str] = []
-        prompt_parts: list[str] = []
+        prompt_extra = ""
 
         # --- Model ---
         cfg_model = resolve_agent_value("model", config, self.name)
@@ -352,19 +341,6 @@ class Agent:
                 f"{self.label} does not support model selection; ignoring model={model!r}"
             )
             model = None
-
-        # --- Max turns ---
-        cfg_turns = resolve_agent_value("max_turns", config, self.name)
-        max_turns_raw = overrides.max_turns if overrides.max_turns is not None else cfg_turns
-        max_turns: int | None = int(max_turns_raw) if max_turns_raw is not None else None
-        if max_turns is not None and not self.max_turns_flag:
-            # Best-effort: inject into prompt as guidance
-            prompt_parts.append(f"Important: complete this task in no more than {max_turns} steps.")
-            warnings.append(
-                f"{self.label} does not support --max-turns; "
-                f"added guidance to prompt instead ({max_turns} steps)"
-            )
-            max_turns = None
 
         # --- Timeout ---
         cfg_timeout = resolve_agent_value("timeout", config, self.name)
@@ -379,20 +355,19 @@ class Agent:
         # Codex receives instructions via -c model_instructions_file=... in the wrapper.
         # OpenCode-based providers receive instructions via opencode.json `instructions`
         # array (injected by prepare_agent_config_dir).
-        # Remaining providers get best-effort prompt prepending.
+        # Remaining providers receive instructions through the prompt.
         instructions = overrides.instructions
         if (
             instructions
             and self.name not in {"claude", "codex"}
             and not self.uses_opencode_instructions
         ):
-            prompt_parts.insert(0, instructions)
+            prompt_extra = instructions
 
         return AgentRunConfig(
             model=model,
-            max_turns=max_turns,
             timeout=timeout,
-            prompt_extra="\n".join(prompt_parts),
+            prompt_extra=prompt_extra,
             warnings=tuple(warnings),
         )
 
@@ -401,7 +376,6 @@ class Agent:
         *,
         timeout: int,
         model: str | None = None,
-        max_turns: int | None = None,
     ) -> str:
         """Assemble the bash command string for a headless agent run.
 
@@ -417,15 +391,14 @@ class Agent:
         uses the generic shape with subcommand + flags.
         """
         if self.name == "claude":
-            return self._build_claude_command(timeout=timeout, model=model, max_turns=max_turns)
-        return self._build_generic_command(timeout=timeout, model=model, max_turns=max_turns)
+            return self._build_claude_command(timeout=timeout, model=model)
+        return self._build_generic_command(timeout=timeout, model=model)
 
     def _build_claude_command(
         self,
         *,
         timeout: int,
         model: str | None,
-        max_turns: int | None,
     ) -> str:
         """Build the headless command for Claude using the wrapper function.
 
@@ -435,8 +408,6 @@ class Agent:
         flags = ""
         if model:
             flags += f" --model {shlex.quote(model)}"
-        if max_turns:
-            flags += f" --max-turns {int(max_turns)}"
 
         return (
             f"init-ssh-and-repo.sh &&"
@@ -451,7 +422,6 @@ class Agent:
         *,
         timeout: int,
         model: str | None,
-        max_turns: int | None,
     ) -> str:
         """Build the headless command for non-Claude providers.
 
@@ -479,11 +449,6 @@ class Agent:
         if model and self.model_flag:
             parts.append(self.model_flag)
             parts.append(shlex.quote(model))
-
-        # Max turns
-        if max_turns and self.max_turns_flag:
-            parts.append(self.max_turns_flag)
-            parts.append(str(int(max_turns)))
 
         # Output format
         for flag in self.output_format_flags:
