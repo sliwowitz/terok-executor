@@ -1756,12 +1756,16 @@ class TestStreamHeadless:
         """Controls are escaped, colour is dropped off a terminal, bad bytes are replaced."""
         proc = Mock(
             stdout=[
-                b"before\x1b]52;c;cG9pc29u\x07\x9b2Jafter\r\n",
+                b"before\x1b]52;c;cG9pc29u\x07\xc2\x9b2Jafter\r\n",
                 b"\x1b[32mok\x1b[0m done\n",
                 b"\xff\n",
             ]
         )
-        with patch("subprocess.Popen", return_value=proc):
+        exited = subprocess.CompletedProcess(["podman", "wait", "ctr"], 0, b"0\n", b"")
+        with (
+            patch("subprocess.Popen", return_value=proc),
+            patch("subprocess.run", return_value=exited),
+        ):
             AgentRunner._stream_headless("ctr", 1)
 
         assert capsys.readouterr().out == (
