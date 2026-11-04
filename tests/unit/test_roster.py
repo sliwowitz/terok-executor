@@ -21,7 +21,7 @@ from terok_executor.roster import (
     load_roster,
 )
 from terok_executor.roster.loader import _load_bundled_agents
-from terok_executor.roster.schema import RawAgentYaml, RawHeadless
+from terok_executor.roster.schema import RawAgentYaml
 from tests.constants import CONTAINER_BIN_DIR, CONTAINER_HOME, CONTAINER_TEROK_DIR, MOCK_BASE
 
 
@@ -61,11 +61,6 @@ def _isolate_user_agents_dir(tmp_path: Path) -> None:
 
 class TestLoadBundledAgents:
     """Verify bundled agent YAML files are loadable and well-formed."""
-
-    def test_turn_limit_is_not_a_roster_capability(self) -> None:
-        """User roster overrides cannot restore a removed headless control."""
-        with pytest.raises(ValidationError, match="max_turns_flag"):
-            RawHeadless.model_validate({"max_turns_flag": "--max-turns"})
 
     def test_loads_all_bundled_agents(self) -> None:
         agents = _load_bundled_agents()

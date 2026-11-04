@@ -93,8 +93,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Honour --config / --raw before dispatch so the very first
     # ``SandboxConfig()`` constructed by any handler sees the override.
-    # SandboxConfig reads via ``terok_sandbox.paths._config_file_paths``,
-    # which consults ``TEROK_CONFIG_FILE`` first.
+    # SandboxConfig reads via ``terok_util.config_file_paths``, which
+    # consults ``TEROK_CONFIG_FILE`` first.
     if args.raw:
         os.environ["TEROK_CONFIG_FILE"] = os.devnull
     elif args.config is not None:
