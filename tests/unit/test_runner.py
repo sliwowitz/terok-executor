@@ -759,6 +759,7 @@ class TestLaunchPrepared:
 
         assert cname == "terok-demo"
         sandbox.run.assert_called_once()
+        assert sandbox.run.call_args[0][0].wayland is False
 
     def test_builds_runspec_from_args(self, tmp_path: Path) -> None:
         """Each kwarg maps to the matching RunSpec field."""
@@ -774,6 +775,7 @@ class TestLaunchPrepared:
             name="terok-x",
             task_dir=tmp_path,
             gpus="nvidia,amd",
+            wayland=True,
             memory="4g",
             cpus="2.0",
             caps=["perfmon"],
@@ -789,6 +791,7 @@ class TestLaunchPrepared:
         assert spec.command == ("bash",)
         assert spec.task_dir == tmp_path
         assert spec.gpus == (("nvidia", None), ("amd", None))
+        assert spec.wayland is True
         assert spec.memory == "4g"
         assert spec.cpus == "2.0"
         assert spec.caps == ("perfmon",)

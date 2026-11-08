@@ -455,6 +455,7 @@ class AgentRunner:
         name: str,
         task_dir: Path,
         broker_context: BrokerContext,
+        wayland: bool = False,
         gpus: bool | str | Sequence[str] | None = None,
         gpu: bool | None = None,
         memory: str | None = None,
@@ -493,6 +494,8 @@ class AgentRunner:
 
         Args:
             env: Environment variables injected into the container.
+            wayland: Grant the desktop user's Wayland socket, without audio
+                or X11. Unsupported in sealed isolation and microVMs.
             volumes: Host↔container directory specs (sandbox decides mount vs inject).
                 Task inputs must use the reserved destination once, with a read-only,
                 live source at ``task_dir / "agent-inputs"``. Child overlays are refused.
@@ -734,6 +737,7 @@ class AgentRunner:
             command=tuple(command),
             task_dir=task_dir,
             gpus=spec_gpus,
+            wayland=wayland,
             memory=memory,
             cpus=cpus,
             caps=tuple(caps or ()),
