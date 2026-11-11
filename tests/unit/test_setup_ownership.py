@@ -295,5 +295,7 @@ def test_read_only_setup_remains_available_while_setup_is_running(cfg, entry) ->
                 )
                 == 0
             )
-            show.assert_called_once_with("apparmor", show_only=True, cfg=cfg)
+            show.assert_called_once_with(
+                "apparmor", show_only=True, with_wayland=False, with_wayland_direct=False, cfg=cfg
+            )
             status.assert_not_called()

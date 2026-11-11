@@ -62,6 +62,15 @@ runner.run_headless(
 `run_interactive`, `run_web`, `run_tool` — all with the same
 hardening guarantees.
 
+Callers assembling their own launch can pass
+`wayland=WaylandMode.MITM` (`wl-mitm`) or `WaylandMode.DIRECT` (`wl-direct`)
+to `launch_prepared` (`WaylandMode` is provided by terok-sandbox). The default is `NONE`.
+Sandbox owns desktop-session discovery, proxy supervision and restart
+checks; executor does not install GUI software, grant GPUs or forward audio.
+Install wl-mitm on the host yourself. On SELinux hosts, the optional proxy
+policy can be inspected with `terok-executor setup selinux --with-wayland --show`
+and installed with the same command without `--show`.
+
 ## Supported agents
 
 | Agent | Auth | Description |

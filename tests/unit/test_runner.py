@@ -20,6 +20,7 @@ from terok_executor.integrations.sandbox import (
     BrokerContext,
     ImageInspection,
     VolumeSpec,
+    WaylandMode,
 )
 from terok_executor.task_files import (
     CONTAINER_AGENT_CONFIG,
@@ -744,7 +745,8 @@ class TestLaunchPrepared:
     [`RunSpec`][terok_sandbox.RunSpec] fields.
     """
 
-    def test_returns_container_name(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("wayland", ["none", "wl-mitm", "wl-direct"])
+    def test_returns_container_name(self, tmp_path: Path, wayland: str) -> None:
         sandbox = _mock_sandbox()
         runner = AgentRunner(sandbox=sandbox)
 
@@ -756,10 +758,12 @@ class TestLaunchPrepared:
             command=["bash", "-lc", "echo hi"],
             name="terok-demo",
             task_dir=tmp_path,
+            wayland=WaylandMode(wayland),
         )
 
         assert cname == "terok-demo"
         sandbox.run.assert_called_once()
+        assert sandbox.run.call_args.args[0].wayland == wayland
 
     def test_builds_runspec_from_args(self, tmp_path: Path) -> None:
         """Each kwarg maps to the matching RunSpec field."""
