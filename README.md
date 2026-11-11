@@ -55,7 +55,6 @@ runner.run_headless(
     agent="claude",
     repo=".",
     prompt="Fix the failing test in test_auth.py",
-    max_turns=25,
 )
 ```
 

@@ -128,9 +128,8 @@ class ExecutorConfigView(SandboxConfigView):
         ``image_base_image()`` call observes the freshly-written value
         rather than the in-memory snapshot taken before the write.
         """
-        from terok_util import paths as _util_paths
+        from terok_util import paths as _util_paths, writable_config_path
 
-        from terok_executor.config import writable_config_path
         from terok_executor.integrations.sandbox import yaml_update_section
 
         path = writable_config_path()

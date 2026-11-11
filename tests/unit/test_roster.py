@@ -241,7 +241,6 @@ class TestDeserializeProvider:
         assert p.auto_approve_flags == ()
         assert p.output_format_flags == ("--output-format", "stream-json")
         assert p.model_flag == "--model"
-        assert p.max_turns_flag == "--max-turns"
         assert p.verbose_flag == "--verbose"
         assert p.supports_session_resume is True
         assert p.resume_flag == "--resume"
@@ -284,7 +283,7 @@ class TestDeserializeProvider:
         assert p.model_flag == "--agent"
 
     def test_pi_uses_json_mode_for_headless(self) -> None:
-        """Pi has no max-turns/verbose flags and emits its JSON event
+        """Pi has no verbose flag and emits its JSON event
         stream via positional prompt + ``--mode json``."""
         agents = _load_bundled_agents()
         p = _agent_provider("pi", agents["pi"])
@@ -294,7 +293,6 @@ class TestDeserializeProvider:
         assert p.prompt_flag == ""
         assert p.output_format_flags == ("--mode", "json")
         assert p.model_flag == "--model"
-        assert p.max_turns_flag is None
         assert p.verbose_flag is None
         assert p.supports_session_resume is True
         assert p.resume_flag == "--session"

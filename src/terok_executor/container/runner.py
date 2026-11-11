@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, TYPE_CHECKING, cast
 
-from terok_util import require_host_tool, require_setup
+from terok_util import require_host_tool, require_setup, sanitize_log_text
 
 from terok_executor._util import detect_host_timezone
 from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig, Sharing, VolumeSpec
@@ -192,7 +192,6 @@ class AgentRunner:
         prompt: str,
         branch: str | None = None,
         model: str | None = None,
-        max_turns: int | None = None,
         timeout: int = 1800,
         gate: bool = True,
         name: str | None = None,
@@ -244,7 +243,6 @@ class AgentRunner:
             prompt=prompt,
             branch=branch,
             model=model,
-            max_turns=max_turns,
             timeout=timeout,
             gate=gate,
             name=name,
@@ -942,7 +940,6 @@ class AgentRunner:
         prompt: str | None = None,
         branch: str | None = None,
         model: str | None = None,
-        max_turns: int | None = None,
         timeout: int = 1800,
         gate: bool = True,
         name: str | None = None,
@@ -1102,9 +1099,7 @@ class AgentRunner:
                 tool_cmd += " " + " ".join(shlex.quote(a) for a in tool_args)
             command = ["bash", "-lc", tool_cmd]
         elif mode == "headless":
-            cmd_str = agent_spec.build_headless_command(
-                timeout=timeout, model=model, max_turns=max_turns
-            )
+            cmd_str = agent_spec.build_headless_command(timeout=timeout, model=model)
             command = ["bash", "-lc", cmd_str]
         elif mode == "interactive":
             command = [
@@ -1392,9 +1387,12 @@ class AgentRunner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            stdout = cast(IO[bytes], proc.stdout)
-            for line in stdout:
-                sys.stdout.buffer.write(line)
+            # Bytes in, bytes out: the terminal's text encoding never decides
+            # whether a task's line can be shown.
+            color = sys.stdout.isatty()
+            for raw in cast(IO[bytes], proc.stdout):
+                safe = sanitize_log_text(raw.decode("utf-8", errors="replace"), color=color)
+                sys.stdout.buffer.write(safe.encode("utf-8", errors="replace"))
                 sys.stdout.buffer.flush()
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from terok_executor.config import writable_config_path
 from terok_executor.config_schema import ExecutorConfigView
 
 
@@ -36,23 +35,6 @@ def override_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     util_paths._config_section_cache.clear()
     return cfg
-
-
-class TestWritableConfigPath:
-    """The path picker honours TEROK_CONFIG_FILE and falls back to namespace dir."""
-
-    def test_honours_env_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """``TEROK_CONFIG_FILE`` wins over the namespace lookup."""
-        target = tmp_path / "custom.yml"
-        monkeypatch.setenv("TEROK_CONFIG_FILE", str(target))
-        assert writable_config_path() == target
-
-    def test_falls_back_to_namespace_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """No override → ``namespace_config_dir() / 'config.yml'``."""
-        monkeypatch.delenv("TEROK_CONFIG_FILE", raising=False)
-        from terok_util import namespace_config_dir
-
-        assert writable_config_path() == namespace_config_dir() / "config.yml"
 
 
 class TestSetImageAgents:

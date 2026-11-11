@@ -74,7 +74,6 @@ runner.run_headless(
     agent="claude",
     repo=".",
     prompt="Add type hints to utils.py",
-    max_turns=25,
 )
 ```
 

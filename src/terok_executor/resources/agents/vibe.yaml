@@ -19,7 +19,6 @@ git_identity:
 headless:
   prompt_flag: "--prompt"
   model_flag: "--agent"
-  max_turns_flag: "--max-turns"
 
 auto_approve:
   env:
