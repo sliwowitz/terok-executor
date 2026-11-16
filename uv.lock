@@ -2720,8 +2720,8 @@ test = [
 
 [[package]]
 name = "terok-sandbox"
-version = "0.7.0a11.dev543+g44378fabf"
-source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fwayland-modes#44378fabf70d50180ec7e94be50ce5380c3cc56d" }
+version = "0.7.0a11.dev544+g9877a01d8"
+source = { git = "https://github.com/sliwowitz/terok-sandbox?rev=feat%2Fwayland-modes#9877a01d8106d2e8f89c9bd209c38248662733c0" }
 dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
