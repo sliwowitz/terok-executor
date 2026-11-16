@@ -131,23 +131,28 @@ class TestHandleSetup:
         setup_spies["sandbox_setup"].assert_not_called()
         setup_spies["build_images"].assert_not_called()
 
+    @pytest.mark.parametrize("show", [False, True])
     @pytest.mark.parametrize("selected", ["selinux", "apparmor", None])
     @pytest.mark.parametrize("filtered,direct", [(True, False), (False, True), (True, True)])
     def test_wayland_option_routes_to_component_validation(
-        self, setup_spies, selected, filtered: bool, direct: bool
+        self, setup_spies, selected, filtered: bool, direct: bool, show: bool
     ) -> None:
-        """The optional policy flag never selects the full bootstrap."""
+        """The optional policy flag never selects the full bootstrap.
+
+        Without ``--show`` and without a component, the flag alone is what
+        keeps the request away from the bootstrap.
+        """
         with patch(
             "terok_executor.integrations.sandbox.handle_setup_component", return_value=0
         ) as component:
             assert (
                 _handle_setup(
-                    component=selected, show=True, with_wayland=filtered, with_wayland_direct=direct
+                    component=selected, show=show, with_wayland=filtered, with_wayland_direct=direct
                 )
                 == 0
             )
         component.assert_called_once_with(
-            selected, show_only=True, with_wayland=filtered, with_wayland_direct=direct, cfg=None
+            selected, show_only=show, with_wayland=filtered, with_wayland_direct=direct, cfg=None
         )
         setup_spies["sandbox_setup"].assert_not_called()
         setup_spies["build_images"].assert_not_called()
