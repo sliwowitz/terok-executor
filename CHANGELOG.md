@@ -1,15 +1,50 @@
 # Changelog
 
-## Unreleased (0.5.0)
+## v0.5.1 — A Man Alone
 
-- Headless runs have no turn limit; `--timeout` bounds them. Streamed agent output is terminal-safe.
-- Add Opper (opper.ai) as a commercial LLM provider, driven through OpenCode.
+- **Breaking:** the auth mode `oauth` is now `login`. The mode runs the vendor's own login
+  in a container, and for Vibe that login is not OAuth. `AuthProvider.supports_login`,
+  `Authenticator.prepare_login()` and `prepare_login_session()` replace the `oauth` names.
+  A roster file that still says `oauth` keeps loading ([#581](https://github.com/terok-ai/terok-executor/pull/581)).
+- **Breaking:** remove `image.user_snippet_inline` and `image.user_snippet_file` from the
+  `config.yml` schema; a Dockerfile snippet is set per project. A `config.yml` that sets
+  either key fails validation ([#577](https://github.com/terok-ai/terok-executor/pull/577)).
+- **Breaking:** the desktop keyring names of terok-sandbox 0.7.0:
+  `credentials.use_desktop_keyring`, the tiers `desktop-keyring` and `session-cache`, and
+  `vault passphrase to-desktop-keyring`. The old names are not read ([#560](https://github.com/terok-ai/terok-executor/pull/560)).
+- **Breaking:** headless runs have no turn limit; `--timeout` bounds them. `--max-turns`,
+  the `max_turns` fields and `headless.max_turns_flag` in a roster file are gone. Streamed
+  agent output is terminal-safe ([#593](https://github.com/terok-ai/terok-executor/pull/593)).
+- Wayland desktop modes: `none`, `wl-mitm` and `wl-direct` pass through the launch pipeline
+  to the sandbox, and `setup selinux` takes `--with-wayland` and `--with-wayland-direct`
+  ([#595](https://github.com/terok-ai/terok-executor/pull/595)).
+- Vibe: browser sign-in as its `login` mode ([#581](https://github.com/terok-ai/terok-executor/pull/581)); the native model catalog through the
+  vault ([#579](https://github.com/terok-ai/terok-executor/pull/579)); sessions captured through Vibe's own hooks, with the transcripts left
+  where Vibe keeps them ([#580](https://github.com/terok-ai/terok-executor/pull/580)); task instructions mounted read-only as Vibe's
+  `AGENTS.md`, so they arrive as system context ([#588](https://github.com/terok-ai/terok-executor/pull/588)); and an installation for the task
+  user with uv, which Vibe can update itself ([#576](https://github.com/terok-ai/terok-executor/pull/576)).
+- `claude` and `terok-claude-acp` refuse to start without a credential and a route to the
+  provider, and name `terok auth claude` ([#582](https://github.com/terok-ai/terok-executor/pull/582)).
+- Add Opper (opper.ai) as a commercial LLM provider, driven through OpenCode ([#565](https://github.com/terok-ai/terok-executor/pull/565)).
+- The shell greeter of a task lists the agents that ran in it before ([#575](https://github.com/terok-ai/terok-executor/pull/575)).
+- `SharedMountStorageInfo.measure(path)` and `label_for(name)` measure one shared mount at
+  a time ([#571](https://github.com/terok-ai/terok-executor/pull/571)).
+- What the host writes for a task is separate from what the task may write: inputs are
+  mounted read-only, credential files are snapshotted into host-owned inputs, and shared
+  vendor files are read without following links ([#591](https://github.com/terok-ai/terok-executor/pull/591)). Task input mounts and the host
+  paths of a roster file are validated ([#592](https://github.com/terok-ai/terok-executor/pull/592)).
+- The L0 image creates `/home/dev/.config` before it sets the ownership of the home
+  directory, so a nested configuration mount no longer leaves a root-owned parent
+  ([#595](https://github.com/terok-ai/terok-executor/pull/595)).
+- Python 3.15 is supported.
+
+**Full Changelog**: https://github.com/terok-ai/terok-executor/compare/v0.5.0...v0.5.1
+
+## v0.5.0 — At Your Service
+
 - Own executor setup receipts and compose readiness checks downward.
 - Resolve host tools from the current launch environment.
 - Serialize setup and uninstall with the other packages.
-- Remove `image.user_snippet_inline` and `image.user_snippet_file` from the `config.yml` schema; a Dockerfile snippet is set per project.
-
-## v0.5.0 — At Your Service
 
 ## What's Changed
 * feat(codex): reach the vault over its in-container TLS bridge in https://github.com/terok-ai/terok-executor/pull/552
