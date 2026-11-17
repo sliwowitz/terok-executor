@@ -545,6 +545,8 @@ def _handle_setup(
     *,
     component: str | None = None,
     show: bool = False,
+    with_wayland: bool = False,
+    with_wayland_direct: bool = False,
     check: bool = False,
     no_sandbox: bool = False,
     no_images: bool = False,
@@ -563,7 +565,7 @@ def _handle_setup(
     per-component installer runs instead — the verb sandbox's hints
     name under this frontend.
     """
-    if component is not None or show:
+    if component is not None or show or with_wayland or with_wayland_direct:
         # Only meaningful against a named component; without one, the flow
         # below answers the real problem ("--show needs a component").
         rejected = (
@@ -594,7 +596,13 @@ def _handle_setup(
         with nullcontext() if show else setup_lock():
             if not show:
                 require_no_downgrade(check_setup(cfg))
-            return handle_setup_component(component, show_only=show, cfg=cfg)
+            return handle_setup_component(
+                component,
+                show_only=show,
+                with_wayland=with_wayland,
+                with_wayland_direct=with_wayland_direct,
+                cfg=cfg,
+            )
 
     if check:
         _print_setup_status(base, cfg=cfg)
@@ -1070,6 +1078,16 @@ SETUP_COMMAND = CommandDef(
             name="--show",
             action="store_true",
             help="With a component: print the rules it would install, then exit",
+        ),
+        ArgDef(
+            name="--with-wayland",
+            action="store_true",
+            help="With selinux: also install the optional confined Wayland proxy policy",
+        ),
+        ArgDef(
+            name="--with-wayland-direct",
+            action="store_true",
+            help="With selinux: install the separate direct desktop-access policy",
         ),
         ArgDef(
             name="--check",

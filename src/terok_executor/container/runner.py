@@ -29,7 +29,13 @@ from typing import IO, TYPE_CHECKING, cast
 from terok_util import require_host_tool, require_setup, sanitize_log_text
 
 from terok_executor._util import detect_host_timezone
-from terok_executor.integrations.sandbox import BrokerContext, SandboxConfig, Sharing, VolumeSpec
+from terok_executor.integrations.sandbox import (
+    BrokerContext,
+    SandboxConfig,
+    Sharing,
+    VolumeSpec,
+    WaylandMode,
+)
 from terok_executor.paths import container_state_dir
 from terok_executor.roster.types import EgressProjection
 from terok_executor.sandbox import check_setup
@@ -454,6 +460,7 @@ class AgentRunner:
         task_dir: Path,
         broker_context: BrokerContext,
         gpus: bool | str | Sequence[str] | None = None,
+        wayland: WaylandMode = WaylandMode.NONE,
         gpu: bool | None = None,
         memory: str | None = None,
         cpus: str | None = None,
@@ -499,6 +506,7 @@ class AgentRunner:
             name: Container name (must be unique on the host).
             task_dir: Per-task directory containing shield state and host-owned inputs.
             broker_context: Exact authorization namespace from environment assembly.
+            wayland: Explicit desktop-access mode; sandbox owns session resolution and supervision.
             gpus: GPU vendors to pass through — ``"all"``/``True``
                 (every vendor detected on the host), ``"nvidia"``,
                 ``"amd"``, ``"intel"``, a comma-separated string, or a
@@ -732,6 +740,7 @@ class AgentRunner:
             command=tuple(command),
             task_dir=task_dir,
             gpus=spec_gpus,
+            wayland=wayland,
             memory=memory,
             cpus=cpus,
             caps=tuple(caps or ()),

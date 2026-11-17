@@ -103,7 +103,7 @@ RUN set -eux; \
             'session include system-auth' \
             > /etc/pam.d/sudo; \
     fi; \
-{% endif %}    mkdir -p /workspace /home/dev/.ssh; \
+{% endif %}    mkdir -p /workspace /home/dev/.ssh /home/dev/.config; \
     chown -R dev:dev /home/dev /workspace; \
     chmod 700 /home/dev/.ssh; \
     chmod 0777 /workspace

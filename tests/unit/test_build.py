@@ -37,7 +37,7 @@ from terok_executor.container.build import (
     stage_tmux_config,
     stage_toad_agents,
 )
-from tests.constants import CONTAINER_HOME
+from tests.constants import CONTAINER_HOME, WORKSPACE_ROOT
 
 pytestmark = pytest.mark.usefixtures("fake_podman")
 
@@ -504,6 +504,17 @@ class TestTemplateRendering:
     def test_l0_contains_tmux(self) -> None:
         content = render_l0()
         assert "container-tmux.conf" in content
+
+    @pytest.mark.parametrize(
+        ("base_image", "family"), [("ubuntu:24.04", "deb"), ("fedora:44", "rpm")]
+    )
+    def test_l0_creates_config_before_home_ownership(self, base_image: str, family: str) -> None:
+        """Desktop applications inherit a writable config parent before bind mounts arrive."""
+        content = render_l0(base_image, family=family)
+        mkdir = f"mkdir -p {WORKSPACE_ROOT} {CONTAINER_HOME / '.ssh'} {CONTAINER_HOME / '.config'};"
+        chown = f"chown -R dev:dev {CONTAINER_HOME} {WORKSPACE_ROOT};"
+
+        assert f"{mkdir} \\\n    {chown}" in content
 
     def test_l0_contains_base_image_arg(self) -> None:
         # Templates rely on Dockerfile ARG/FROM ${VAR} for the BASE_IMAGE
